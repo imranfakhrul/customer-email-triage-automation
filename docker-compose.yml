@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  email-triage:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: customer_email_triage
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
+      - ./data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/triage.db
+    command: python main.py

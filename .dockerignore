@@ -1,0 +1,20 @@
+# Python cache and virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Git and VS Code
+.git/
+.gitignore
+.vscode/
+
+# Local task tracking & environment secrets
+.env
+.task_memory.md
+*.log

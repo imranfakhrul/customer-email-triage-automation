@@ -4,3 +4,5 @@ langchain
 langchain-groq
 python-dotenv
 pyyaml
+spacy
+requests
