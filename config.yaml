@@ -1,0 +1,71 @@
+# Master Configuration for Customer Email Triage Automation
+# NOTE: In accordance with our security principles, ZERO API keys or secrets are stored here.
+# Any external credential uses the strict `*_env` convention referencing environment variables.
+
+system:
+  database_path: "triage.db"
+  idempotency_stale_minutes: 10
+  max_dispatch_retries: 3
+  audit_log_enabled: true
+
+privacy:
+  # Local spaCy NER model (runs 100% locally on CPU)
+  spacy_model: "en_core_web_sm"
+  # Tuned sensitive keywords for B2B (<15% false diversion SLA)
+  sensitive_keywords:
+    - "passport"
+    - "driver's license"
+    - "national id"
+    - "nid"
+    - "police"
+    - "lawsuit"
+    - "court order"
+    - "legal notice"
+    - "subpoena"
+    - "bank account details"
+    - "wire transfer routing"
+    - "chargeback"
+    - "refund dispute"
+  # Max count of [NUM] / [CODE] tokens before triggering sensitive-skip
+  max_code_density: 4
+
+gatekeeper:
+  # Primary gatekeeper: Jev AI
+  timeout_seconds: 3
+  max_retries: 2
+  api_key_env: "JEV_API_KEY"
+  # Fallback fast classifier if Jev AI is unavailable or times out
+  fallback_model: "llama-3.1-8b-instant"
+  groq_api_key_env: "GROQ_API_KEY"
+
+llm:
+  model: "llama-3.3-70b-versatile"
+  groq_api_key_env: "GROQ_API_KEY"
+  temperature: 0.1
+  confidence_threshold: 0.70
+
+destinations:
+  Engineering:
+    service: "github"
+    target: "my-company/backend-repo"
+    token_env: "GITHUB_TOKEN"
+    labels: ["bug", "triage-bot"]
+    use_masked_text_only: true
+
+  Support:
+    service: "freescout"
+    target: "https://support.mycompany.com"
+    api_key_env: "FREESCOUT_API_KEY"
+    mailbox_id: 1
+    use_masked_text_only: false
+
+  Sales:
+    service: "crm"
+    target_env: "CRM_API_ENDPOINT"
+    api_key_env: "CRM_API_KEY"
+    use_masked_text_only: false
+
+  Billing:
+    service: "webhook"
+    target_env: "SLACK_BILLING_WEBHOOK_URL"
+    use_masked_text_only: false

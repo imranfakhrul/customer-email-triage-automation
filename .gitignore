@@ -9,3 +9,6 @@ venv/
 
 # VS Code local workspace settings
 .vscode/
+
+# Local task memory & tracking
+.task_memory.md
