@@ -10,6 +10,11 @@ from nodes.pii_masker import (
     pii_masker_node,
     unmask_text,
 )
+from nodes.sensitive_skip import (
+    evaluate_sensitive,
+    sensitive_skip_node,
+    should_route_after_sensitive,
+)
 
 __all__ = [
     "ingest_node",
@@ -19,4 +24,7 @@ __all__ = [
     "mask_pii",
     "pii_masker_node",
     "unmask_text",
+    "evaluate_sensitive",
+    "sensitive_skip_node",
+    "should_route_after_sensitive",
 ]
