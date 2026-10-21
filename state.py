@@ -64,6 +64,7 @@ class TriageState(TypedDict):
     email_body: str
     raw_body: str
     has_attachments: bool
+    is_active_thread: Optional[bool]
 
     # Local Privacy & Masking (Nodes 02, 03 & 10)
     cleaned_body: Optional[str]
