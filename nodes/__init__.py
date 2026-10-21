@@ -5,10 +5,18 @@ from nodes.signature_stripper import (
     signature_stripper_node,
     strip_signatures_and_quotes,
 )
+from nodes.pii_masker import (
+    mask_pii,
+    pii_masker_node,
+    unmask_text,
+)
 
 __all__ = [
     "ingest_node",
     "should_continue_triage",
     "signature_stripper_node",
     "strip_signatures_and_quotes",
+    "mask_pii",
+    "pii_masker_node",
+    "unmask_text",
 ]
