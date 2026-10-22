@@ -36,6 +36,19 @@ DEFAULT_SENSITIVE_KEYWORDS = [
     "cease and desist",
     "arbitration demand",
     "gdpr erasure request",
+    "gdpr",
+    "erasure",
+    "dsar",
+    "ccpa",
+    "do not sell",
+    "banking details",
+    "bank details",
+    "wire transfer instructions",
+    "routing number",
+    "preservation demand",
+    "litigation",
+    "wage garnishment",
+    "data breach",
 ]
 
 DEFAULT_MAX_CODE_DENSITY = 4
@@ -112,6 +125,13 @@ def evaluate_sensitive(
             return (
                 True,
                 f"High credential density detected ({sensitive_token_count} tokens > max {max_code_density})",
+            )
+
+        api_keys_leaked = [k for k in token_map.keys() if k.startswith("[API_KEY_")]
+        if api_keys_leaked:
+            return (
+                True,
+                f"Customer credential leak detected ({len(api_keys_leaked)} secret key(s) in payload)",
             )
 
     return False, None

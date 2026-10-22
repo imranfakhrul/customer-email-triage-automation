@@ -16,6 +16,7 @@ import unittest
 from db.database import TriageDatabase
 from pipeline import create_triage_pipeline, run_triage_pipeline
 from state import TriageState
+from utils.jev_client import JevClient
 
 
 class TestPipelineE2E(unittest.TestCase):
@@ -23,7 +24,10 @@ class TestPipelineE2E(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = os.path.join(self.temp_dir.name, "test_e2e.db")
         self.db = TriageDatabase(db_path=self.db_path)
-        self.pipeline = create_triage_pipeline(db=self.db)
+        self.client = JevClient(
+            groq_api_key="your_placeholder_key", api_key="your_placeholder_key"
+        )
+        self.pipeline = create_triage_pipeline(db=self.db, client=self.client)
 
         # Path to synthetic benchmark dataset
         self.benchmark_file = os.path.join(

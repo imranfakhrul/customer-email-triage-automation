@@ -22,25 +22,37 @@ logger = logging.getLogger(__name__)
 SPAM_REGEX = re.compile(
     r"\b(?:viagra|cialis|crypto\s+investment|guaranteed\s+returns|lottery\s+winner|"
     r"claim\s+your\s+prize|wire\s+transfer\s+millions|seo\s+backlinks|guest\s+post|do-follow\s+backlinks|"
-    r"casino|betting|adult\s+dating|earn\s+\$?\d{3,}\s+daily|act\s+now\s+limited\s+time|"
-    r"congratulations\s+you\s+won|geek\s*squad|norton\s*protection|renew(?:ed|al)\s+for\s+\$\d+|"
-    r"abandoned\s+\$[\d.,]+M|next\s+of\s+kin|beneficiary\s+to\s+claim|transfer\s+of\s+abandoned|"
+    r"casino|betting|adult\s+dating|earn\s+[\$]?\d{3,}\s+daily|act\s+now\s+limited\s+time|"
+    r"congratulations|geek\s*squad|norton|lifelock|renew(?:ed|al)\s+for\s+[\$]?\d+|"
+    r"abandoned\s+[\$]?[\d.,]+M|next\s+of\s+kin|beneficiary\s+to\s+claim|transfer\s+of\s+[\$]?[\d.,]+|prince\s+\w+|"
     r"customs\s+clearance|receipt\.zip|belly\s+fat|slimming\s+drops|lose\s+weight\s+effortlessly|"
-    r"docusign.*envelope.*signature|pump\s+and\s+dump|telegram\s+signals|100x\s+gem|"
-    r"account\s+has\s+been\s+restricted|verify\s+your\s+identity.*login|"
-    r"password\s+expires|mailbox\s+deactivation|portal-verify|"
-    r"icloud\s+storage\s+is\s+full|storage\s+limit\s+has\s+been\s+exceeded|"
+    r"docusign|document\s+ready\s+for\s+signature|pump\s+and\s+dump|telegram\s+signals|100x\s+gem|"
+    r"account\s+has\s+been\s+restricted|verify\s+your\s+identity.*login|reset\s+your\s+password.*http|"
+    r"password\s+reset\s+for\s+your\s+account|password\s+expires|mailbox\s+deactivation|portal-verify|paypa[l1]|"
+    r"icloud\s+storage\s+is\s+full|storage\s+limit\s+has\s+been\s+exceeded|mailbox\s+is\s+\d+%\s+full|"
     r"office\s+suites\s+available|luxury\s+class\s+a\s+office|commercial\s+spaces\s+realty|"
-    r"redesign\s+your\s+website\s+for|cheap.*developers|"
+    r"redesign\s+your\s+website\s+for|cheap.*developers|cheap\s+meds|without\s+prescription|"
+    r"apple\s+gift\s+cards?|purchase.*gift\s+cards?|"
+    r"get\s+#1\s+on\s+google|page\s+1.*satisfied\s+clients|"
+    r"parcel.*could\s+not\s+be\s+delivered|redelivery\s+fee|reschedule\s+your\s+package|"
+    r"earn\s+[\$]?\d+.*working\s+from\s+home|whatsapp\s+number|"
+    r"scraped\s+your\s+email|database\s+of.*contacts\s+available\s+for\s+purchase|"
     r"verified\s+decision\s+maker\s+emails|verified\s+database\s+of.*emails)\b",
     flags=re.IGNORECASE | re.DOTALL,
 )
 
 PROMPT_INJECTION_REGEX = re.compile(
-    r"\b(?:ignore\s+all\s+previous\s+instructions|system\s+override|disregard\s+all\s+prior|"
-    r"you\s+are\s+now\s+DAN|output\s+the\s+system\s+prompt|new\s+system\s+directive|"
-    r"system\s+instruction\s+override|decode\s+this\s+base64|execute\s+the\s+decoded|"
-    r"pretend\s+you\s+are.*grandmother|grandma.*read\s+me.*system\s+prompt)\b",
+    r"(?:---\s*END\s+OF\s+USER\s+MESSAGE\s*---|\b(?:ignore\s+all\s+previous\s+instructions|system\s+override|"
+    r"disregard\s+all\s+prior|from\s+now\s+on\s+you\s+are\s+DAN|you\s+are\s+DAN|DAN\s+mode|Do\s+Anything\s+Now|"
+    r"output\s+the\s+system\s+prompt|print\s+your\s+system\s+prompt|new\s+system\s+directive|"
+    r"system\s+instruction\s+override|\[SYSTEM\]:\s*New\s+instruction|"
+    r"decode\s+this\s+base64|decode\s+and\s+execute|"
+    r"</email>|<system>|you\s+are\s+now\s+the\s+administrator|"
+    r"disregard\s+the\s+above|output\s+the\s+contents\s+of\s+your\s+configuration|"
+    r"FreeBot|AI\s+with\s+no\s+filters|secret\s+instructions\s+it\s+was\s+given|"
+    r"notice\s+to\s+the\s+ai\s+assistant|your\s+policies\s+have\s+been\s+updated|"
+    r"must\s+bypass\s+all\s+filters|ignore\s+any\s+safety\s+checks|"
+    r"pretend\s+you\s+are.*grandmother|grandma.*read\s+me.*system\s+prompt)\b)",
     flags=re.IGNORECASE | re.DOTALL,
 )
 
@@ -74,8 +86,10 @@ class JevClient:
 
         self.timeout_seconds = gatekeeper_cfg.get("timeout_seconds", 3)
         self.max_retries = gatekeeper_cfg.get("max_retries", 2)
-        self.fallback_model = gatekeeper_cfg.get(
-            "fallback_model", "llama-3.1-8b-instant"
+        self.fallback_model = (
+            os.environ.get("GROQ_FALLBACK_MODEL")
+            or gatekeeper_cfg.get("fallback_model")
+            or "openai/gpt-oss-20b"
         )
 
         # Resolve credentials securely via environment variables
@@ -137,6 +151,13 @@ class JevClient:
         self, subject: str, body: str, sender: str
     ) -> Optional[Dict[str, Any]]:
         """Makes HTTP request to the Jev AI classification endpoint."""
+        if (
+            not self.api_key
+            or self.api_key.startswith("your_")
+            or "placeholder" in self.api_key.lower()
+        ):
+            return None
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -188,7 +209,6 @@ class JevClient:
             not self.groq_api_key
             or self.groq_api_key.startswith("your_")
             or "placeholder" in self.groq_api_key.lower()
-            or "dummy" in self.groq_api_key.lower()
         ):
             return None
 

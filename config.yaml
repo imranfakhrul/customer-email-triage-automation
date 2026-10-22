@@ -29,6 +29,19 @@ privacy:
     - "cease and desist"
     - "arbitration demand"
     - "gdpr erasure request"
+    - "gdpr"
+    - "erasure"
+    - "dsar"
+    - "ccpa"
+    - "do not sell"
+    - "banking details"
+    - "bank details"
+    - "wire transfer instructions"
+    - "routing number"
+    - "preservation demand"
+    - "litigation"
+    - "wage garnishment"
+    - "data breach"
   # Max count of [NUM] / [CODE] tokens before triggering sensitive-skip
   max_code_density: 4
 
@@ -38,11 +51,11 @@ gatekeeper:
   max_retries: 2
   api_key_env: "JEV_API_KEY"
   # Fallback fast classifier if Jev AI is unavailable or times out
-  fallback_model: "llama-3.1-8b-instant"
+  fallback_model: "openai/gpt-oss-20b"
   groq_api_key_env: "GROQ_API_KEY"
 
 llm:
-  model: "llama-3.3-70b-versatile"
+  model: "openai/gpt-oss-120b"
   groq_api_key_env: "GROQ_API_KEY"
   temperature: 0.1
   confidence_threshold: 0.70
