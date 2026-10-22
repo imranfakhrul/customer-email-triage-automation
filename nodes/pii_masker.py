@@ -117,6 +117,70 @@ NON_PERSON_ENTITIES = {
     "false",
 }
 
+# Cached tech-terms whitelist set loaded from config
+_TECH_TERMS_CACHE: Optional[Set[str]] = None
+
+
+def load_tech_terms_whitelist(filepath: Optional[str] = None) -> Set[str]:
+    """Loads and caches technical terms whitelist from external file.
+
+    Terms are matched case-insensitively as exact whole entities to prevent
+    spaCy NER from misclassifying infrastructure and developer tools as PERSON.
+    Falls back safely to internal NON_PERSON_ENTITIES if file is unavailable.
+
+    Args:
+        filepath: Optional path to tech terms file. If None, checks config.yaml.
+
+    Returns:
+        Set of lowercase whitelist terms.
+    """
+    global _TECH_TERMS_CACHE
+    if _TECH_TERMS_CACHE is not None and filepath is None:
+        return _TECH_TERMS_CACHE
+
+    terms = set(NON_PERSON_ENTITIES)
+    target_path = filepath
+    if target_path is None:
+        try:
+            cfg = load_config()
+            target_path = cfg.get("privacy", {}).get(
+                "tech_terms_file", "config/tech_terms.txt"
+            )
+        except Exception:
+            target_path = "config/tech_terms.txt"
+
+    if target_path:
+        from pathlib import Path
+
+        candidate = Path(target_path)
+        if not candidate.is_absolute():
+            # Resolve relative to project root
+            repo_root = Path(__file__).resolve().parent.parent
+            resolved = repo_root / target_path
+            if resolved.exists():
+                candidate = resolved
+
+        if candidate.exists():
+            try:
+                with open(candidate, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            terms.add(line.lower())
+            except Exception:
+                # Log nothing about customer text or specific terms
+                pass
+
+    if filepath is None:
+        _TECH_TERMS_CACHE = terms
+    return terms
+
+
+def reset_tech_terms_cache() -> None:
+    """Resets cached tech terms whitelist (used for testing or dynamic reloads)."""
+    global _TECH_TERMS_CACHE
+    _TECH_TERMS_CACHE = None
+
 
 def mask_pii(
     text: str,
@@ -227,15 +291,17 @@ def mask_pii(
     nlp = get_spacy_nlp(spacy_model_name)
     if nlp is not None:
         doc = nlp(working)
+        whitelist = load_tech_terms_whitelist()
         # Collect PERSON entities that are not part of an existing token
         person_spans: List[Tuple[int, int, str]] = []
         for ent in doc.ents:
             if ent.label_ == "PERSON":
                 ent_text = ent.text.strip()
-                # Skip if already a token like [EMAIL_1] or technical term
+                # Skip if already a token like [EMAIL_1]
                 if ent_text.startswith("[") and ent_text.endswith("]"):
                     continue
-                if ent_text.lower() in NON_PERSON_ENTITIES:
+                # Skip masking only if the entity matches a whitelist term exactly (case-insensitive, whole entity)
+                if ent_text.lower() in whitelist:
                     continue
                 if len(ent_text) < 2:
                     continue

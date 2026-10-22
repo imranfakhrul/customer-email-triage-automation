@@ -1,0 +1,56 @@
+# Technical terms, software libraries, and infrastructure tools whitelist for PII masker
+# One term per line (case-insensitive). Exact whole-entity matches will not be masked as PERSON.
+
+# Databases & Storage
+Postgres
+PostgreSQL
+MySQL
+Redis
+MongoDB
+Elasticsearch
+Cassandra
+SQLite
+
+# Cloud & Orchestration
+Kubernetes
+Docker
+Terraform
+Ansible
+Helm
+AWS
+GCP
+Azure
+Linux
+Ubuntu
+Nginx
+Apache
+
+# Streaming & Messaging
+Kafka
+RabbitMQ
+
+# Monitoring & CI/CD
+Grafana
+Prometheus
+Jenkins
+Apollo
+
+# Frameworks & Languages
+Python
+JavaScript
+TypeScript
+React
+Node.js
+FastAPI
+Flask
+Django
+GraphQL
+
+# Collaboration, Ticketing & Support Tools
+GitHub
+GitLab
+Jira
+Slack
+Zendesk
+FreeScout
+Stripe

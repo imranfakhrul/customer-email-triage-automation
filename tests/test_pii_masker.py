@@ -2,7 +2,13 @@
 
 import unittest
 
-from nodes.pii_masker import mask_pii, pii_masker_node, unmask_text
+from nodes.pii_masker import (
+    load_tech_terms_whitelist,
+    mask_pii,
+    pii_masker_node,
+    reset_tech_terms_cache,
+    unmask_text,
+)
 from state import TriageState
 
 
@@ -152,6 +158,90 @@ class TestPiiMasker(unittest.TestCase):
         self.assertNotIn("robert@client.com", output["masked_body"])
         self.assertNotIn("555-888-9999", output["masked_body"])
         self.assertIn("[EMAIL_1]", output["masked_body"])
+
+    def test_tech_terms_whitelist_prevents_person_masking(self):
+        """Verifies tech whitelist keeps infrastructure and tool names intact while masking person names."""
+        reset_tech_terms_cache()
+
+        # 1. "Our Postgres and Kubernetes cluster is down" -> no [PERSON_*], text unchanged
+        text1 = "Our Postgres and Kubernetes cluster is down."
+        m1, t1 = mask_pii(text1)
+        self.assertNotIn("[PERSON", m1)
+        self.assertIn("Postgres", m1)
+        self.assertIn("Kubernetes", m1)
+        self.assertEqual(m1, text1)
+
+        # 2. "Hi, I'm John Doe, our Postgres pool is exhausted" -> "John Doe" is masked, "Postgres" is not
+        text2 = "Hi, I'm John Doe, our Postgres pool is exhausted"
+        m2, t2 = mask_pii(text2)
+        self.assertNotIn("John Doe", m2)
+        self.assertIn("[PERSON_1]", m2)
+        self.assertEqual(t2.get("[PERSON_1]"), "John Doe")
+        self.assertIn("Postgres", m2)
+        self.assertNotIn("Postgres", t2.values())
+
+        # 3. "Please contact Apollo Chen" -> "Apollo Chen" (full person name) is still masked
+        text3 = "Please contact Apollo Chen"
+        m3, t3 = mask_pii(text3)
+        self.assertNotIn("Apollo Chen", m3)
+        self.assertIn("[PERSON_1]", m3)
+        self.assertEqual(t3.get("[PERSON_1]"), "Apollo Chen")
+
+        # 4. Case variations: "postgres", "POSTGRES" are not masked
+        text4 = "Our postgres instance failed while POSTGRES replica was restarting."
+        m4, t4 = mask_pii(text4)
+        self.assertNotIn("[PERSON", m4)
+        self.assertIn("postgres", m4)
+        self.assertIn("POSTGRES", m4)
+
+        # 5. Tool names like Grafana which spaCy tags as PERSON when starting sentence
+        text5 = "Grafana is not loading on port 3000."
+        m5, t5 = mask_pii(text5)
+        self.assertNotIn("[PERSON", m5)
+        self.assertIn("Grafana", m5)
+
+        # 6. Full person name with tech term like "Grafana Smith" must still be masked
+        text6 = "Please escalate this to Grafana Smith immediately."
+        m6, t6 = mask_pii(text6)
+        self.assertNotIn("Grafana Smith", m6)
+        self.assertIn("[PERSON_1]", m6)
+        self.assertEqual(t6.get("[PERSON_1]"), "Grafana Smith")
+
+    def test_tech_terms_whitelist_loading(self):
+        """Verifies loading external tech terms file populates whitelist correctly."""
+        whitelist = load_tech_terms_whitelist()
+        expected_terms = [
+            "postgres",
+            "postgresql",
+            "mysql",
+            "redis",
+            "kafka",
+            "kubernetes",
+            "docker",
+            "terraform",
+            "grafana",
+            "prometheus",
+            "jenkins",
+            "github",
+            "gitlab",
+            "jira",
+            "slack",
+            "zendesk",
+            "freescout",
+            "nginx",
+            "apache",
+            "elasticsearch",
+            "mongodb",
+            "rabbitmq",
+            "django",
+            "flask",
+            "fastapi",
+            "react",
+            "node.js",
+            "apollo",
+        ]
+        for term in expected_terms:
+            self.assertIn(term, whitelist)
 
 
 if __name__ == "__main__":
