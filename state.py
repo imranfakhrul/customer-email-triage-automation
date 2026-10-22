@@ -81,6 +81,7 @@ class TriageState(TypedDict):
     gatekeeper_confidence: Optional[float]
     is_threat: Optional[bool]
     threat_details: Optional[str]
+    classifier_used: Optional[str]  # 'jev', 'groq', or 'regex'
 
     # Enrichment & Main Triage (Nodes 07, 08 & 09)
     customer_tier: Optional[str]  # 'Enterprise', 'Free', etc.

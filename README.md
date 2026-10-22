@@ -48,9 +48,17 @@ flowchart TD
 * **Human-in-the-Loop Quarantine:** Routes matching emails directly to the human review queue.
 
 ### 5. Jev AI Decision Gatekeeper (Node 05)
-* **Primary Classifier:** Sub-second threat and spam classification powered by Jev AI.
-* **High Availability Fallback:** Automatic failover to Groq (`llama-3.1-8b-instant`) in the event of timeouts or upstream API latency.
+* **Primary Classifier:** Sub-second threat and spam classification powered by TypeSafe System One (Jev `jev-1.13.0`).
+* **High Availability Fallback:** Automatic failover to Groq (`openai/gpt-oss-20b`) and deterministic regex heuristics.
 * **Tri-State Routing:** Labels items as `legitimate`, `spam`, or `manual_review`.
+
+#### 🚀 Enabling TypeSafe System One (Jev)
+To enable live Jev AI evaluation:
+1. Put a real key in `.env`: `JEV_API_KEY=your_actual_key`
+2. Run the smoke test to verify connectivity: `python scripts/jev_smoke_test.py`
+3. Run the pipeline: `python main.py` (or inside Docker via `docker compose up`)
+
+*(Note: Without a real key or with placeholder credentials, the pipeline automatically skips Jev and uses the Groq / regex fallback with zero downtime).*
 
 ---
 

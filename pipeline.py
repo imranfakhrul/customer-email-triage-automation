@@ -76,6 +76,7 @@ def prepare_initial_state(payload: Dict[str, Any]) -> TriageState:
         "gatekeeper_confidence": payload.get("gatekeeper_confidence"),
         "is_threat": payload.get("is_threat"),
         "threat_details": payload.get("threat_details"),
+        "classifier_used": payload.get("classifier_used"),
         "customer_tier": payload.get("customer_tier"),
         "sla_target": payload.get("sla_target"),
         "classification": payload.get("classification"),

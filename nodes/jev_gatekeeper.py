@@ -49,6 +49,7 @@ def jev_gatekeeper_node(
             "gatekeeper_confidence": 1.0,
             "is_threat": False,
             "threat_details": None,
+            "classifier_used": "thread_continuity",
             "routing_status": "active_thread_continuation",
         }
 
@@ -73,6 +74,13 @@ def jev_gatekeeper_node(
     is_spam = bool(result.get("is_spam", decision == "spam"))
     is_threat = bool(result.get("is_threat", False))
     threat_details = result.get("threat_details")
+    classifier_used = result.get("classifier_used", "regex")
+
+    # Structured one-line audit log per email
+    logger.info(
+        f"[Gatekeeper] Email '{email_id}' evaluated by engine='{classifier_used}' -> "
+        f"decision='{decision}', confidence={confidence:.2f}"
+    )
 
     existing_labels = list(state.get("labels_to_apply") or [])
 
@@ -100,6 +108,7 @@ def jev_gatekeeper_node(
             "gatekeeper_confidence": confidence,
             "is_threat": is_threat,
             "threat_details": threat_details,
+            "classifier_used": classifier_used,
             "labels_to_apply": existing_labels,
             "dispatch_target": "Junk/Spam",
             "dispatch_status": "done",
@@ -127,6 +136,7 @@ def jev_gatekeeper_node(
             "gatekeeper_confidence": confidence,
             "is_threat": is_threat,
             "threat_details": threat_details,
+            "classifier_used": classifier_used,
             "labels_to_apply": existing_labels,
             "is_starred": True,
             "dispatch_target": "Review/Manual",
@@ -144,6 +154,7 @@ def jev_gatekeeper_node(
         "gatekeeper_confidence": confidence,
         "is_threat": is_threat,
         "threat_details": threat_details,
+        "classifier_used": classifier_used,
         "routing_status": "gatekeeper_approved",
         "dispatch_status": "processing",
     }

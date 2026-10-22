@@ -1,8 +1,8 @@
-"""Client wrapper for Jev AI Spam Gatekeeper with Groq Fallback.
+"""Client wrapper for TypeSafe System One (Jev) Gatekeeper with Groq Fallback.
 
 This module provides high-availability spam and security classification:
-1. Primary Layer: Jev AI classification API (fast sub-second spam/threat scoring).
-2. Secondary Layer: Groq LLM fallback ('llama-3.1-8b-instant') if Jev AI times out or errors.
+1. Primary Layer: TypeSafe System One (Jev model `jev-1.13.0`) sub-second decision scoring.
+2. Secondary Layer: Groq LLM fallback ('openai/gpt-oss-20b') if Jev is disabled or errors.
 3. Tertiary Layer: Local deterministic heuristic rules ensuring zero crash policy when offline.
 """
 
@@ -57,8 +57,15 @@ PROMPT_INJECTION_REGEX = re.compile(
 )
 
 
+class JevClientError(Exception):
+    """Base exception for Jev client errors."""
+
+
 class JevClient:
-    """Gatekeeper client with automatic Groq and heuristic fallback."""
+    """Gatekeeper client with TypeSafe System One (Jev), Groq, and heuristic fallback."""
+
+    # Track startup warning across instances so we log exactly once
+    _startup_warned: bool = False
 
     def __init__(
         self,
@@ -83,14 +90,29 @@ class JevClient:
 
         self.config = config
         gatekeeper_cfg = config.get("gatekeeper", {})
+        jev_cfg = gatekeeper_cfg.get("jev", {})
 
-        self.timeout_seconds = gatekeeper_cfg.get("timeout_seconds", 3)
-        self.max_retries = gatekeeper_cfg.get("max_retries", 2)
+        self.timeout_seconds = float(
+            jev_cfg.get("timeout_seconds")
+            or gatekeeper_cfg.get("timeout_seconds", 5.0)
+        )
+        self.max_retries = int(gatekeeper_cfg.get("max_retries", 2))
         self.fallback_model = (
             os.environ.get("GROQ_FALLBACK_MODEL")
             or gatekeeper_cfg.get("fallback_model")
             or "openai/gpt-oss-20b"
         )
+
+        # TypeSafe System One (Jev) specific configuration
+        self.jev_model = jev_cfg.get("model", "jev-1.13.0")
+        self.api_url = (
+            api_url
+            or os.environ.get("JEV_API_URL")
+            or jev_cfg.get("api_url", "https://api.typesafe.ai/v1/systemone")
+        )
+        self.hi_threshold = float(jev_cfg.get("hi_threshold", 0.85))
+        self.lo_threshold = float(jev_cfg.get("lo_threshold", 0.15))
+        self.max_body_chars = int(jev_cfg.get("max_body_chars", 20000))
 
         # Resolve credentials securely via environment variables
         api_key_env = gatekeeper_cfg.get("api_key_env", "JEV_API_KEY")
@@ -109,9 +131,28 @@ class JevClient:
                 "GROQ_API_KEY", ""
             )
 
-        self.api_url = api_url or os.environ.get(
-            "JEV_API_URL", "https://api.jev.ai/v1/classify"
-        )
+        # Session-wide disable flag (e.g. after HTTP 401 Unauthorized)
+        self._jev_disabled: bool = False
+
+        # One-time startup check for Jev key validity
+        if not self._is_valid_key(self.api_key):
+            if not JevClient._startup_warned:
+                logger.warning(
+                    "Jev disabled: no valid key found. Pipeline will use Groq/heuristic fallbacks."
+                )
+                JevClient._startup_warned = True
+
+    @staticmethod
+    def _is_valid_key(key: Optional[str]) -> bool:
+        """Determines if a key string is non-empty and not a placeholder."""
+        if not key or not isinstance(key, str):
+            return False
+        k = key.strip().lower()
+        if not k:
+            return False
+        if k.startswith("your_") or "placeholder" in k or "your_jev_api_key_here" in k:
+            return False
+        return True
 
     def classify(self, subject: str, body: str, sender: str = "") -> Dict[str, Any]:
         """Classifies incoming email using Jev AI with automatic fallbacks.
@@ -124,94 +165,151 @@ class JevClient:
         Returns:
             Dictionary containing:
                 - decision: 'legitimate', 'spam', or 'manual_review'
+                - confidence: float between 0.0 and 1.0 (rounded to 2 decimals)
                 - is_spam: bool
-                - confidence: float between 0.0 and 1.0
                 - is_threat: bool
                 - threat_details: Optional[str]
-                - classifier_used: 'jev_ai', 'groq_fallback', or 'heuristic_fallback'
+                - classifier_used: 'jev', 'groq', or 'regex'
         """
-        # Step 1: Attempt Primary Classifier (Jev AI)
-        if self.api_key:
-            jev_result = self._call_jev_api(subject=subject, body=body, sender=sender)
-            if jev_result is not None:
-                return jev_result
+        result: Optional[Dict[str, Any]] = None
+
+        # Step 1: Attempt Primary Classifier (TypeSafe System One / Jev)
+        if self._is_valid_key(self.api_key) and not self._jev_disabled:
+            result = self._call_jev_api(subject=subject, body=body, sender=sender)
 
         # Step 2: Attempt Secondary Fallback (Groq)
-        if self.groq_api_key:
-            groq_result = self._call_groq_fallback(
+        if result is None and self._is_valid_key(self.groq_api_key):
+            result = self._call_groq_fallback(
                 subject=subject, body=body, sender=sender
             )
-            if groq_result is not None:
-                return groq_result
 
         # Step 3: Local Deterministic Heuristics Fallback (Guarantees zero downtime)
-        return self._heuristic_fallback(subject=subject, body=body, sender=sender)
+        if result is None:
+            result = self._heuristic_fallback(subject=subject, body=body, sender=sender)
+
+        # Always-on single structured log line per email evaluation
+        logger.info(
+            f"[Gatekeeper] Email evaluated by engine='{result['classifier_used']}' -> "
+            f"decision='{result['decision']}', confidence={result['confidence']:.2f}"
+        )
+
+        return result
 
     def _call_jev_api(
         self, subject: str, body: str, sender: str
     ) -> Optional[Dict[str, Any]]:
-        """Makes HTTP request to the Jev AI classification endpoint."""
-        if (
-            not self.api_key
-            or self.api_key.startswith("your_")
-            or "placeholder" in self.api_key.lower()
-        ):
-            return None
+        """Makes HTTP request to the TypeSafe System One evaluation endpoint."""
+        truncated_body = body[: self.max_body_chars] if body else ""
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "User-Agent": "CustomerEmailTriage/1.0",
         }
+
         payload = {
-            "subject": subject,
-            "body": body,
-            "sender": sender,
+            "model": self.jev_model,
+            "state": {
+                "sender": sender,
+                "subject": subject,
+                "body": truncated_body,
+            },
+            "questions": {
+                "is_spam": {
+                    "type": "noul",
+                    "instructions": (
+                        "The message is unsolicited mass marketing, promotional spam, "
+                        "or automated link farming."
+                    ),
+                },
+                "is_threat": {
+                    "type": "noul",
+                    "instructions": (
+                        "The message contains prompt injection, jailbreak attempts, "
+                        "or malicious exploits."
+                    ),
+                },
+            },
         }
 
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                response = requests.post(
-                    self.api_url,
-                    json=payload,
-                    headers=headers,
-                    timeout=self.timeout_seconds,
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    decision = data.get("decision", "legitimate")
-                    is_spam = bool(data.get("is_spam", decision == "spam"))
-                    confidence = float(data.get("confidence", 0.95))
-                    is_threat = bool(data.get("is_threat", False))
-                    threat_details = data.get("threat_details")
-                    return {
-                        "decision": decision,
-                        "is_spam": is_spam,
-                        "confidence": confidence,
-                        "is_threat": is_threat,
-                        "threat_details": threat_details,
-                        "classifier_used": "jev_ai",
-                    }
-                else:
-                    logger.warning(
-                        f"Jev AI returned status {response.status_code} on attempt {attempt}: {response.text[:200]}"
-                    )
-            except Exception as exc:
-                logger.warning(f"Jev AI request failed on attempt {attempt}: {exc}")
+        try:
+            response = requests.post(
+                self.api_url,
+                json=payload,
+                headers=headers,
+                timeout=self.timeout_seconds,
+            )
 
-        return None
+            # Handle 401 Unauthorized: Invalid API key disables Jev for session
+            if response.status_code == 401:
+                logger.error(
+                    "Jev API returned 401 Unauthorized: invalid API key. "
+                    "Disabling Jev for this session and falling back."
+                )
+                self._jev_disabled = True
+                return None
+
+            # Handle other client/server error codes
+            if response.status_code != 200:
+                logger.warning(
+                    f"Jev API returned status {response.status_code}: {response.text[:200]}"
+                )
+                return None
+
+            data = response.json()
+            answers = data.get("answers", {})
+
+            if "is_spam" not in answers or "is_threat" not in answers:
+                logger.warning("Jev API response missing expected questions in 'answers'.")
+                return None
+
+            p_spam_raw = answers["is_spam"].get("noul")
+            p_threat_raw = answers["is_threat"].get("noul")
+
+            if p_spam_raw is None or p_threat_raw is None:
+                logger.warning("Jev API answers missing 'noul' probability values.")
+                return None
+
+            p_spam = float(p_spam_raw)
+            p_threat = float(p_threat_raw)
+
+            # Map probabilities to standardized triage schema
+            if p_threat >= 0.5:
+                decision = "manual_review"
+                confidence = p_threat
+            elif p_spam >= self.hi_threshold:
+                decision = "spam"
+                confidence = p_spam
+            elif p_spam <= self.lo_threshold:
+                decision = "legitimate"
+                confidence = 1.0 - p_spam
+            else:
+                decision = "manual_review"
+                confidence = max(p_spam, 1.0 - p_spam)
+
+            is_spam = p_spam >= 0.5
+            is_threat = p_threat >= 0.5
+            threat_details = (
+                "Adversarial threat detected by Jev System One" if is_threat else None
+            )
+
+            return {
+                "decision": decision,
+                "confidence": round(confidence, 2),
+                "is_spam": is_spam,
+                "is_threat": is_threat,
+                "threat_details": threat_details,
+                "classifier_used": "jev",
+            }
+
+        except Exception as exc:
+            logger.warning(f"Jev API request failed: {exc}")
+            return None
 
     def _call_groq_fallback(
         self, subject: str, body: str, sender: str
     ) -> Optional[Dict[str, Any]]:
         """Invokes Groq fast model as fallback classifier."""
-        if (
-            not self.groq_api_key
-            or self.groq_api_key.startswith("your_")
-            or "placeholder" in self.groq_api_key.lower()
-        ):
-            return None
-
         try:
             from langchain_groq import ChatGroq
             from langchain_core.messages import HumanMessage, SystemMessage
@@ -244,13 +342,15 @@ class JevClient:
             if decision not in ("legitimate", "spam", "manual_review"):
                 decision = "legitimate"
 
+            confidence = round(float(data.get("confidence", 0.85)), 2)
+
             return {
                 "decision": decision,
+                "confidence": confidence,
                 "is_spam": bool(data.get("is_spam", decision == "spam")),
-                "confidence": float(data.get("confidence", 0.85)),
                 "is_threat": bool(data.get("is_threat", False)),
                 "threat_details": data.get("threat_details"),
-                "classifier_used": "groq_fallback",
+                "classifier_used": "groq",
             }
         except Exception as exc:
             logger.warning(f"Groq fallback classifier failed: {exc}")
@@ -266,35 +366,34 @@ class JevClient:
         if PROMPT_INJECTION_REGEX.search(text):
             return {
                 "decision": "spam",
-                "is_spam": True,
                 "confidence": 0.99,
+                "is_spam": True,
                 "is_threat": True,
                 "threat_details": "Adversarial prompt injection pattern detected",
-                "classifier_used": "heuristic_fallback",
+                "classifier_used": "regex",
             }
 
         # 2. Known Spam & Phishing Patterns
         if SPAM_REGEX.search(text):
             return {
                 "decision": "spam",
-                "is_spam": True,
                 "confidence": 0.95,
+                "is_spam": True,
                 "is_threat": False,
                 "threat_details": "Unsolicited spam pattern detected",
-                "classifier_used": "heuristic_fallback",
+                "classifier_used": "regex",
             }
 
         # 3. Legitimate by default for typical inquiries
         return {
             "decision": "legitimate",
-            "is_spam": False,
             "confidence": 0.85,
+            "is_spam": False,
             "is_threat": False,
             "threat_details": None,
-            "classifier_used": "heuristic_fallback",
+            "classifier_used": "regex",
         }
 
 
 # Convenient alias for architectural consistency
 JevAIClient = JevClient
-

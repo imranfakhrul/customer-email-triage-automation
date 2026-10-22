@@ -73,11 +73,10 @@ class TestJevGatekeeper(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "decision": "legitimate",
-            "is_spam": False,
-            "confidence": 0.98,
-            "is_threat": False,
-            "threat_details": None,
+            "answers": {
+                "is_spam": {"type": "noul", "noul": 0.02},
+                "is_threat": {"type": "noul", "noul": 0.01},
+            }
         }
         mock_post.return_value = mock_response
 
@@ -91,7 +90,7 @@ class TestJevGatekeeper(unittest.TestCase):
         self.assertEqual(result["decision"], "legitimate")
         self.assertFalse(result["is_spam"])
         self.assertEqual(result["confidence"], 0.98)
-        self.assertEqual(result["classifier_used"], "jev_ai")
+        self.assertEqual(result["classifier_used"], "jev")
 
     @patch("requests.post")
     def test_jev_ai_api_spam_classification_and_db_update(self, mock_post):
@@ -99,11 +98,10 @@ class TestJevGatekeeper(unittest.TestCase):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "decision": "spam",
-            "is_spam": True,
-            "confidence": 0.99,
-            "is_threat": False,
-            "threat_details": "Known marketing blast list",
+            "answers": {
+                "is_spam": {"type": "noul", "noul": 0.99},
+                "is_threat": {"type": "noul", "noul": 0.01},
+            }
         }
         mock_post.return_value = mock_response
 
@@ -171,7 +169,7 @@ class TestJevGatekeeper(unittest.TestCase):
         self.assertEqual(result["decision"], "spam")
         self.assertTrue(result["is_threat"])
         self.assertIn("prompt injection", result["threat_details"].lower())
-        self.assertEqual(result["classifier_used"], "heuristic_fallback")
+        self.assertEqual(result["classifier_used"], "regex")
 
     def test_heuristic_fallback_detects_commercial_spam(self):
         """Verifies local heuristic catches unsolicited lottery and crypto spam."""
@@ -184,7 +182,7 @@ class TestJevGatekeeper(unittest.TestCase):
 
         self.assertEqual(result["decision"], "spam")
         self.assertTrue(result["is_spam"])
-        self.assertEqual(result["classifier_used"], "heuristic_fallback")
+        self.assertEqual(result["classifier_used"], "regex")
 
     def test_heuristic_fallback_allows_normal_b2b_inquiry(self):
         """Verifies regular B2B business inquiries pass heuristic check as legitimate."""
@@ -198,7 +196,7 @@ class TestJevGatekeeper(unittest.TestCase):
         self.assertEqual(result["decision"], "legitimate")
         self.assertFalse(result["is_spam"])
         self.assertEqual(result["confidence"], 0.85)
-        self.assertEqual(result["classifier_used"], "heuristic_fallback")
+        self.assertEqual(result["classifier_used"], "regex")
 
     def test_manual_review_routing(self):
         """Verifies manual_review decision routes to Review/Manual and stars email."""

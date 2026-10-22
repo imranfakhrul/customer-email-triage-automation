@@ -14,6 +14,24 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 
+def validate_config(config: Dict[str, Any]) -> None:
+    """Validates configuration parameters to fail fast on invalid setups.
+
+    Raises:
+        ValueError: If configuration thresholds or parameters violate constraints.
+    """
+    gatekeeper_cfg = config.get("gatekeeper", {})
+    jev_cfg = gatekeeper_cfg.get("jev", {})
+    if jev_cfg:
+        hi = jev_cfg.get("hi_threshold", 0.85)
+        lo = jev_cfg.get("lo_threshold", 0.15)
+        if not (0.0 < float(lo) < float(hi) < 1.0):
+            raise ValueError(
+                f"Invalid Jev gatekeeper thresholds: expected 0.0 < lo_threshold < hi_threshold < 1.0, "
+                f"got lo_threshold={lo}, hi_threshold={hi}"
+            )
+
+
 def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     """Loads and returns the YAML configuration file.
 
@@ -26,6 +44,7 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     Raises:
         FileNotFoundError: If the configuration file is not found.
         yaml.YAMLError: If the YAML file contains invalid syntax.
+        ValueError: If configuration parameters violate constraints.
     """
     path = Path(config_path)
     if not path.is_file():
@@ -34,7 +53,9 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    return config or {}
+    cfg = config or {}
+    validate_config(cfg)
+    return cfg
 
 
 def get_env_var(

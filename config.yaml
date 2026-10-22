@@ -46,13 +46,19 @@ privacy:
   max_code_density: 4
 
 gatekeeper:
-  # Primary gatekeeper: Jev AI
-  timeout_seconds: 3
+  # Primary gatekeeper: TypeSafe System One (Jev)
+  timeout_seconds: 5.0
   max_retries: 2
   api_key_env: "JEV_API_KEY"
   # Fallback fast classifier if Jev AI is unavailable or times out
   fallback_model: "openai/gpt-oss-20b"
   groq_api_key_env: "GROQ_API_KEY"
+  jev:
+    model: "jev-1.13.0"
+    api_url: "https://api.typesafe.ai/v1/systemone"
+    hi_threshold: 0.85
+    lo_threshold: 0.15
+    max_body_chars: 20000
 
 llm:
   model: "openai/gpt-oss-120b"

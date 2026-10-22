@@ -44,12 +44,14 @@ def print_banner() -> None:
 def run_benchmark_suite(
     benchmark_path: Optional[str] = None,
     use_temp_db: bool = True,
+    offline: bool = False,
 ) -> bool:
     """Executes the synthetic benchmark dataset through the complete triage pipeline.
 
     Args:
         benchmark_path: Optional path to benchmark JSON file.
         use_temp_db: Whether to use an isolated temporary database for benchmarking.
+        offline: Whether to force offline deterministic mode (preserves API quotas).
 
     Returns:
         True if all benchmark scenarios pass matching assertions, False otherwise.
@@ -76,12 +78,18 @@ def run_benchmark_suite(
     else:
         db = TriageDatabase()
 
-    pipeline = create_triage_pipeline(db=db)
+    from utils.jev_client import JevClient
+    client = (
+        JevClient(api_key="your_placeholder_key", groq_api_key="your_placeholder_key")
+        if offline
+        else None
+    )
+    pipeline = create_triage_pipeline(db=db, client=client)
 
     print(
-        f"{'#':<3} | {'Scenario Name':<28} | {'Routing Status':<26} | {'Decision':<12} | {'Time (ms)':<9} | {'Status'}"
+        f"{'#':<3} | {'Scenario Name':<28} | {'Routing Status':<26} | {'Decision':<12} | {'Engine':<7} | {'Time (ms)':<9} | {'Status'}"
     )
-    print("-" * 95)
+    print("-" * 105)
 
     all_passed = True
     total_duration_ms = 0.0
@@ -96,12 +104,13 @@ def run_benchmark_suite(
             db.mark_done(item["email_id"], routing_status="completed")
 
         t0 = time.perf_counter()
-        result = run_triage_pipeline(item, pipeline=pipeline, db=db)
+        result = run_triage_pipeline(item, pipeline=pipeline, db=db, client=client)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         total_duration_ms += elapsed_ms
 
         routing_status = str(result.get("routing_status") or "unknown")
         gatekeeper_decision = str(result.get("gatekeeper_decision") or "—")
+        classifier_used = str(result.get("classifier_used") or "—")
 
         # Verify against expected outcomes
         case_passed = True
@@ -123,10 +132,10 @@ def run_benchmark_suite(
             status_badge = "✅ PASS"
 
         print(
-            f"{idx:<3} | {name:<28} | {routing_status:<26} | {gatekeeper_decision:<12} | {elapsed_ms:>8.1f}  | {status_badge}"
+            f"{idx:<3} | {name:<28} | {routing_status:<26} | {gatekeeper_decision:<12} | {classifier_used:<7} | {elapsed_ms:>8.1f}  | {status_badge}"
         )
 
-    print("-" * 95)
+    print("-" * 105)
     avg_ms = total_duration_ms / len(benchmarks) if benchmarks else 0.0
     print(
         f"[*] Execution Summary: {len(benchmarks)} scenarios in {total_duration_ms:.1f}ms (Average: {avg_ms:.1f}ms/email)"
@@ -165,6 +174,7 @@ def process_single_email(json_path: str) -> None:
         "email_id": result.get("email_id"),
         "routing_status": result.get("routing_status"),
         "gatekeeper_decision": result.get("gatekeeper_decision"),
+        "classifier_used": result.get("classifier_used"),
         "is_sensitive": result.get("is_sensitive"),
         "sensitive_reason": result.get("sensitive_reason"),
         "is_spam": result.get("is_spam"),
@@ -200,6 +210,11 @@ def main() -> None:
         default=None,
         help="Custom path to benchmark dataset JSON file.",
     )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Run using offline deterministic heuristics (avoids external API quotas).",
+    )
 
     args = parser.parse_args()
 
@@ -209,7 +224,10 @@ def main() -> None:
         process_single_email(args.input)
     else:
         # Default behavior: run benchmark verification suite
-        success = run_benchmark_suite(benchmark_path=args.dataset)
+        success = run_benchmark_suite(
+            benchmark_path=args.dataset,
+            offline=args.offline,
+        )
         if not success:
             sys.exit(1)
 

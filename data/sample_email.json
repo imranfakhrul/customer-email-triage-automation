@@ -1,0 +1,6 @@
+{
+  "email_id": "test_groq_001",
+  "sender_email": "alex.chen@cloudtech.com",
+  "email_subject": "Latency spike during Redis cluster rebalancing",
+  "email_body": "Hello engineering team,\nWe noticed a 450ms latency spike when our Redis shard 3 rebalanced at 14:00 UTC yesterday. Can you check our throughput limits?\nThanks,\nAlex Chen\nSenior DevOps Lead\nPhone: +1 415-555-2671"
+}
