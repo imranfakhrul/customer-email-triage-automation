@@ -294,6 +294,55 @@ class TestIdempotencyAndIngest(unittest.TestCase):
         self.assertEqual(output["dispatch_status"], "processing")
         self.assertEqual(should_continue_triage(output), "continue")
 
+    def test_duplicate_recognized_within_10_minutes_after_gatekeeper_approval(self):
+        """Verifies an approved email is recognized as a duplicate on retransmission within 10 minutes."""
+        email_id = "em_approved_test_01"
+        self.db.check_and_acquire(email_id=email_id, thread_id="th_app_01")
+        self.db.mark_done(email_id=email_id, routing_status="gatekeeper_approved")
+
+        # Retransmit within 10 minutes
+        allowed, outcome, record = self.db.check_and_acquire(
+            email_id=email_id, thread_id="th_app_01"
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(outcome, "already_completed")
+        self.assertEqual(record["routing_status"], "gatekeeper_approved")
+
+    def test_get_gatekeeper_approved_helper(self):
+        """Verifies get_gatekeeper_approved retrieves all approved emails for Phase 2 pickup."""
+        self.db.check_and_acquire("em_approved_1", "th_1")
+        self.db.mark_done("em_approved_1", routing_status="gatekeeper_approved")
+
+        self.db.check_and_acquire("em_spam_1", "th_2")
+        self.db.mark_done("em_spam_1", routing_status="spam_skipped")
+
+        self.db.check_and_acquire("em_approved_2", "th_3")
+        self.db.mark_done("em_approved_2", routing_status="gatekeeper_approved")
+
+        approved = self.db.get_gatekeeper_approved()
+        approved_ids = [r["email_id"] for r in approved]
+        self.assertEqual(len(approved), 2)
+        self.assertIn("em_approved_1", approved_ids)
+        self.assertIn("em_approved_2", approved_ids)
+        self.assertNotIn("em_spam_1", approved_ids)
+
+    def test_thread_participant_validation(self):
+        """Verifies thread participant verification rejects unknown spoofed senders."""
+        thread_id = "th_collab_99"
+        self.db.check_and_acquire(
+            email_id="msg_legit", thread_id=thread_id, sender_email="alice@company.com"
+        )
+        self.db.mark_done("msg_legit", routing_status="gatekeeper_approved")
+
+        # Known participant
+        self.assertTrue(
+            self.db.is_thread_participant(thread_id, "alice@company.com")
+        )
+        # Unknown attacker attempting thread header spoofing
+        self.assertFalse(
+            self.db.is_thread_participant(thread_id, "attacker@evil.com")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

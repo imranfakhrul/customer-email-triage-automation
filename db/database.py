@@ -144,6 +144,56 @@ class TriageDatabase:
         records = self.get_active_thread_records(thread_id, exclude_email_id)
         return len(records) > 0
 
+    def is_thread_participant(
+        self, thread_id: str, sender_email: str, exclude_email_id: Optional[str] = None
+    ) -> bool:
+        """Checks if sender_email participated in previous completed records of this thread.
+
+        Prevents thread spoofing / blind trust of thread headers from unknown parties.
+
+        Args:
+            thread_id: Thread conversation ID.
+            sender_email: Email address of the inbound sender.
+            exclude_email_id: Optional email_id to exclude.
+
+        Returns:
+            True if sender_email participated in prior completed messages of this thread.
+        """
+        records = self.get_active_thread_records(thread_id, exclude_email_id)
+        sender_clean = (sender_email or "").strip().lower()
+        if not sender_clean:
+            return False
+        for r in records:
+            prev_sender = (r.get("sender_email") or "").strip().lower()
+            if not prev_sender or prev_sender == sender_clean:
+                return True
+        return False
+
+    def get_gatekeeper_approved(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Retrieves emails completed with routing_status='gatekeeper_approved'.
+
+        Phase 2 Note: Downstream dispatchers must pick up verified legitimate emails
+        using this query or routing_status='gatekeeper_approved'. The idempotency check
+        records these as finished (status='done') so retries do not re-trigger gatekeeping.
+
+        Args:
+            limit: Maximum number of records to return.
+
+        Returns:
+            List of database records ready for downstream ticket dispatching.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM email_triage
+                WHERE status = 'done' AND routing_status = 'gatekeeper_approved'
+                ORDER BY updated_at ASC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
     def check_and_acquire(
         self,
         email_id: str,

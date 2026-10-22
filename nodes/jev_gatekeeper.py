@@ -37,22 +37,6 @@ def jev_gatekeeper_node(
     email_id = state.get("email_id", "")
     is_active_thread = state.get("is_active_thread", False)
 
-    # 1. Active Thread Continuity Bypass
-    # Ongoing customer conversations bypass gatekeeping to minimize latency and false flags
-    if is_active_thread:
-        logger.info(
-            f"Email '{email_id}' belongs to an active thread; bypassing gatekeeper check."
-        )
-        return {
-            "gatekeeper_decision": "legitimate",
-            "is_spam": False,
-            "gatekeeper_confidence": 1.0,
-            "is_threat": False,
-            "threat_details": None,
-            "classifier_used": "thread_continuity",
-            "routing_status": "active_thread_continuation",
-        }
-
     if client is None:
         client = JevClient()
 
@@ -67,7 +51,8 @@ def jev_gatekeeper_node(
     )
     sender = state.get("sender_email") or ""
 
-    # 2. Gatekeeper Evaluation (Jev AI -> Groq Fallback -> Heuristics)
+    # 1. Gatekeeper Evaluation (Jev AI -> Groq Fallback -> Heuristics)
+    # Active thread replies are fully inspected for threats, injections, and spam
     result = client.classify(subject=subject, body=body, sender=sender)
     decision = result.get("decision", "legitimate")
     confidence = float(result.get("confidence", 0.85))
@@ -84,7 +69,7 @@ def jev_gatekeeper_node(
 
     existing_labels = list(state.get("labels_to_apply") or [])
 
-    # 3. Decision Dispatch Mapping
+    # 2. Decision Dispatch Mapping
     if decision == "spam":
         logger.info(
             f"Email '{email_id}' flagged as SPAM by gatekeeper: {threat_details}"
@@ -144,10 +129,27 @@ def jev_gatekeeper_node(
             "routing_status": "manual_review",
         }
 
-    # Legitimate Inbound
+    # 3. Legitimate Inbound Approval
     logger.info(
         f"Email '{email_id}' approved as LEGITIMATE (confidence: {confidence:.2f})."
     )
+
+    # Phase 1 Idempotency Hand-off: Mark as done in SQLite so retransmissions within 10m are duplicates.
+    # Phase 2 dispatchers will pick up these verified emails using routing_status='gatekeeper_approved'.
+    if db is not None and email_id:
+        try:
+            db.mark_done(
+                email_id=email_id,
+                routing_status="gatekeeper_approved",
+                dispatch_target=None,
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to record gatekeeper approval in DB: {exc}")
+
+    routing_status = (
+        "active_thread_continuation" if is_active_thread else "gatekeeper_approved"
+    )
+
     return {
         "gatekeeper_decision": "legitimate",
         "is_spam": False,
@@ -155,7 +157,7 @@ def jev_gatekeeper_node(
         "is_threat": is_threat,
         "threat_details": threat_details,
         "classifier_used": classifier_used,
-        "routing_status": "gatekeeper_approved",
+        "routing_status": routing_status,
         "dispatch_status": "processing",
     }
 

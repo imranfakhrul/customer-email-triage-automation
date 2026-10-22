@@ -158,6 +158,12 @@ class TestSignatureStripper(unittest.TestCase):
         )
         self.assertEqual(cleaned, expected)
 
+    def test_opening_thank_you_three_line_email_preserved(self):
+        """Verifies short email starting with 'Thank you.' is fully preserved."""
+        raw_email = "Thank you.\nOur server is crashing.\nPlease help."
+        cleaned = strip_signatures_and_quotes(raw_email)
+        self.assertEqual(cleaned, raw_email)
+
     def test_fallback_on_only_signature(self):
         """Verifies safety fallback: does not return empty string when input has only signature."""
         raw_email = "Best regards,\nJohn"

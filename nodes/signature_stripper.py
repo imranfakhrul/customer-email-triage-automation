@@ -117,11 +117,11 @@ def strip_signatures_and_quotes(text: str) -> str:
     sign_off_idx = None
     for idx, line in enumerate(lines):
         if SIGN_OFF_REGEX.match(line):
-            # Verify that following lines look like a signature block:
-            # - At most 8 subsequent non-empty lines
-            # - No long narrative paragraphs (each line < 120 chars)
+            preceding = [l.strip() for l in lines[:idx] if l.strip()]
             subsequent = [l.strip() for l in lines[idx + 1 :] if l.strip()]
-            if len(subsequent) <= 8 and all(len(l) < 120 for l in subsequent):
+            # A sign-off closing requires real body text preceding it
+            # (prevents treating opening lines like 'Thank you.\nOur server is down...' as signatures)
+            if preceding and len(subsequent) <= 8 and all(len(l) < 120 for l in subsequent):
                 sign_off_idx = idx
                 break
 

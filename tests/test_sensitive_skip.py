@@ -146,6 +146,19 @@ class TestSensitiveSkip(unittest.TestCase):
         }  # type: ignore
         self.assertEqual(should_route_after_sensitive(normal_state), "continue")
 
+    def test_billing_intent_phrases_vs_benign_refund(self):
+        """Verifies polite refund requests mentioning chargebacks are not quarantined,
+        while explicit threats to file a chargeback are quarantined."""
+        benign_refund = "Please refund my $20, I don't want to file a chargeback."
+        is_sensitive, reason = evaluate_sensitive(text=benign_refund)
+        self.assertFalse(is_sensitive)
+        self.assertIsNone(reason)
+
+        hostile_dispute = "I will file a chargeback if this isn't fixed today!"
+        is_sensitive_hostile, hostile_reason = evaluate_sensitive(text=hostile_dispute)
+        self.assertTrue(is_sensitive_hostile)
+        self.assertIn("chargeback", hostile_reason.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

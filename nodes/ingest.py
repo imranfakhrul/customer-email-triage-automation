@@ -65,9 +65,18 @@ def ingest_node(
     has_attachments = bool(state.get("has_attachments", False))
 
     # Active Thread Continuity Check
-    is_active_thread = bool(state.get("is_active_thread")) or db.is_active_thread(
-        thread_id, exclude_email_id=email_id
+    # Do not trust In-Reply-To or thread headers alone; also require that sender is a known participant
+    has_prior_thread = db.is_active_thread(thread_id, exclude_email_id=email_id)
+    is_known_participant = (
+        db.is_thread_participant(thread_id, sender_email, exclude_email_id=email_id)
+        if has_prior_thread
+        else False
     )
+
+    if has_prior_thread:
+        is_active_thread = bool(is_known_participant)
+    else:
+        is_active_thread = bool(state.get("is_active_thread", False))
 
     # Check and acquire idempotency lock
     allowed, outcome, record = db.check_and_acquire(

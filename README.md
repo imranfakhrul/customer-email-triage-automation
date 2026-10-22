@@ -32,7 +32,8 @@ flowchart TD
 ### 1. Ingestion & Idempotency Store (Node 01)
 * **Crash-Resilient State Machine:** Utilizes SQLite with three atomic states (`processing`, `done`, `failed`).
 * **Stale Lock Recovery:** In-flight tasks exceeding 10 minutes without completion are automatically recovered with incremented retry counters.
-* **Active Thread Continuity:** Detects ongoing threads to prioritize customer conversations.
+* **Active Thread Verification:** Detects ongoing threads and verifies that the inbound sender is a known participant of prior messages in the thread.
+* **Phase 2 Hand-off Contract:** Phase 2 dispatchers pick up verified emails using `routing_status = 'gatekeeper_approved'` (or `db.get_gatekeeper_approved()`). Marking them as `status = 'done'` guarantees immediate retransmissions within 10 minutes are recognized as duplicates without blocking Phase 2 downstream execution.
 
 ### 2. Privacy & Noise Stripping (Node 02)
 * **Quote Truncation:** Strips nested email replies (`On <date> ... wrote:`, `-----Original Message-----`, Outlook header dividers).
