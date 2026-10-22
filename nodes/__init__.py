@@ -15,6 +15,10 @@ from nodes.sensitive_skip import (
     sensitive_skip_node,
     should_route_after_sensitive,
 )
+from nodes.jev_gatekeeper import (
+    jev_gatekeeper_node,
+    should_route_after_gatekeeper,
+)
 
 __all__ = [
     "ingest_node",
@@ -27,4 +31,6 @@ __all__ = [
     "evaluate_sensitive",
     "sensitive_skip_node",
     "should_route_after_sensitive",
+    "jev_gatekeeper_node",
+    "should_route_after_gatekeeper",
 ]

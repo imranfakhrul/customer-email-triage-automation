@@ -2,7 +2,7 @@
 
 > **Scope:** Inbound Email Ingestion ➔ Privacy Redaction ➔ Sensitive Diversion ➔ **Jev AI Decision Engine**  
 > **Last Updated:** October 21, 2026  
-> **Overall Progress:** **7 of 9 Milestones Completed** (~77%)
+> **Overall Progress:** **8 of 9 Milestones Completed** (~88%)
 
 ---
 
@@ -17,7 +17,7 @@
 | **5** | **Signature & Quote Stripper (Node 02)** | ✅ Completed | Strips RFC reply headers, Outlook/Exchange headers, mobile signatures (`Sent from my iPhone`), and legal disclaimers. |
 | **6** | **Local spaCy NER & PII Masker (Node 03)** | ✅ Completed | 100% on-premise PII redactor. Masks names, emails, phone numbers, and credentials with reversible tokens before external AI calls. |
 | **7** | **Sensitive-Skip Diversion Rules (Node 04)** | ✅ Completed | Rule-based security diversion. Immediately quarantines legal threats, regulatory notices, and sensitive customer data to human review. |
-| **8** | **Jev AI Decision Gatekeeper (Node 05)** | ⏳ Pending | **Final Decision Engine:** Evaluates inbound emails via Jev AI (with Groq fallback) to decide `legitimate`, `spam`, or `manual_review`. |
+| **8** | **Jev AI Decision Gatekeeper (Node 05)** | ✅ Completed | **Final Decision Engine:** Evaluates inbound emails via Jev AI (with Groq fallback) to decide `legitimate`, `spam`, or `manual_review`. |
 | **9** | **Automated Pipeline Verification Suite** | ⏳ Pending | End-to-end integration tests and synthetic benchmark verifying pipeline execution and decision accuracy up to Jev AI. |
 
 ---
@@ -50,14 +50,16 @@
 * Applied immediate quarantine routing to `Review/Sensitive` mailbox and committed final status to SQLite idempotency store.
 * Tested with 7 dedicated unit test cases.
 
+### 6. Node 05: Jev AI Decision Gatekeeper & Fallback Routing
+* Implemented the core decision engine evaluating inbound emails with sub-second spam, threat, and legitimacy scoring.
+* Added multi-tier resilience: primary Jev AI API with automatic Groq (`llama-3.1-8b-instant`) fallback and deterministic local heuristics.
+* Enabled active thread continuity bypass to eliminate redundant AI calls on existing customer conversations.
+* Routed `spam` to `Junk/Spam`, `manual_review` to `Review/Manual`, and approved `legitimate` inquiries for downstream processing.
+* Tested with 7 dedicated unit test cases.
+
 ---
 
 ## ⏳ Remaining Works (Path to Jev AI Decision)
 
-### 1. Node 05: Jev AI Decision Gatekeeper
-* Build the primary gatekeeper client integrating Jev AI for spam and threat classification.
-* Implement automatic fallback to Groq (`llama-3.1-8b-instant`) for high availability.
-* Output conclusive triage decisions: `legitimate`, `spam`, or `manual_review`.
-
-### 2. Verification & Testing
-* Build integration tests running the full pipeline from raw email input to final Jev AI decision in Docker.
+### 1. Verification & Benchmark Dataset
+* Build end-to-end integration tests and synthetic benchmark dataset running the full pipeline from raw email input to final Jev AI decision in Docker.
