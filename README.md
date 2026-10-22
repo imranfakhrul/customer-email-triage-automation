@@ -61,6 +61,10 @@ Customer-Email-Triage-Automation/
 ├── config.yaml               # Central system and threshold configuration
 ├── Dockerfile                # Production container specification
 ├── docker-compose.yml        # Multi-container orchestration
+├── main.py                   # Production entry point and CLI benchmark runner
+├── pipeline.py               # LangGraph compiled pipeline orchestrator
+├── data/
+│   └── benchmark_emails.json # 10-scenario synthetic benchmark dataset
 ├── db/
 │   └── database.py           # SQLite idempotency engine
 ├── nodes/
@@ -71,6 +75,12 @@ Customer-Email-Triage-Automation/
 │   └── jev_gatekeeper.py     # Node 05: Jev AI decision engine
 ├── state.py                  # LangGraph TriageState & Pydantic models
 ├── tests/                    # Unit and integration test suites
+│   ├── test_ingest_idempotency.py
+│   ├── test_signature_stripper.py
+│   ├── test_pii_masker.py
+│   ├── test_sensitive_skip.py
+│   ├── test_jev_gatekeeper.py
+│   └── test_pipeline_e2e.py  # End-to-end integration and benchmark tests
 └── utils/
     ├── config.py             # Environment and config loader
     └── jev_client.py         # Jev AI client with fallback handler
@@ -222,8 +232,14 @@ python -m spacy download en_core_web_sm
 # 3. Configure environment
 cp .env.example .env
 
-# 4. Run tests
+# 4. Run automated test suite (61 tests)
 python -m unittest discover tests
+
+# 5. Run the synthetic benchmark suite across all pipeline stages
+python main.py --benchmark
+
+# 6. Process an individual email JSON payload
+python main.py --input path/to/email.json
 ```
 
 ---

@@ -65,7 +65,9 @@ def ingest_node(
     has_attachments = bool(state.get("has_attachments", False))
 
     # Active Thread Continuity Check
-    is_active_thread = db.is_active_thread(thread_id, exclude_email_id=email_id)
+    is_active_thread = bool(state.get("is_active_thread")) or db.is_active_thread(
+        thread_id, exclude_email_id=email_id
+    )
 
     # Check and acquire idempotency lock
     allowed, outcome, record = db.check_and_acquire(

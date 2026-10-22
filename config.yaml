@@ -26,6 +26,9 @@ privacy:
     - "wire transfer routing"
     - "chargeback"
     - "refund dispute"
+    - "cease and desist"
+    - "arbitration demand"
+    - "gdpr erasure request"
   # Max count of [NUM] / [CODE] tokens before triggering sensitive-skip
   max_code_density: 4
 

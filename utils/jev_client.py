@@ -20,14 +20,28 @@ logger = logging.getLogger(__name__)
 
 # Heuristic patterns for local fallback
 SPAM_REGEX = re.compile(
-    r"(?i)\b(?:viagra|cialis|crypto\s+investment|guaranteed\s+returns|lottery\s+winner|"
-    r"claim\s+your\s+prize|wire\s+transfer\s+millions|seo\s+backlinks|casino|betting|"
-    r"adult\s+dating|earn\s+\$?\d{3,}\s+daily|act\s+now\s+limited\s+time|congratulations\s+you\s+won)\b"
+    r"\b(?:viagra|cialis|crypto\s+investment|guaranteed\s+returns|lottery\s+winner|"
+    r"claim\s+your\s+prize|wire\s+transfer\s+millions|seo\s+backlinks|guest\s+post|do-follow\s+backlinks|"
+    r"casino|betting|adult\s+dating|earn\s+\$?\d{3,}\s+daily|act\s+now\s+limited\s+time|"
+    r"congratulations\s+you\s+won|geek\s*squad|norton\s*protection|renew(?:ed|al)\s+for\s+\$\d+|"
+    r"abandoned\s+\$[\d.,]+M|next\s+of\s+kin|beneficiary\s+to\s+claim|transfer\s+of\s+abandoned|"
+    r"customs\s+clearance|receipt\.zip|belly\s+fat|slimming\s+drops|lose\s+weight\s+effortlessly|"
+    r"docusign.*envelope.*signature|pump\s+and\s+dump|telegram\s+signals|100x\s+gem|"
+    r"account\s+has\s+been\s+restricted|verify\s+your\s+identity.*login|"
+    r"password\s+expires|mailbox\s+deactivation|portal-verify|"
+    r"icloud\s+storage\s+is\s+full|storage\s+limit\s+has\s+been\s+exceeded|"
+    r"office\s+suites\s+available|luxury\s+class\s+a\s+office|commercial\s+spaces\s+realty|"
+    r"redesign\s+your\s+website\s+for|cheap.*developers|"
+    r"verified\s+decision\s+maker\s+emails|verified\s+database\s+of.*emails)\b",
+    flags=re.IGNORECASE | re.DOTALL,
 )
 
 PROMPT_INJECTION_REGEX = re.compile(
-    r"(?i)\b(?:ignore\s+all\s+previous\s+instructions|system\s+override|disregard\s+all\s+prior|"
-    r"you\s+are\s+now\s+DAN|output\s+the\s+system\s+prompt|new\s+system\s+directive)\b"
+    r"\b(?:ignore\s+all\s+previous\s+instructions|system\s+override|disregard\s+all\s+prior|"
+    r"you\s+are\s+now\s+DAN|output\s+the\s+system\s+prompt|new\s+system\s+directive|"
+    r"system\s+instruction\s+override|decode\s+this\s+base64|execute\s+the\s+decoded|"
+    r"pretend\s+you\s+are.*grandmother|grandma.*read\s+me.*system\s+prompt)\b",
+    flags=re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -170,6 +184,14 @@ class JevClient:
         self, subject: str, body: str, sender: str
     ) -> Optional[Dict[str, Any]]:
         """Invokes Groq fast model as fallback classifier."""
+        if (
+            not self.groq_api_key
+            or self.groq_api_key.startswith("your_")
+            or "placeholder" in self.groq_api_key.lower()
+            or "dummy" in self.groq_api_key.lower()
+        ):
+            return None
+
         try:
             from langchain_groq import ChatGroq
             from langchain_core.messages import HumanMessage, SystemMessage
@@ -251,3 +273,8 @@ class JevClient:
             "threat_details": None,
             "classifier_used": "heuristic_fallback",
         }
+
+
+# Convenient alias for architectural consistency
+JevAIClient = JevClient
+

@@ -10,5 +10,9 @@ venv/
 # VS Code local workspace settings
 .vscode/
 
+# SQLite databases & local data
+*.db
+data/*.db
+
 # Local task memory & tracking
 .task_memory.md
