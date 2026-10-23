@@ -8,6 +8,7 @@ This module provides high-availability spam and security classification:
 
 import json
 import logging
+import math
 import os
 import re
 from typing import Any, Dict, Optional
@@ -55,6 +56,165 @@ PROMPT_INJECTION_REGEX = re.compile(
     r"pretend\s+you\s+are.*grandmother|grandma.*read\s+me.*system\s+prompt)\b)",
     flags=re.IGNORECASE | re.DOTALL,
 )
+
+
+def normalize_result(
+    raw: Any, config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Normalizes and validates a classifier output dictionary to fail closed.
+
+    Enforces strict safety invariants:
+    1. Result must be a dictionary.
+    2. Jev probability values (e.g. p_spam, p_threat) outside [0.0, 1.0] invalidate the result -> manual_review.
+    3. Decision must be stripped and lowercased; unknown or missing decisions default to 'manual_review'.
+    4. Confidence is clamped to [0.0, 1.0]; None, NaN, or non-numeric values default to 0.0.
+    5. If is_threat is True, decision is forced to at least 'manual_review'.
+    6. If decision is 'legitimate' but confidence < llm.confidence_threshold (default 0.70), diverts to 'manual_review'.
+
+    Args:
+        raw: Raw classifier output dictionary from Jev, Groq, or regex heuristics.
+        config: Optional configuration dictionary containing llm.confidence_threshold.
+
+    Returns:
+        Standardized dictionary containing:
+            - decision: 'legitimate', 'spam', or 'manual_review'
+            - confidence: float clamped to [0.0, 1.0]
+            - is_spam: bool
+            - is_threat: bool
+            - threat_details: Optional[str]
+            - classifier_used: str
+    """
+    if not isinstance(raw, dict):
+        return {
+            "decision": "manual_review",
+            "confidence": 0.0,
+            "is_spam": False,
+            "is_threat": False,
+            "threat_details": None,
+            "classifier_used": "unknown",
+        }
+
+    classifier_used = str(raw.get("classifier_used") or "unknown")
+
+    # 1. Jev probabilities validation: probabilities outside 0..1 invalidate the entire result
+    for key in ("p_spam", "p_threat"):
+        if key in raw and raw[key] is not None:
+            try:
+                p_val = float(raw[key])
+                if not (0.0 <= p_val <= 1.0) or math.isnan(p_val) or math.isinf(p_val):
+                    return {
+                        "decision": "manual_review",
+                        "confidence": 0.0,
+                        "is_spam": False,
+                        "is_threat": False,
+                        "threat_details": f"Invalid {key} probability range: {raw[key]}",
+                        "classifier_used": classifier_used if classifier_used != "unknown" else "jev",
+                    }
+            except (ValueError, TypeError):
+                return {
+                    "decision": "manual_review",
+                    "confidence": 0.0,
+                    "is_spam": False,
+                    "is_threat": False,
+                    "threat_details": f"Invalid {key} probability value: {raw[key]}",
+                    "classifier_used": classifier_used if classifier_used != "unknown" else "jev",
+                }
+
+    if isinstance(raw.get("answers"), dict):
+        answers = raw["answers"]
+        for q in ("is_spam", "is_threat"):
+            if isinstance(answers.get(q), dict) and "noul" in answers[q]:
+                try:
+                    p_val = float(answers[q]["noul"])
+                    if not (0.0 <= p_val <= 1.0) or math.isnan(p_val) or math.isinf(p_val):
+                        return {
+                            "decision": "manual_review",
+                            "confidence": 0.0,
+                            "is_spam": False,
+                            "is_threat": False,
+                            "threat_details": f"Invalid Jev answers.{q}.noul probability range: {answers[q]['noul']}",
+                            "classifier_used": classifier_used if classifier_used != "unknown" else "jev",
+                        }
+                except (ValueError, TypeError):
+                    return {
+                        "decision": "manual_review",
+                        "confidence": 0.0,
+                        "is_spam": False,
+                        "is_threat": False,
+                        "threat_details": f"Invalid Jev answers.{q}.noul probability value: {answers[q]['noul']}",
+                        "classifier_used": classifier_used if classifier_used != "unknown" else "jev",
+                    }
+
+    # 2. Decision parsing: lowercase & strip; anything other than legitimate/spam/manual_review -> manual_review
+    raw_decision = raw.get("decision")
+    if raw_decision is None or not isinstance(raw_decision, str):
+        decision = "manual_review"
+    else:
+        decision = raw_decision.strip().lower()
+        if decision not in ("legitimate", "spam", "manual_review"):
+            decision = "manual_review"
+
+    # 3. Confidence parsing: clamp to 0.0..1.0; None, NaN or non-number -> 0.0
+    raw_confidence = raw.get("confidence")
+    if raw_confidence is None or isinstance(raw_confidence, bool):
+        confidence = 0.0
+    else:
+        try:
+            c_float = float(raw_confidence)
+            if math.isnan(c_float) or math.isinf(c_float):
+                confidence = 0.0
+            elif c_float < 0.0:
+                confidence = 0.0
+            elif c_float > 1.0:
+                confidence = 1.0
+            else:
+                confidence = round(c_float, 2)
+        except (ValueError, TypeError):
+            confidence = 0.0
+
+    # 4. Threat parsing & enforcement: is_threat true -> decision becomes at least manual_review
+    raw_threat = raw.get("is_threat")
+    if isinstance(raw_threat, str):
+        is_threat = raw_threat.strip().lower() in ("true", "1", "yes")
+    else:
+        is_threat = bool(raw_threat)
+
+    threat_details = raw.get("threat_details")
+    if is_threat:
+        if decision == "legitimate":
+            decision = "manual_review"
+        if not threat_details:
+            threat_details = "Adversarial threat detected"
+
+    # 5. Threshold enforcement: legitimate with confidence < threshold -> manual_review
+    threshold = 0.70
+    if isinstance(config, dict):
+        llm_cfg = config.get("llm")
+        if isinstance(llm_cfg, dict):
+            try:
+                threshold = float(llm_cfg.get("confidence_threshold", 0.70))
+            except (ValueError, TypeError):
+                threshold = 0.70
+        elif "confidence_threshold" in config:
+            try:
+                threshold = float(config.get("confidence_threshold", 0.70))
+            except (ValueError, TypeError):
+                threshold = 0.70
+
+    if decision == "legitimate" and confidence < threshold:
+        decision = "manual_review"
+
+    # 6. Spam flag consistency
+    is_spam = (decision == "spam")
+
+    return {
+        "decision": decision,
+        "confidence": confidence,
+        "is_spam": is_spam,
+        "is_threat": is_threat,
+        "threat_details": threat_details,
+        "classifier_used": classifier_used,
+    }
 
 
 class JevClientError(Exception):
@@ -204,6 +364,8 @@ class JevClient:
         if result is None:
             result = self._heuristic_fallback(subject=subject, body=body, sender=sender)
 
+        result = normalize_result(result, self.config)
+
         # Always-on single structured log line per email evaluation
         logger.info(
             f"[Gatekeeper] Email evaluated by engine='{result['classifier_used']}' -> "
@@ -289,8 +451,33 @@ class JevClient:
                 logger.warning("Jev API answers missing 'noul' probability values.")
                 return None
 
-            p_spam = float(p_spam_raw)
-            p_threat = float(p_threat_raw)
+            try:
+                p_spam = float(p_spam_raw)
+                p_threat = float(p_threat_raw)
+            except (ValueError, TypeError):
+                logger.warning("Jev API answers have non-numeric 'noul' values.")
+                return None
+
+            # Fail closed on invalid probability range: outside 0..1 must produce manual_review
+            if (
+                not (0.0 <= p_spam <= 1.0)
+                or not (0.0 <= p_threat <= 1.0)
+                or math.isnan(p_spam)
+                or math.isnan(p_threat)
+            ):
+                logger.warning(
+                    f"Jev API returned invalid probability range: p_spam={p_spam}, p_threat={p_threat}"
+                )
+                return {
+                    "decision": "manual_review",
+                    "confidence": 0.0,
+                    "is_spam": False,
+                    "is_threat": False,
+                    "threat_details": f"Invalid Jev probability values: p_spam={p_spam}, p_threat={p_threat}",
+                    "classifier_used": "jev",
+                    "p_spam": p_spam,
+                    "p_threat": p_threat,
+                }
 
             # Map probabilities to standardized triage schema
             if p_threat >= 0.5:
@@ -319,6 +506,8 @@ class JevClient:
                 "is_threat": is_threat,
                 "threat_details": threat_details,
                 "classifier_used": "jev",
+                "p_spam": p_spam,
+                "p_threat": p_threat,
             }
 
         except Exception as exc:
@@ -358,20 +547,8 @@ class JevClient:
                 content = content.split("```")[-1].split("```")[0].strip()
 
             data = json.loads(content)
-            decision = data.get("decision", "legitimate")
-            if decision not in ("legitimate", "spam", "manual_review"):
-                decision = "legitimate"
-
-            confidence = round(float(data.get("confidence", 0.85)), 2)
-
-            return {
-                "decision": decision,
-                "confidence": confidence,
-                "is_spam": bool(data.get("is_spam", decision == "spam")),
-                "is_threat": bool(data.get("is_threat", False)),
-                "threat_details": data.get("threat_details"),
-                "classifier_used": "groq",
-            }
+            data["classifier_used"] = "groq"
+            return normalize_result(data, self.config)
         except Exception as exc:
             logger.warning(f"Groq fallback classifier failed: {exc}")
             return None

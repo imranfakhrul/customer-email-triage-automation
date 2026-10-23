@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 from utils.config import validate_config
-from utils.jev_client import JevClient
+from utils.jev_client import JevClient, normalize_result
 
 
 class TestJevClient(unittest.TestCase):
@@ -158,6 +158,23 @@ class TestJevClient(unittest.TestCase):
                 self.assertEqual(result["classifier_used"], "regex")
                 mock_post.assert_not_called()
 
+    @patch("requests.post")
+    def test_jev_api_negative_p_spam_returns_manual_review(self, mock_post):
+        """Verifies fix A4: Jev API returning p_spam = -1 fails closed to manual_review."""
+        mock_post.return_value = self._make_mock_response(200, p_spam=-1.0, p_threat=0.01)
+        client = JevClient(config=self.mock_config, api_key="test_real_key_123")
+
+        result = client.classify(
+            subject="Hello",
+            body="Normal billing inquiry",
+            sender="customer@corp.com",
+        )
+
+        self.assertEqual(result["decision"], "manual_review")
+        self.assertEqual(result["confidence"], 0.0)
+        self.assertFalse(result["is_spam"])
+        self.assertEqual(result["classifier_used"], "jev")
+
     def test_config_threshold_validation(self):
         """Verifies 0.0 < LO < HI < 1.0 constraint validation on configuration."""
         # Valid config
@@ -185,6 +202,156 @@ class TestJevClient(unittest.TestCase):
         }
         with self.assertRaises(ValueError):
             validate_config(out_of_bounds_cfg)
+
+
+class TestNormalizeResultTableDriven(unittest.TestCase):
+    def test_normalize_result_table_driven_cases(self):
+        """Table-driven test looping over all required classifier normalization cases.
+
+        Verifies:
+        - unknown decision
+        - missing decision
+        - confidence 5.0 / -3 / None / NaN
+        - Jev p_spam = -1
+        - is_threat true with decision legitimate
+        - legitimate with confidence 0.30
+        - a normal legitimate 0.95 (must stay legitimate)
+        - a normal spam 0.95 (must stay spam)
+        """
+        cases = [
+            {
+                "name": "unknown decision",
+                "raw": {"decision": "quarantine", "confidence": 0.85},
+                "config": None,
+                "expected_decision": "manual_review",
+                "expected_confidence": 0.85,
+                "expected_is_threat": False,
+                "expected_is_spam": False,
+            },
+            {
+                "name": "missing decision",
+                "raw": {"confidence": 0.85},
+                "config": None,
+                "expected_decision": "manual_review",
+                "expected_confidence": 0.85,
+                "expected_is_threat": False,
+                "expected_is_spam": False,
+            },
+            {
+                "name": "confidence 5.0",
+                "raw": {"decision": "legitimate", "confidence": 5.0},
+                "config": None,
+                "expected_decision": "legitimate",
+                "expected_confidence": 1.0,
+                "expected_is_threat": False,
+                "expected_is_spam": False,
+            },
+            {
+                "name": "confidence -3",
+                "raw": {"decision": "legitimate", "confidence": -3},
+                "config": None,
+                "expected_decision": "manual_review",
+                "expected_confidence": 0.0,
+                "expected_is_threat": False,
+                "expected_is_spam": False,
+            },
+            {
+                "name": "confidence None",
+                "raw": {"decision": "legitimate", "confidence": None},
+                "config": None,
+                "expected_decision": "manual_review",
+                "expected_confidence": 0.0,
+                "expected_is_threat": False,
+                "expected_is_spam": False,
+            },
+            {
+                "name": "confidence NaN",
+                "raw": {"decision": "legitimate", "confidence": float("nan")},
+                "config": None,
+                "expected_decision": "manual_review",
+                "expected_confidence": 0.0,
+                "expected_is_threat": False,
+                "expected_is_spam": False,
+            },
+            {
+                "name": "Jev p_spam = -1",
+                "raw": {"decision": "legitimate", "confidence": 0.95, "p_spam": -1},
+                "config": None,
+                "expected_decision": "manual_review",
+                "expected_confidence": 0.0,
+                "expected_is_threat": False,
+                "expected_is_spam": False,
+            },
+            {
+                "name": "is_threat true with decision legitimate",
+                "raw": {"decision": "legitimate", "confidence": 0.95, "is_threat": True},
+                "config": None,
+                "expected_decision": "manual_review",
+                "expected_confidence": 0.95,
+                "expected_is_threat": True,
+                "expected_is_spam": False,
+            },
+            {
+                "name": "legitimate with confidence 0.30",
+                "raw": {"decision": "legitimate", "confidence": 0.30},
+                "config": None,
+                "expected_decision": "manual_review",
+                "expected_confidence": 0.30,
+                "expected_is_threat": False,
+                "expected_is_spam": False,
+            },
+            {
+                "name": "a normal legitimate 0.95 (must stay legitimate)",
+                "raw": {"decision": "legitimate", "confidence": 0.95},
+                "config": None,
+                "expected_decision": "legitimate",
+                "expected_confidence": 0.95,
+                "expected_is_threat": False,
+                "expected_is_spam": False,
+            },
+            {
+                "name": "a normal spam 0.95 (must stay spam)",
+                "raw": {"decision": "spam", "confidence": 0.95},
+                "config": None,
+                "expected_decision": "spam",
+                "expected_confidence": 0.95,
+                "expected_is_threat": False,
+                "expected_is_spam": True,
+            },
+            {
+                "name": "non-numeric confidence",
+                "raw": {"decision": "legitimate", "confidence": "not-a-number"},
+                "config": None,
+                "expected_decision": "manual_review",
+                "expected_confidence": 0.0,
+                "expected_is_threat": False,
+                "expected_is_spam": False,
+            },
+        ]
+
+        for case in cases:
+            with self.subTest(case=case["name"]):
+                res = normalize_result(case["raw"], case["config"])
+                self.assertEqual(
+                    res["decision"],
+                    case["expected_decision"],
+                    f"Case '{case['name']}' failed decision: expected {case['expected_decision']}, got {res['decision']}",
+                )
+                self.assertEqual(
+                    res["confidence"],
+                    case["expected_confidence"],
+                    f"Case '{case['name']}' failed confidence: expected {case['expected_confidence']}, got {res['confidence']}",
+                )
+                self.assertEqual(
+                    res["is_threat"],
+                    case["expected_is_threat"],
+                    f"Case '{case['name']}' failed is_threat",
+                )
+                self.assertEqual(
+                    res["is_spam"],
+                    case["expected_is_spam"],
+                    f"Case '{case['name']}' failed is_spam",
+                )
 
 
 if __name__ == "__main__":

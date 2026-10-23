@@ -520,6 +520,112 @@ class TestJevGatekeeper(unittest.TestCase):
         self.assertNotIn(email_secret_subject, joined_logs)
         self.assertNotIn(email_secret_body, joined_logs)
 
+    def test_gatekeeper_normalizes_unrecognized_decision_to_manual_review(self):
+        """Verifies fix A4: gatekeeper normalizes unknown/unrecognized decisions to manual_review."""
+        self.db.check_and_acquire("em_unknown_dec_01", "th_unknown_dec_01")
+        mock_client = MagicMock()
+        mock_client.classify.return_value = {
+            "decision": "UNRECOGNIZED_ACTION",
+            "confidence": 0.95,
+            "is_spam": False,
+            "is_threat": False,
+            "threat_details": None,
+        }
+
+        state: TriageState = {
+            "email_id": "em_unknown_dec_01",
+            "message_id": "msg_unknown_dec_01",
+            "thread_id": "th_unknown_dec_01",
+            "sender_email": "user@corp.com",
+            "sender_domain": "corp.com",
+            "email_subject": "Testing normalization",
+            "email_body": "Hello support",
+            "raw_body": "Hello support",
+            "has_attachments": False,
+            "cleaned_body": "Hello support",
+            "masked_body": "Hello support",
+            "masked_subject": "Testing normalization",
+            "token_map": {},
+            "is_sensitive": False,
+            "sensitive_reason": None,
+            "is_spam": None,
+            "gatekeeper_decision": None,
+            "gatekeeper_confidence": None,
+            "is_threat": None,
+            "threat_details": None,
+            "customer_tier": None,
+            "sla_target": None,
+            "classification": None,
+            "labels_to_apply": [],
+            "is_starred": False,
+            "dispatch_target": None,
+            "dispatch_status": "processing",
+            "retry_count": 0,
+            "error_message": None,
+            "routing_status": "processing",
+            "is_active_thread": False,
+        }
+
+        output = jev_gatekeeper_node(state, client=mock_client, db=self.db)
+
+        self.assertEqual(output["gatekeeper_decision"], "manual_review")
+        self.assertEqual(output["routing_status"], "manual_review")
+        self.assertEqual(output["dispatch_target"], "Review/Manual")
+        self.assertEqual(should_route_after_gatekeeper(output), "end")
+
+    def test_gatekeeper_normalizes_low_confidence_legitimate_to_manual_review(self):
+        """Verifies fix A4: legitimate decision with confidence below 0.70 threshold becomes manual_review."""
+        self.db.check_and_acquire("em_low_conf_01", "th_low_conf_01")
+        mock_client = MagicMock()
+        mock_client.classify.return_value = {
+            "decision": "legitimate",
+            "confidence": 0.40,
+            "is_spam": False,
+            "is_threat": False,
+            "threat_details": None,
+        }
+
+        state: TriageState = {
+            "email_id": "em_low_conf_01",
+            "message_id": "msg_low_conf_01",
+            "thread_id": "th_low_conf_01",
+            "sender_email": "user@corp.com",
+            "sender_domain": "corp.com",
+            "email_subject": "Testing low confidence",
+            "email_body": "Low confidence email",
+            "raw_body": "Low confidence email",
+            "has_attachments": False,
+            "cleaned_body": "Low confidence email",
+            "masked_body": "Low confidence email",
+            "masked_subject": "Testing low confidence",
+            "token_map": {},
+            "is_sensitive": False,
+            "sensitive_reason": None,
+            "is_spam": None,
+            "gatekeeper_decision": None,
+            "gatekeeper_confidence": None,
+            "is_threat": None,
+            "threat_details": None,
+            "customer_tier": None,
+            "sla_target": None,
+            "classification": None,
+            "labels_to_apply": [],
+            "is_starred": False,
+            "dispatch_target": None,
+            "dispatch_status": "processing",
+            "retry_count": 0,
+            "error_message": None,
+            "routing_status": "processing",
+            "is_active_thread": False,
+        }
+
+        output = jev_gatekeeper_node(state, client=mock_client, db=self.db)
+
+        self.assertEqual(output["gatekeeper_decision"], "manual_review")
+        self.assertEqual(output["routing_status"], "manual_review")
+        self.assertEqual(output["dispatch_target"], "Review/Manual")
+        self.assertEqual(should_route_after_gatekeeper(output), "end")
+
 
 if __name__ == "__main__":
     unittest.main()

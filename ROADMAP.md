@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[A4] Fail-Closed Classifier Normalization**
+**Next up:** **[A3] Prevent Groq LLM Prompt Injection Attacks**
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -37,7 +37,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **1** | **A1** | Security | Mask subject line & sender address domain before egress to Jev/Groq | ✅ Resolved |
 | **2** | **A2** | Security | Suppress raw `token_map` from `main.py` CLI and logs; print entity counts | ✅ Resolved |
 | **3** | **A3** | Security | Guard against Groq prompt injection with pre-filter & randomized delimiter tags | ⏳ Pending |
-| **4** | **A4** | Security | Enforce fail-closed classifier normalization (`normalize_result`) with 0.70 threshold | ⏳ Pending |
+| **4** | **A4** | Security | Enforce fail-closed classifier normalization (`normalize_result`) with 0.70 threshold | ✅ Resolved |
 | **5** | **A5** | Security | Harden active-thread detection against spoofing & unapproved thread history | 🟡 Partially Done |
 | **6** | **A6** | Security | Eliminate ReDoS vulnerabilities in heuristic regexes & limit input length | ⏳ Pending |
 | **7** | **A7** | Security | Defeat sensitive keyword evasion (NFKC, zero-width, Cyrillic/Greek homoglyphs, broad chargeback) | ✅ Resolved (`c75f0b5`) |
@@ -88,6 +88,7 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Tests verify that an adversarial injection payload diverts to `manual_review` without calling Groq, and that outgoing Groq prompts contain dynamic nonce tags.
 
 ### [A4] Fail-Closed Classifier Normalization
+* **Status:** ✅ **Resolved**
 * **Problem:** The gatekeeper fails open: unknown decisions default to `"legitimate"`, out-of-range confidence scores are accepted, and the confidence threshold (`llm.confidence_threshold` in config, default 0.70) is never enforced in code.
 * **Solution:** Implement a unified `normalize_result(raw) -> dict` function:
   1. Unknown or malformed decisions default to `"manual_review"`.

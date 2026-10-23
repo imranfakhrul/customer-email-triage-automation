@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 import logging
 from db.database import TriageDatabase
 from state import TriageState
-from utils.jev_client import JevClient
+from utils.jev_client import JevClient, normalize_result
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +95,12 @@ def jev_gatekeeper_node(
 
     # 1. Gatekeeper Evaluation (Jev AI -> Groq Fallback -> Heuristics)
     # Active thread replies are fully inspected for threats, injections, and spam
-    result = client.classify(subject=subject, body=body, sender=sender)
-    decision = result.get("decision", "legitimate")
-    confidence = float(result.get("confidence", 0.85))
+    raw_result = client.classify(subject=subject, body=body, sender=sender)
+    client_config = getattr(client, "config", None)
+    result = normalize_result(raw_result, config=client_config)
+
+    decision = result.get("decision", "manual_review")
+    confidence = float(result.get("confidence", 0.0))
     is_spam = bool(result.get("is_spam", decision == "spam"))
     is_threat = bool(result.get("is_threat", False))
     threat_details = result.get("threat_details")
@@ -214,7 +217,7 @@ def should_route_after_gatekeeper(state: TriageState) -> str:
         'end' if email is spam or routed to manual review; 'continue' if approved.
     """
     decision = state.get("gatekeeper_decision")
-    if decision in ("spam", "manual_review"):
+    if decision != "legitimate":
         return "end"
 
     return "continue"
