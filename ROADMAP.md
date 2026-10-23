@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[A1] Mask Subject Line & Sender Address Before AI Egress**
+**Next up:** **[A2] Suppress Raw `token_map` from CLI and Logs**
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -34,7 +34,7 @@ The following foundational improvements were implemented and merged in earlier P
 
 | # | Code | Area | Description | Status |
 |:---:|:---:|:---|:---|:---:|
-| **1** | **A1** | Security | Mask subject line & sender address domain before egress to Jev/Groq | ⏳ Pending |
+| **1** | **A1** | Security | Mask subject line & sender address domain before egress to Jev/Groq | ✅ Resolved |
 | **2** | **A2** | Security | Suppress raw `token_map` from `main.py` CLI and logs; print entity counts | ⏳ Pending |
 | **3** | **A3** | Security | Guard against Groq prompt injection with pre-filter & randomized delimiter tags | ⏳ Pending |
 | **4** | **A4** | Security | Enforce fail-closed classifier normalization (`normalize_result`) with 0.70 threshold | ⏳ Pending |
@@ -64,10 +64,11 @@ The following foundational improvements were implemented and merged in earlier P
 ## Part A: Security and Privacy
 
 ### [A1] Mask Subject Line & Sender Address Before AI Egress
+* **Status:** ✅ **Resolved**
 * **Problem:** The PII masker currently masks only the email body. The raw subject line (which may contain names and credit cards) and raw sender email address are transmitted unmasked to Jev AI and Groq.
 * **Solution:** 
   1. Mask `email_subject` in `pii_masker_node` using the same `token_map`, storing it as `masked_subject` in `TriageState`.
-  2. Send `masked_subject` (never raw subject) to external classifiers.
+  2. Send `masked_subject` (never raw subject) to external classifiers. Fail closed to `manual_review` without calling external AI if `masked_subject` is missing.
   3. Send only the sender domain (e.g., `example.com`), omitting the personal username portion.
 * **Done When:** Test feeds an email with subject PII and asserts external mocked API calls receive only redacted tokens and domain.
 

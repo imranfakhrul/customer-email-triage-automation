@@ -143,6 +143,23 @@ class JevClient:
                 JevClient._startup_warned = True
 
     @staticmethod
+    def _extract_domain(sender: str) -> str:
+        """Extracts the domain portion of an email address or sender string.
+
+        Args:
+            sender: Email address, sender string, or domain.
+
+        Returns:
+            Domain string (e.g., 'example.com'), or empty string if empty.
+        """
+        if not sender:
+            return ""
+        s = sender.strip()
+        if "@" in s:
+            s = s.split("@")[-1].strip().rstrip(">")
+        return s.lower()
+
+    @staticmethod
     def _is_valid_key(key: Optional[str]) -> bool:
         """Determines if a key string is non-empty and not a placeholder."""
         if not key or not isinstance(key, str):
@@ -207,10 +224,12 @@ class JevClient:
             "User-Agent": "CustomerEmailTriage/1.0",
         }
 
+        sender_domain = self._extract_domain(sender)
+
         payload = {
             "model": self.jev_model,
             "state": {
-                "sender": sender,
+                "sender": sender_domain,
                 "subject": subject,
                 "body": truncated_body,
             },
@@ -322,7 +341,8 @@ class JevClient:
                 timeout=5.0,
             )
 
-            prompt_content = f"Sender: {sender}\nSubject: {subject}\n\nBody:\n{body}"
+            sender_domain = self._extract_domain(sender)
+            prompt_content = f"Sender: {sender_domain}\nSubject: {subject}\n\nBody:\n{body}"
             messages = [
                 SystemMessage(content=GATEKEEPER_SYSTEM_PROMPT),
                 HumanMessage(content=prompt_content),

@@ -40,7 +40,41 @@ def jev_gatekeeper_node(
     if client is None:
         client = JevClient()
 
-    subject = state.get("email_subject") or ""
+    # Fail-closed privacy safeguard: if masked_subject is missing/None, do not egress to AI
+    subject = state.get("masked_subject")
+    if subject is None:
+        logger.warning(
+            f"[Gatekeeper] Email '{email_id}' missing masked_subject; "
+            "failing closed to manual_review without external AI calls."
+        )
+        existing_labels = list(state.get("labels_to_apply") or [])
+        if "Review/Manual" not in existing_labels:
+            existing_labels.append("Review/Manual")
+
+        if db is not None and email_id:
+            try:
+                db.mark_done(
+                    email_id=email_id,
+                    routing_status="manual_review",
+                    dispatch_target="Review/Manual",
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to record manual review diversion in DB: {exc}")
+
+        return {
+            "gatekeeper_decision": "manual_review",
+            "is_spam": False,
+            "gatekeeper_confidence": 0.0,
+            "is_threat": False,
+            "threat_details": "Missing masked_subject privacy safeguard triggered",
+            "classifier_used": "fail_closed",
+            "labels_to_apply": existing_labels,
+            "is_starred": True,
+            "dispatch_target": "Review/Manual",
+            "dispatch_status": "done",
+            "routing_status": "manual_review",
+        }
+
     # Use masked_body if available to protect PII, falling back to cleaned or raw body
     body = (
         state.get("masked_body")
@@ -49,7 +83,15 @@ def jev_gatekeeper_node(
         or state.get("raw_body")
         or ""
     )
-    sender = state.get("sender_email") or ""
+
+    # Send only the sender domain (never the full email address or username)
+    sender = state.get("sender_domain") or ""
+    if not sender:
+        sender_email = state.get("sender_email") or ""
+        if "@" in sender_email:
+            sender = sender_email.split("@")[-1].strip().rstrip(">").lower()
+        else:
+            sender = sender_email
 
     # 1. Gatekeeper Evaluation (Jev AI -> Groq Fallback -> Heuristics)
     # Active thread replies are fully inspected for threats, injections, and spam

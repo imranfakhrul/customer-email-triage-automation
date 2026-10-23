@@ -291,6 +291,7 @@ class TestSensitiveSkip(unittest.TestCase):
             "has_attachments": False,
             "cleaned_body": original_greek_cyrillic,
             "masked_body": original_greek_cyrillic,
+            "masked_subject": subject_line,
             "token_map": {},
             "is_sensitive": False,
             "sensitive_reason": None,

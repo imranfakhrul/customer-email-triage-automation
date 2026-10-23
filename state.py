@@ -69,6 +69,7 @@ class TriageState(TypedDict):
     # Local Privacy & Masking (Nodes 02, 03 & 10)
     cleaned_body: Optional[str]
     masked_body: Optional[str]
+    masked_subject: Optional[str]
     token_map: Dict[str, str]
 
     # Sensitive-Skip Guardrail (Node 04)

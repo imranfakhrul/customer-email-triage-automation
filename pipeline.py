@@ -68,6 +68,7 @@ def prepare_initial_state(payload: Dict[str, Any]) -> TriageState:
         "is_active_thread": payload.get("is_active_thread"),
         "cleaned_body": payload.get("cleaned_body"),
         "masked_body": payload.get("masked_body"),
+        "masked_subject": payload.get("masked_subject"),
         "token_map": dict(payload.get("token_map") or {}),
         "is_sensitive": bool(payload.get("is_sensitive", False)),
         "sensitive_reason": payload.get("sensitive_reason"),

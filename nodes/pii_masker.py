@@ -185,30 +185,51 @@ def reset_tech_terms_cache() -> None:
 def mask_pii(
     text: str,
     spacy_model_name: Optional[str] = None,
+    token_map: Optional[Dict[str, str]] = None,
 ) -> Tuple[str, Dict[str, str]]:
     """Sanitizes text by replacing PII with anonymized placeholder tokens.
 
     Args:
         text: Input text string to sanitize.
         spacy_model_name: Optional spaCy model override.
+        token_map: Optional existing token map to reuse tokens and counters across texts.
 
     Returns:
         Tuple of (masked_text, token_map) where token_map maps [TOKEN_N] -> original value.
     """
-    if not text:
-        return "", {}
+    if token_map is None:
+        token_map = {}
+        value_to_token: Dict[str, str] = {}
+        entity_counters: Dict[str, int] = {
+            "API_KEY": 0,
+            "CREDIT_CARD": 0,
+            "SSN": 0,
+            "EMAIL": 0,
+            "PHONE": 0,
+            "IP_ADDRESS": 0,
+            "PERSON": 0,
+        }
+    else:
+        token_map = dict(token_map)
+        value_to_token = {v: k for k, v in token_map.items()}
+        entity_counters = {
+            "API_KEY": 0,
+            "CREDIT_CARD": 0,
+            "SSN": 0,
+            "EMAIL": 0,
+            "PHONE": 0,
+            "IP_ADDRESS": 0,
+            "PERSON": 0,
+        }
+        for tok in token_map.keys():
+            m = re.match(r"^\[([A-Z_]+)_(\d+)\]$", tok)
+            if m:
+                etype, idx = m.group(1), int(m.group(2))
+                if etype in entity_counters:
+                    entity_counters[etype] = max(entity_counters[etype], idx)
 
-    token_map: Dict[str, str] = {}
-    value_to_token: Dict[str, str] = {}
-    entity_counters: Dict[str, int] = {
-        "API_KEY": 0,
-        "CREDIT_CARD": 0,
-        "SSN": 0,
-        "EMAIL": 0,
-        "PHONE": 0,
-        "IP_ADDRESS": 0,
-        "PERSON": 0,
-    }
+    if not text:
+        return "", token_map
 
     def get_or_create_token(entity_type: str, original_val: str) -> str:
         if original_val in value_to_token:
@@ -314,6 +335,12 @@ def mask_pii(
             token = get_or_create_token("PERSON", val)
             working = working[:start_char] + token + working[end_char:]
 
+    # 8. Consistency Pass: Ensure any pre-existing tokens from token_map are replaced
+    for val, token in sorted(value_to_token.items(), key=lambda x: len(x[0]), reverse=True):
+        if len(val) >= 2 and val in working:
+            pattern = re.compile(rf"\b{re.escape(val)}\b")
+            working = pattern.sub(token, working)
+
     return working, token_map
 
 
@@ -345,19 +372,27 @@ def pii_masker_node(
     """LangGraph node execution function for local PII masking.
 
     Args:
-        state: Pipeline state containing 'cleaned_body' or 'email_body'.
+        state: Pipeline state containing 'cleaned_body' or 'email_body' and 'email_subject'.
         spacy_model_name: Optional spaCy model override.
 
     Returns:
-        Dictionary update with 'masked_body' and 'token_map'.
+        Dictionary update with 'masked_subject', 'masked_body', and 'token_map'.
     """
+    subject = state.get("email_subject") or ""
     body = state.get("cleaned_body")
     if body is None:
         body = state.get("email_body") or state.get("raw_body") or ""
 
-    masked_body, token_map = mask_pii(body, spacy_model_name=spacy_model_name)
+    token_map = dict(state.get("token_map") or {})
+    masked_subject, token_map = mask_pii(
+        subject, spacy_model_name=spacy_model_name, token_map=token_map
+    )
+    masked_body, token_map = mask_pii(
+        body, spacy_model_name=spacy_model_name, token_map=token_map
+    )
 
     return {
+        "masked_subject": masked_subject,
         "masked_body": masked_body,
         "token_map": token_map,
     }

@@ -130,6 +130,7 @@ class TestPiiMasker(unittest.TestCase):
             "has_attachments": False,
             "cleaned_body": "Please contact Robert at robert@client.com or call 555-888-9999.",
             "masked_body": None,
+            "masked_subject": None,
             "token_map": {},
             "is_sensitive": False,
             "sensitive_reason": None,
@@ -154,10 +155,79 @@ class TestPiiMasker(unittest.TestCase):
         output = pii_masker_node(state)
 
         self.assertIn("masked_body", output)
+        self.assertIn("masked_subject", output)
+        self.assertEqual(output["masked_subject"], "Leaked Token Issue")
         self.assertIn("token_map", output)
         self.assertNotIn("robert@client.com", output["masked_body"])
         self.assertNotIn("555-888-9999", output["masked_body"])
         self.assertIn("[EMAIL_1]", output["masked_body"])
+
+    def test_subject_and_body_shared_token_map(self):
+        """Verifies subject and body share the same token_map, matching the same entities."""
+        state: TriageState = {
+            "email_id": "em_pii_shared_01",
+            "message_id": "msg_pii_shared_01",
+            "thread_id": "th_pii_shared_01",
+            "sender_email": "alice.smith@corporate.com",
+            "sender_domain": "corporate.com",
+            "email_subject": "Billing issue for Alice Smith (alice.smith@corporate.com) card 4111 2222 3333 4444",
+            "email_body": "Hello, my name is Alice Smith and my email is alice.smith@corporate.com.",
+            "raw_body": "Hello, my name is Alice Smith and my email is alice.smith@corporate.com.",
+            "has_attachments": False,
+            "cleaned_body": "Hello, my name is Alice Smith and my email is alice.smith@corporate.com.",
+            "masked_body": None,
+            "masked_subject": None,
+            "token_map": {},
+            "is_sensitive": False,
+            "sensitive_reason": None,
+            "is_spam": None,
+            "gatekeeper_decision": None,
+            "gatekeeper_confidence": None,
+            "is_threat": None,
+            "threat_details": None,
+            "customer_tier": None,
+            "sla_target": None,
+            "classification": None,
+            "labels_to_apply": [],
+            "is_starred": False,
+            "dispatch_target": None,
+            "dispatch_status": "processing",
+            "retry_count": 0,
+            "error_message": None,
+            "routing_status": "processing",
+            "is_active_thread": False,
+        }
+
+        output = pii_masker_node(state)
+
+        # Subject assertions
+        self.assertNotIn("Alice Smith", output["masked_subject"])
+        self.assertNotIn("alice.smith@corporate.com", output["masked_subject"])
+        self.assertNotIn("4111 2222 3333 4444", output["masked_subject"])
+
+        # Body assertions
+        self.assertNotIn("Alice Smith", output["masked_body"])
+        self.assertNotIn("alice.smith@corporate.com", output["masked_body"])
+
+        # Token map consistency: same entity gets same token in subject and body
+        person_token = output["token_map"].get("[PERSON_1]")
+        self.assertEqual(person_token, "Alice Smith")
+        self.assertIn("[PERSON_1]", output["masked_subject"])
+        self.assertIn("[PERSON_1]", output["masked_body"])
+
+        email_token = output["token_map"].get("[EMAIL_1]")
+        self.assertEqual(email_token, "alice.smith@corporate.com")
+        self.assertIn("[EMAIL_1]", output["masked_subject"])
+        self.assertIn("[EMAIL_1]", output["masked_body"])
+
+        # Credit card token present in token_map
+        card_token = output["token_map"].get("[CREDIT_CARD_1]")
+        self.assertEqual(card_token, "4111 2222 3333 4444")
+        self.assertIn("[CREDIT_CARD_1]", output["masked_subject"])
+
+        # Bidirectional unmasking restores original strings exactly
+        self.assertEqual(unmask_text(output["masked_subject"], output["token_map"]), state["email_subject"])
+        self.assertEqual(unmask_text(output["masked_body"], output["token_map"]), state["cleaned_body"])
 
     def test_tech_terms_whitelist_prevents_person_masking(self):
         """Verifies tech whitelist keeps infrastructure and tool names intact while masking person names."""
