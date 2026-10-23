@@ -6,6 +6,30 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ---
 
+## 🎯 Next Up & Recommended Execution Order
+
+**Next up:** **[A1] Mask Subject Line & Sender Address Before AI Egress**
+
+### Recommended Execution Roadmap:
+1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
+2. **State & Concurrency Hardening:** `A5` -> `A6` -> `A11` -> `A9` -> `A10`
+3. **Correctness & Performance (Part B):** `B2` -> `B3` -> `B4` -> `B5` -> `B6`
+4. **Testing, Docs & Packaging:** `C1` -> `C2` -> `C3` -> `C4` -> `A12` -> `A14`
+
+---
+
+## 📋 Completed Before This Review
+
+The following foundational improvements were implemented and merged in earlier Phase 1 iterations (Commits `61658fd` to `03867d1`):
+* **Jev System One Client Alignment (Commit `61658fd`):** Conformed API request/response schema to TypeSafe System One contract (`is_threat`, `threat_details`, `p_spam`, `p_threat`), added startup engine validation, and enabled `classifier_used` tracking.
+* **Thread Bypass Removal & Thread Security (Commit `02650f9`):** Removed unverified active-thread bypass and enforced participant validation for email threads. *(Partially done: see A5 for remaining SQL history and payload guards).*
+* **`gatekeeper_approved` Status Synchronization (Commit `02650f9`):** Implemented `db.mark_done` for approved emails and introduced `get_gatekeeper_approved()` reader.
+* **First Tech-Terms Whitelist (Commit `03867d1`):** Externalized whitelist in `config/tech_terms.txt`, cached loader, and whole-entity matching for `PERSON` spans. *(Partially done: see A10 for remaining surname context guardrails).*
+* **Billing Keyword Intent Phrases (Commit `02650f9`):** Tuned multi-word phrase patterns (`will file a chargeback`, `dispute notice`) for dispute handling.
+* **Signature Stripper First Fix (Commit `02650f9`):** Added preceding body checks for opening lines and preserved short email bodies. *(Fully resolved in B1).*
+
+---
+
 ## 📊 24-Point Remediation Progress Matrix
 
 | # | Code | Area | Description | Status |
@@ -14,17 +38,17 @@ Each issue is implemented individually with corresponding unit tests, verified a
 | **2** | **A2** | Security | Suppress raw `token_map` from `main.py` CLI and logs; print entity counts | ⏳ Pending |
 | **3** | **A3** | Security | Guard against Groq prompt injection with pre-filter & randomized delimiter tags | ⏳ Pending |
 | **4** | **A4** | Security | Enforce fail-closed classifier normalization (`normalize_result`) with 0.70 threshold | ⏳ Pending |
-| **5** | **A5** | Security | Harden active-thread detection against spoofing & unapproved thread history | ⏳ Pending |
+| **5** | **A5** | Security | Harden active-thread detection against spoofing & unapproved thread history | 🟡 Partially Done |
 | **6** | **A6** | Security | Eliminate ReDoS vulnerabilities in heuristic regexes & limit input length | ⏳ Pending |
-| **7** | **A7** | Security | Defeat sensitive keyword evasion (NFKC, zero-width, Cyrillic/Greek homoglyphs, broad chargeback) | ✅ Implemented |
-| **8** | **A8** | Security | Fail fast on startup if spaCy model fails to load while AI keys are active | ⏳ Pending |
+| **7** | **A7** | Security | Defeat sensitive keyword evasion (NFKC, zero-width, Cyrillic/Greek homoglyphs, broad chargeback) | ✅ Resolved (`c75f0b5`) |
+| **8** | **A8** | Security | Fail fast on startup & runtime safeguard if spaCy model is missing while AI keys active | ⏳ Pending |
 | **9** | **A9** | Privacy | Integrate `phonenumbers` library, Luhn credit card check, and collision-safe tokens | ⏳ Pending |
-| **10** | **A10** | Privacy | Contextualize technical terms whitelist to protect real surnames (Jenkins, Kafka, etc.) | ⏳ Pending |
+| **10** | **A10** | Privacy | Contextualize technical terms whitelist to protect real surnames (Jenkins, Kafka, etc.) | 🟡 Partially Done |
 | **11** | **A11** | Concurrency | Atomic SQLite idempotency check-and-claim to prevent multi-worker race conditions | ⏳ Pending |
 | **12** | **A12** | Infrastructure | Run container as non-root `appuser`, fix data volume mounts, and honor `DATABASE_PATH` | ⏳ Pending |
-| **13** | **A13** | Security | Hardened secrets handling: `override=False`, strict Jev host check, redact debug keys | ⏳ Pending |
+| **13** | **A13** | Security | Hardened secrets handling: `override=False`, enforce `api.typesafe.ai` host, redact debug keys | ⏳ Pending |
 | **14** | **A14** | Infrastructure | Pin exact dependency versions in `requirements.txt` and spaCy language model URL | ⏳ Pending |
-| **15** | **B1** | Correctness | Refine signature stripper: RFC 3676, bare `--` code safety, bottom-up scan, >50% guard | ✅ Implemented |
+| **15** | **B1** | Correctness | Refine signature stripper: RFC 3676, bare `--` code safety, bottom-up scan, safety size limit | ✅ Resolved (`8c13658`) |
 | **16** | **B2** | Correctness | Remove generic business words from offline spam heuristics; route threats to manual review | ⏳ Pending |
 | **17** | **B3** | Correctness | Tune sensitive keywords to intent phrases and establish single source in `config.yaml` | ⏳ Pending |
 | **18** | **B4** | Correctness | Harmonize returned state with SQLite database and persist clean text for Phase 2 | ⏳ Pending |
@@ -58,19 +82,23 @@ Each issue is implemented individually with corresponding unit tests, verified a
   1. Run `PROMPT_INJECTION_REGEX` on subject and body *before* invoking any AI; divert matches immediately to `manual_review`.
   2. Enclose customer email text in randomized boundary markers (`<email-XXXXXX>...</email-XXXXXX>`) with explicit system instructions to ignore internal directives.
   3. Strictly validate the returned JSON response structure.
+* **Note on Benchmark Expectations:** Benchmark rows 91-99 and related gatekeeper tests currently assert `routing_status = 'spam_skipped'`. When A3 is implemented, their expected outcome will transition to `manual_review`.
 * **Done When:** Tests verify that an adversarial injection payload diverts to `manual_review` without calling Groq, and that outgoing Groq prompts contain dynamic nonce tags.
 
 ### [A4] Fail-Closed Classifier Normalization
-* **Problem:** The gatekeeper fails open: unknown decisions default to `"legitimate"`, out-of-range confidence scores are accepted, and the `0.70` confidence threshold in config is never enforced in code.
+* **Problem:** The gatekeeper fails open: unknown decisions default to `"legitimate"`, out-of-range confidence scores are accepted, and the confidence threshold (`llm.confidence_threshold` in config, default 0.70) is never enforced in code.
 * **Solution:** Implement a unified `normalize_result(raw) -> dict` function:
   1. Unknown or malformed decisions default to `"manual_review"`.
-  2. Confidence clamped to `[0.0, 1.0]` (NaN/None $\rightarrow$ 0.0).
+  2. Confidence clamped to `[0.0, 1.0]` (NaN/None -> 0.0).
   3. If `is_threat` is True, force decision to at least `"manual_review"`.
-  4. If decision is `"legitimate"` but confidence $< 0.70$, divert to `"manual_review"`.
+  4. If decision is `"legitimate"` but confidence < `config["llm"]["confidence_threshold"]` (default 0.70), divert to `"manual_review"`.
 * **Done When:** Table-driven unit test covers all edge cases (out-of-range confidence, unrecognized decision strings, threat flags).
 
 ### [A5] Harden Active-Thread Verification Against Spoofing
-* **Problem:** (1) Spam emails saved as `status = 'done'` count as conversation history. (2) Empty previous sender evaluates as a participant match. (3) Incoming payload's `is_active_thread` flag is trusted blindly without database history.
+* **Status:** 🟡 **Partially Done**
+  * *Done earlier:* Verified participant addresses against thread history in Commit `02650f9`.
+  * *Still missing:* (1) Restrict SQL history queries strictly to `routing_status = 'gatekeeper_approved'` (currently counts any `status = 'done'`, including spam/sensitive). (2) Disallow empty sender matching; require non-empty exact equality. (3) Initialize `is_active_thread = None` in initial state, ignoring incoming payload claims.
+* **Problem:** A spammer can send an initial email (caught as spam, marked done), then reply to the thread and have it classified as an active customer conversation. Empty senders match any address. Payloads can inject `is_active_thread: true`.
 * **Solution:**
   1. Restrict SQL history queries strictly to `routing_status = 'gatekeeper_approved'`.
   2. Disallow empty sender matching; require non-empty exact equality.
@@ -82,23 +110,26 @@ Each issue is implemented individually with corresponding unit tests, verified a
 * **Solution:**
   1. Replace unbounded `.*` with bounded matches (`.{0,200}`).
   2. Enforce an upper bound on text length (10,000 characters) before running heuristic regexes.
-* **Done When:** Test runs heuristic evaluation against a 50 KB adversarial string and completes in $< 1.0$ second.
+* **Done When:** Test runs heuristic evaluation against a 50 KB adversarial string and completes in < 1.0 second.
 
 ### [A7] Defeat Sensitive Keyword Evasion & Homoglyphs
-* **Status:** ✅ **Solved & Tested**
+* **Status:** ✅ **Resolved (`c75f0b5`)**
 * **Problem:** Attackers could evade sensitive legal filters using Cyrillic/Greek homoglyphs (`pоlice`), zero-width spaces (`sub\u200bpoena`), full-width text (`ｓｕｂｐｏｅｎａ`), newlines (`legal\nnotice`), or spacing variations. The broad `chargeback` rule was missing.
 * **Solution:**
-  1. 4-step normalization pipeline: `unicodedata.normalize("NFKC")` $\rightarrow$ strip zero-width characters $\rightarrow$ `.casefold()` $\rightarrow$ Cyrillic/Greek homoglyph map.
+  1. 4-step normalization pipeline: `unicodedata.normalize("NFKC")` -> strip zero-width characters -> `.casefold()` -> Cyrillic/Greek homoglyph map.
   2. Ephemeral guarantee: normalized text is used strictly for internal matching and never leaks to state, Jev, Groq, or DB.
   3. Regex phrase compilation with `re.split(r"[\s\-]+", kw)` and lookaround boundaries to preserve literal punctuation like `a.b(c)`.
   4. Inspection across `subject`, `cleaned_body`, and `raw_body`.
   5. Restored broad `\bchargebacks?\b` matching.
+* **Note on Billing Intent:** `"Please refund my $20, I don't want to file a chargeback"` now routes to `Review/Sensitive` on purpose as a safe-side false positive due to the broad `\bchargebacks?\b` rule; this will be reduced via keyword scoring in B3.
 * **Done When:** Unit tests verify diversion for all homoglyph, zero-width, full-width, spacing, and chargeback variants, and prove zero leakage of normalized text.
 
-### [A8] Fail Fast on spaCy Model Loading Failures
+### [A8] Fail Fast on Startup & Runtime Safeguard for spaCy Failures
 * **Problem:** If spaCy fails to load (missing package, missing model, out-of-memory), the node currently logs a warning and proceeds, silently transmitting unmasked person names to external AI APIs.
-* **Solution:** If external AI keys (Jev or Groq) are configured and spaCy fails to load, raise `RuntimeError` at startup to stop container initialization immediately.
-* **Done When:** Unit test mocking `spacy.load` to raise verifies that the pipeline refuses to boot with active API keys.
+* **Solution:**
+  1. Startup: If external AI keys (Jev or Groq) are configured and spaCy fails to load, raise `RuntimeError` at startup to halt container initialization immediately.
+  2. Runtime safeguard: If the spaCy model is missing or unavailable at runtime while Jev or Groq is enabled, send nothing outside and divert the email to `manual_review`.
+* **Done When:** Unit test mocking `spacy.load` to raise verifies that the pipeline refuses to boot with active API keys, and runtime fallback routes to `manual_review` without external network calls.
 
 ### [A9] Precision PII Regexes, Luhn Check & Token Nonces
 * **Problem:** Masker misses international phone numbers (`+44...`, `+880...`), truncated IBANs, JWTs, and API keys; falsely redacts 16-digit order numbers as credit cards without Luhn verification; corrupts text when customers quote earlier tokens like `[EMAIL_1]`.
@@ -111,11 +142,11 @@ Each issue is implemented individually with corresponding unit tests, verified a
 * **Done When:** Test suite validates each PII type is redacted when valid and ignored when checksum fails.
 
 ### [A10] Contextualize Tech-Terms Whitelist (Surnames vs Tech)
-* **Problem:** `config/tech_terms.txt` contains common surnames (Jenkins, Kafka, Helm, Apollo, Flask, Django). If a customer signs *"Thanks, Jenkins"*, their surname is unmasked. Missing programming languages (Ruby, Rust, Swift, Go).
-* **Solution:**
-  1. Distinguish unambiguous tools from ambiguous nouns/surnames.
-  2. For ambiguous terms, require technical context words nearby (e.g., `Jenkins pipeline`, `Kafka cluster`); if signed alone, mask as person.
-  3. Add missing language terms; add `@unittest.skipUnless(spacy_available)` guards.
+* **Status:** 🟡 **Partially Done**
+  * *Done earlier:* Externalized tech terms whitelist in `config/tech_terms.txt`, cached loader, and whole-entity matching for `PERSON` spans in Commit `03867d1`.
+  * *Still missing:* Ambiguous names (Jenkins, Kafka, Helm, Apollo, Flask, Django) must be kept only when a technical context word is directly adjacent (e.g., `Jenkins pipeline`, `Kafka cluster`); a lone name (for example after a greeting or sign-off like *"Thanks, Jenkins"*) must always be masked. Add `@unittest.skipUnless(spacy_available)` guards to tests.
+* **Problem:** Common surnames in the whitelist allow customer surnames to be sent to external AI unmasked when signed alone.
+* **Solution:** Implement contextual adjacency verification: ambiguous terms are skipped only if accompanied by directly adjacent technical context words; otherwise, mask as person.
 * **Done When:** `"Thanks, Jenkins"` masks the name, while `"our Jenkins pipeline failed"` does not.
 
 ### [A11] Concurrency & Atomic SQLite Idempotency Locking
@@ -138,10 +169,10 @@ Each issue is implemented individually with corresponding unit tests, verified a
 * **Problem:** `load_dotenv(override=True)` overwrites production environment variables; arbitrary `JEV_API_URL` allows secret harvesting; smoke test prints partial API key; raw error response bodies are logged.
 * **Solution:**
   1. Set `load_dotenv(override=False)`.
-  2. Restrict allowed Jev endpoints strictly to `api.jev.ai` (or configured localhost/test hosts).
+  2. Restrict allowed Jev/TypeSafe endpoints strictly to `api.typesafe.ai` (verified against `docs.typesafe.ai`, with localhost/test host exceptions).
   3. Redact API key characters in smoke test (print only `present` or `missing`).
   4. Log only HTTP status code on Jev API errors.
-* **Done When:** Config loads without overriding existing environment; invalid URLs are rejected; key secrets never appear in logs.
+* **Done When:** Config loads without overriding existing environment; URLs not pointing to `api.typesafe.ai` (or local test hosts) are rejected; key secrets never appear in logs.
 
 ### [A14] Pin All Dependency Versions
 * **Problem:** `requirements.txt` has unpinned package versions; Dockerfile downloads unpinned spaCy model releases.
@@ -153,14 +184,14 @@ Each issue is implemented individually with corresponding unit tests, verified a
 ## Part B: Correctness
 
 ### [B1] Refine Signature Stripper & Prevent Real Text Loss
-* **Status:** ✅ **Solved & Tested**
+* **Status:** ✅ **Resolved (`8c13658`)**
 * **Problem:** Top-down search deleted bug reports starting with *"Thanks."*; bare `--` stripped SQL queries; opening disclaimers were cut; no safety check prevented message deletion.
 * **Solution:**
   1. Search for sign-offs bottom-up within the last 10 non-empty lines.
-  2. Respect RFC 3676 `"-- "` with trailing space; allow bare `"--"` only if followed by $\le 6$ short lines and no code tokens (`SELECT`, `INSERT`, `;`, `{`, `}`, `=>`, `//`).
+  2. Respect RFC 3676 `"-- "` with trailing space; allow bare `"--"` only if followed by <= 6 short lines and no code tokens (`SELECT`, `INSERT`, `;`, `{`, `}`, `=>`, `//`).
   3. Require substantive customer body prior to sign-offs (`has_substantive_body()`).
   4. Disclaimers at the top treated as customer text; bottom disclaimers require legal boilerplate terms.
-  5. Direct safety size limit: if stripping would remove $> 50\%$ of message text, abort stripping and preserve original.
+  5. Direct safety size limit: stripping is aborted when it would remove more than half of the message AND the removed part looks like message body or the part before it has no substantive text (preserving the original text).
 * **Done When:** Tests verify bug reports with opening "Thanks", SQL queries with `--`, disclaimers at top, and short 3-line emails are all preserved intact.
 
 ### [B2] Eliminate False Positives in Offline Spam Heuristics
@@ -169,6 +200,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
   1. Remove generic business terms from `SPAM_REGEX`; preserve only clear spam phrases.
   2. Route offline heuristic matches to `manual_review` instead of `spam_skipped`.
   3. Ensure all threats route consistently to `manual_review`.
+* **Note on Benchmark Expectations:** Benchmark rows 76-90 (offline spam heuristics) currently assert `routing_status = 'spam_skipped'`. When B2 is implemented, heuristic matches will transition to `manual_review`.
 * **Done When:** Unit tests verify common inquiries mentioning PayPal or DocuSign do not route to Junk.
 
 ### [B3] Consolidate Sensitive Keywords to Intent Phrases
@@ -176,6 +208,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 * **Solution:**
   1. Replace bare words with intent phrases (`gdpr erasure request`, `police report`, `under article 17`).
   2. Establish `config.yaml` as the single source of truth, removing duplicate keyword lists in code.
+  3. Implement scoring for sensitive phrases so ambiguous chargeback mentions can be differentiated from explicit dispute filings.
 * **Done When:** `"Is your product GDPR compliant?"` is not diverted, while explicit erasure requests divert.
 
 ### [B4] Synchronize In-Memory State & SQLite Record
@@ -213,6 +246,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
   1. Assert all keys present in scenario `expected` dictionary.
   2. Default to `--offline` mode; require explicit `--live` flag for network calls.
   3. Transmit identical email payload twice through pipeline to verify duplicate delivery naturally.
+* **Note on Benchmark Transitions:** Benchmark rows 76-99 currently assert `spam_skipped`. They will be systematically updated to expect `manual_review` alongside the implementation of A3 and B2.
 * **Done When:** Benchmark runner checks 100% of expected fields across all 100 scenarios.
 
 ### [C2] Deterministic Test Environment Isolation
