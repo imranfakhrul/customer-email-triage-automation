@@ -224,6 +224,60 @@ class TestSignatureStripper(unittest.TestCase):
         self.assertEqual(output["cleaned_body"], "Can you refund our latest invoice?")
         self.assertEqual(output["email_body"], "Can you refund our latest invoice?")
 
+    def test_b1_bug_report_starting_with_thanks_preserved(self):
+        """Verifies bug reports with an opening 'Thanks' are not prematurely cut."""
+        raw = "Hi team,\nThanks.\nThe export button crashes when clicking on it.\nSteps to reproduce:\n1. Go to exports\n2. Click export"
+        self.assertEqual(strip_signatures_and_quotes(raw), raw)
+
+    def test_b1_important_notice_at_top_preserved(self):
+        """Verifies 'Important notice' at the top of an email is treated as customer text, not a disclaimer."""
+        raw = "Hello,\nImportant notice: since v2.3 the export crashes when generating CSVs."
+        self.assertEqual(strip_signatures_and_quotes(raw), raw)
+
+    def test_b1_disclaimer_at_top_preserved(self):
+        """Verifies 'Disclaimer' at the top of an email is treated as customer text."""
+        raw = "Disclaimer: I'm not an admin, but our dashboard shows high CPU alerts on worker 4."
+        self.assertEqual(strip_signatures_and_quotes(raw), raw)
+
+    def test_b1_sql_query_with_bare_dashes_not_cut(self):
+        """Verifies a pasted SQL query with a bare '--' comment line is preserved."""
+        raw = (
+            "Hi team, here is the failing query:\n"
+            "SELECT id, name\n"
+            "FROM users\n"
+            "--\n"
+            "WHERE active = 1;"
+        )
+        self.assertEqual(strip_signatures_and_quotes(raw), raw)
+
+    def test_b1_real_signature_bare_dashes_cut(self):
+        """Verifies a real signature starting with bare '--' (no trailing space) is cleanly cut."""
+        raw = "Can we meet tomorrow to review the proposal?\n\n--\nJohn Doe\n+1 555 0100"
+        self.assertEqual(strip_signatures_and_quotes(raw), "Can we meet tomorrow to review the proposal?")
+
+    def test_b1_real_signature_rfc_dashes_cut(self):
+        """Verifies a real signature starting with RFC 3676 '-- ' (with space) is cleanly cut."""
+        raw = "I need assistance with my account access.\n\n-- \nJohn Doe"
+        self.assertEqual(strip_signatures_and_quotes(raw), "I need assistance with my account access.")
+
+    def test_b1_three_line_email_starting_with_thank_you_preserved(self):
+        """Verifies short 3-line email starting with 'Thank you.' is preserved by safety check."""
+        raw = "Thank you.\nOur server is crashing.\nPlease help."
+        self.assertEqual(strip_signatures_and_quotes(raw), raw)
+
+    def test_b1_safety_check_stripping_more_than_half_aborts(self):
+        """Verifies direct safety rule: if stripping would remove more than half of the message,
+        do not strip and keep the original text."""
+        raw = (
+            "Hi Support,\n"
+            "Thanks,\n"
+            "The database connection fails on replica 3.\n"
+            "Logs:\n"
+            "Error: Connection refused at 10.0.0.5:5432\n"
+            "Please investigate immediately."
+        )
+        self.assertEqual(strip_signatures_and_quotes(raw), raw)
+
 
 if __name__ == "__main__":
     unittest.main()
