@@ -1,181 +1,235 @@
-# 🎯 Project Roadmap — Customer Email Triage Automation (Phase 1)
+# Customer Email Triage Automation — Remediation & Engineering Roadmap
 
-> **Scope:** Inbound Email Ingestion ➔ Privacy Redaction ➔ Sensitive Diversion ➔ **Jev AI Decision Engine**  
-> **Status:** **Production Ready for Client Review & Phase 2 Handoff** ✅  
-> **Overall Progress:** **13 of 13 Milestones Completed (100%)** 🎉  
-> **Quality Gate:** **77 of 77 Automated Tests Passing** | **100 of 100 Benchmark Scenarios Passing (0 False Positives)**
+This roadmap tracks all 24 security, correctness, performance, and documentation issues identified during the senior architectural and security code review (Commit `03867d1`).
 
----
-
-## 📋 Executive Readiness Summary
-
-The **Customer Email Triage Automation Pipeline (Phase 1)** is fully operational, thoroughly hardened, containerized, and ready for client delivery and inspection.
-
-Every inbound email traverses an asynchronous, privacy-preserving **LangGraph** pipeline with sub-50ms average decision latency:
-1. **Node 01: Ingestion & Idempotency Store** (SQLite 3-state concurrency control, thread participant verification, 10-minute duplicate suppression).
-2. **Node 02: Signature & Quote Stripper** (Thread history and disclaimer removal; safeguards short opening emails).
-3. **Node 03: Local spaCy NER & Regex PII Masker** (100% on-premise PII redaction with an externalized tech-term whitelist).
-4. **Node 04: Sensitive-Skip Guardrail** (Immediate human-in-the-loop diversion for regulatory, legal, and billing disputes).
-5. **Node 05: 3-Tier Jev AI Decision Gatekeeper** (TypeSafe System One Jev AI + Groq fast LLM fallback + deterministic offline heuristics).
+Each issue is implemented individually with corresponding unit tests, verified against the benchmark suite, and committed atomically following our modular review workflow.
 
 ---
 
-## 📊 Milestone Tracking Table
+## 📊 24-Point Remediation Progress Matrix
 
-| # | Milestone | Status | Deliverables & Scope |
-|:---:|:---|:---:|:---|
-| **1** | **Pipeline State & Data Schemas** | ✅ Completed | LangGraph `TriageState`, Pydantic models for triage, confidence scoring, and threat assessment. |
-| **2** | **Configuration & Secret Loader** | ✅ Completed | Central `config.yaml`, `.env.example`, and secure loader (`utils/config.py`). Zero hardcoded secrets. |
-| **3** | **Containerization Environment** | ✅ Completed | Production `Dockerfile` and `docker-compose.yml` for isolated cross-platform execution. |
-| **4** | **SQLite Idempotency Engine (Node 01)** | ✅ Completed | Crash-resilient 3-state tracking (`processing`, `done`, `failed`), 10-min stale lock recovery, and thread tracking. |
-| **5** | **Signature & Quote Stripper (Node 02)** | ✅ Completed | Strips RFC reply headers, Outlook/Exchange headers, mobile signatures (`Sent from my iPhone`), and legal disclaimers. |
-| **6** | **Local spaCy NER & PII Masker (Node 03)** | ✅ Completed | 100% on-premise PII redactor. Masks names, emails, phone numbers, and credentials with reversible tokens before external AI calls. |
-| **7** | **Sensitive-Skip Diversion Rules (Node 04)** | ✅ Completed | Rule-based security diversion. Immediately quarantines legal threats, regulatory notices, and sensitive customer data to human review. |
-| **8** | **Jev AI Decision Gatekeeper (Node 05)** | ✅ Completed | Evaluates inbound emails via Jev AI (with Groq and regex fallbacks) to decide `legitimate`, `spam`, or `manual_review`. |
-| **9** | **Automated Pipeline Verification Suite** | ✅ Completed | End-to-end integration tests (`tests/test_pipeline_e2e.py`), 100-scenario synthetic benchmark (`data/benchmark_emails.json`), and CLI runner (`main.py`). |
-| **10** | **Security & Heuristics Hardening** | ✅ Completed | Multi-stage prompt injection heuristics, credential dump density limit, and live Groq model wiring. |
-| **11** | **TypeSafe System One Schema Calibration** | ✅ Completed | Reconciled Jev AI probability schema (`hi_threshold: 0.85`, `lo_threshold: 0.15`), engine telemetry (`classifier_used`), and smoke test script. |
-| **12** | **Security & Pipeline Bug Fix Audit** | ✅ Completed | Resolved thread header spoofing, fixed idempotency 'processing' deadlock, calibrated billing intent phrases, and prevented opening sign-off truncation. |
-| **13** | **External Tech-Term Whitelist** | ✅ Completed | Externalized tech term whitelist (`config/tech_terms.txt`) preventing spaCy NER from redacting tools/databases as `PERSON`. |
-
----
-
-## 🛠️ Audit of Identified Issues & Production Fixes Applied
-
-During rigorous stress testing, code audit, and adversarial benchmark evaluation, **6 key issues** were identified and systematically resolved. The table below details what was broken, the architectural fix applied, and the test proof.
-
-### Issue 1: Thread Header Bypass & Spoofing Vulnerability (Security — High Priority)
-* **Node Affected:** Node 01 (`nodes/ingest.py` & `db/database.py`) and Node 05 (`nodes/jev_gatekeeper.py`).
-* **The Problem:** The initial design allowed any email containing an `In-Reply-To` header or active `thread_id` to bypass the Jev Gatekeeper and Sensitive Guardrail. An attacker could spoof an `In-Reply-To` header or inject a malicious prompt injection payload into an existing thread, bypassing all AI safety controls.
-* **The Fix:**
-  1. **Participant Verification:** In `db/database.py` and `nodes/ingest.py`, thread continuity now strictly verifies that the inbound sender is a known participant of prior messages in that thread (`db.is_thread_participant`). Unverified senders cannot inherit thread state.
-  2. **Zero Blanket Bypass:** Removed the rule that skipped the gatekeeper for active threads. All thread replies must pass Node 04 (Sensitive Guardrail) and Node 05 (`is_threat` check).
-* **Test Verification:**
-  - `test_active_thread_prompt_injection_blocked`: An adversarial prompt injection sent within a legitimate thread is blocked and routed to `Review/Manual`.
-  - `test_active_thread_normal_reply_approved`: Benign follow-ups from verified thread participants pass safely.
+| # | Code | Area | Description | Status |
+|:---:|:---:|:---|:---|:---:|
+| **1** | **A1** | Security | Mask subject line & sender address domain before egress to Jev/Groq | ⏳ Pending |
+| **2** | **A2** | Security | Suppress raw `token_map` from `main.py` CLI and logs; print entity counts | ⏳ Pending |
+| **3** | **A3** | Security | Guard against Groq prompt injection with pre-filter & randomized delimiter tags | ⏳ Pending |
+| **4** | **A4** | Security | Enforce fail-closed classifier normalization (`normalize_result`) with 0.70 threshold | ⏳ Pending |
+| **5** | **A5** | Security | Harden active-thread detection against spoofing & unapproved thread history | ⏳ Pending |
+| **6** | **A6** | Security | Eliminate ReDoS vulnerabilities in heuristic regexes & limit input length | ⏳ Pending |
+| **7** | **A7** | Security | Defeat sensitive keyword evasion (NFKC, zero-width, Cyrillic/Greek homoglyphs, broad chargeback) | ✅ Implemented |
+| **8** | **A8** | Security | Fail fast on startup if spaCy model fails to load while AI keys are active | ⏳ Pending |
+| **9** | **A9** | Privacy | Integrate `phonenumbers` library, Luhn credit card check, and collision-safe tokens | ⏳ Pending |
+| **10** | **A10** | Privacy | Contextualize technical terms whitelist to protect real surnames (Jenkins, Kafka, etc.) | ⏳ Pending |
+| **11** | **A11** | Concurrency | Atomic SQLite idempotency check-and-claim to prevent multi-worker race conditions | ⏳ Pending |
+| **12** | **A12** | Infrastructure | Run container as non-root `appuser`, fix data volume mounts, and honor `DATABASE_PATH` | ⏳ Pending |
+| **13** | **A13** | Security | Hardened secrets handling: `override=False`, strict Jev host check, redact debug keys | ⏳ Pending |
+| **14** | **A14** | Infrastructure | Pin exact dependency versions in `requirements.txt` and spaCy language model URL | ⏳ Pending |
+| **15** | **B1** | Correctness | Refine signature stripper: RFC 3676, bare `--` code safety, bottom-up scan, >50% guard | ✅ Implemented |
+| **16** | **B2** | Correctness | Remove generic business words from offline spam heuristics; route threats to manual review | ⏳ Pending |
+| **17** | **B3** | Correctness | Tune sensitive keywords to intent phrases and establish single source in `config.yaml` | ⏳ Pending |
+| **18** | **B4** | Correctness | Harmonize returned state with SQLite database and persist clean text for Phase 2 | ⏳ Pending |
+| **19** | **B5** | Correctness | Resolve config relative to root, fail fast on invalid YAML, and honor environment overrides | ⏳ Pending |
+| **20** | **B6** | Performance | Preload models and precompile regexes once at startup to eliminate per-email overhead | ⏳ Pending |
+| **21** | **C1** | Testing | Expand synthetic benchmark validation to check all expected fields and default to offline | ⏳ Pending |
+| **22** | **C2** | Testing | Isolate test suite from host environment variables (`.env`) for reproducible test runs | ⏳ Pending |
+| **23** | **C3** | Testing | Ensure `scripts/jev_smoke_test.py` strictly verifies Jev response and exits non-zero on failure | ⏳ Pending |
+| **24** | **C4** | Documentation | Reconcile README/ROADMAP test counts, directory trees, class names, and claim metrics | ⏳ Pending |
 
 ---
 
-### Issue 2: Stuck 'processing' Status & Idempotency Deadlock
-* **Node Affected:** Node 01 (`db/database.py`) and Node 05 (`nodes/jev_gatekeeper.py`).
-* **The Problem:** When the Gatekeeper approved an email as legitimate, the SQLite status was left as `'processing'` to be picked up by Phase 2. If the same email was re-transmitted within 10 minutes, the idempotency check treated it as a concurrent locked email rather than recognizing it as already finished for Phase 1.
-* **The Fix:**
-  1. When an email is approved as legitimate, Node 05 explicitly calls `db.mark_done(email_id, routing_status="gatekeeper_approved")`.
-  2. Added helper `db.get_gatekeeper_approved()` as the atomic hand-off contract for Phase 2 workers.
-  3. Re-transmissions within 10 minutes are recognized as duplicate deliveries (`duplicate_skipped`), not stuck locks.
-* **Test Verification:**
-  - `test_duplicate_recognized_within_10_minutes_after_gatekeeper_approval`: Verifies that a duplicate email arriving 2 minutes after approval is detected as a duplicate and skipped cleanly.
-  - `test_get_gatekeeper_approved_helper`: Confirms approved emails are returned atomically for Phase 2 pickup.
+## Part A: Security and Privacy
+
+### [A1] Mask Subject Line & Sender Address Before AI Egress
+* **Problem:** The PII masker currently masks only the email body. The raw subject line (which may contain names and credit cards) and raw sender email address are transmitted unmasked to Jev AI and Groq.
+* **Solution:** 
+  1. Mask `email_subject` in `pii_masker_node` using the same `token_map`, storing it as `masked_subject` in `TriageState`.
+  2. Send `masked_subject` (never raw subject) to external classifiers.
+  3. Send only the sender domain (e.g., `example.com`), omitting the personal username portion.
+* **Done When:** Test feeds an email with subject PII and asserts external mocked API calls receive only redacted tokens and domain.
+
+### [A2] Suppress Raw `token_map` from CLI and Logs
+* **Problem:** `main.py` prints the raw `token_map` dictionary in terminal output and logs, exposing real customer names, card numbers, and credentials.
+* **Solution:** Remove `token_map` from CLI summaries. Display aggregate counts by entity type (e.g., `{"PERSON": 2, "EMAIL": 1}`) without plaintext values.
+* **Done When:** Executing `python main.py --input data/sample_email.json` outputs zero plaintext PII in stdout/stderr.
+
+### [A3] Prevent Groq LLM Prompt Injection Attacks
+* **Problem:** Unbounded email content is interpolated directly into Groq prompts. Adversarial emails with instructions (`Ignore previous instructions...`) can hijack the gatekeeper. `PROMPT_INJECTION_REGEX` only ran during offline fallback.
+* **Solution:**
+  1. Run `PROMPT_INJECTION_REGEX` on subject and body *before* invoking any AI; divert matches immediately to `manual_review`.
+  2. Enclose customer email text in randomized boundary markers (`<email-XXXXXX>...</email-XXXXXX>`) with explicit system instructions to ignore internal directives.
+  3. Strictly validate the returned JSON response structure.
+* **Done When:** Tests verify that an adversarial injection payload diverts to `manual_review` without calling Groq, and that outgoing Groq prompts contain dynamic nonce tags.
+
+### [A4] Fail-Closed Classifier Normalization
+* **Problem:** The gatekeeper fails open: unknown decisions default to `"legitimate"`, out-of-range confidence scores are accepted, and the `0.70` confidence threshold in config is never enforced in code.
+* **Solution:** Implement a unified `normalize_result(raw) -> dict` function:
+  1. Unknown or malformed decisions default to `"manual_review"`.
+  2. Confidence clamped to `[0.0, 1.0]` (NaN/None $\rightarrow$ 0.0).
+  3. If `is_threat` is True, force decision to at least `"manual_review"`.
+  4. If decision is `"legitimate"` but confidence $< 0.70$, divert to `"manual_review"`.
+* **Done When:** Table-driven unit test covers all edge cases (out-of-range confidence, unrecognized decision strings, threat flags).
+
+### [A5] Harden Active-Thread Verification Against Spoofing
+* **Problem:** (1) Spam emails saved as `status = 'done'` count as conversation history. (2) Empty previous sender evaluates as a participant match. (3) Incoming payload's `is_active_thread` flag is trusted blindly without database history.
+* **Solution:**
+  1. Restrict SQL history queries strictly to `routing_status = 'gatekeeper_approved'`.
+  2. Disallow empty sender matching; require non-empty exact equality.
+  3. Initialize `is_active_thread = None` in initial state, relying solely on DB verification.
+* **Done When:** Tests prove that spam threads, empty senders, and injected `is_active_thread: true` payloads all evaluate to `is_active_thread = False`.
+
+### [A6] Eliminate ReDoS Backtracking in Heuristic Regexes
+* **Problem:** Patterns containing multiple `.*` with the `re.DOTALL` flag (such as `grandma.*read\s+me.*system\s+prompt`) trigger catastrophic backtracking on long inputs, stalling worker threads.
+* **Solution:**
+  1. Replace unbounded `.*` with bounded matches (`.{0,200}`).
+  2. Enforce an upper bound on text length (10,000 characters) before running heuristic regexes.
+* **Done When:** Test runs heuristic evaluation against a 50 KB adversarial string and completes in $< 1.0$ second.
+
+### [A7] Defeat Sensitive Keyword Evasion & Homoglyphs
+* **Status:** ✅ **Solved & Tested**
+* **Problem:** Attackers could evade sensitive legal filters using Cyrillic/Greek homoglyphs (`pоlice`), zero-width spaces (`sub\u200bpoena`), full-width text (`ｓｕｂｐｏｅｎａ`), newlines (`legal\nnotice`), or spacing variations. The broad `chargeback` rule was missing.
+* **Solution:**
+  1. 4-step normalization pipeline: `unicodedata.normalize("NFKC")` $\rightarrow$ strip zero-width characters $\rightarrow$ `.casefold()` $\rightarrow$ Cyrillic/Greek homoglyph map.
+  2. Ephemeral guarantee: normalized text is used strictly for internal matching and never leaks to state, Jev, Groq, or DB.
+  3. Regex phrase compilation with `re.split(r"[\s\-]+", kw)` and lookaround boundaries to preserve literal punctuation like `a.b(c)`.
+  4. Inspection across `subject`, `cleaned_body`, and `raw_body`.
+  5. Restored broad `\bchargebacks?\b` matching.
+* **Done When:** Unit tests verify diversion for all homoglyph, zero-width, full-width, spacing, and chargeback variants, and prove zero leakage of normalized text.
+
+### [A8] Fail Fast on spaCy Model Loading Failures
+* **Problem:** If spaCy fails to load (missing package, missing model, out-of-memory), the node currently logs a warning and proceeds, silently transmitting unmasked person names to external AI APIs.
+* **Solution:** If external AI keys (Jev or Groq) are configured and spaCy fails to load, raise `RuntimeError` at startup to stop container initialization immediately.
+* **Done When:** Unit test mocking `spacy.load` to raise verifies that the pipeline refuses to boot with active API keys.
+
+### [A9] Precision PII Regexes, Luhn Check & Token Nonces
+* **Problem:** Masker misses international phone numbers (`+44...`, `+880...`), truncated IBANs, JWTs, and API keys; falsely redacts 16-digit order numbers as credit cards without Luhn verification; corrupts text when customers quote earlier tokens like `[EMAIL_1]`.
+* **Solution:**
+  1. Use Google's `phonenumbers` library for international phone number parsing.
+  2. Implement Luhn checksum algorithm for credit card matching.
+  3. Add IBAN mod-97 validation.
+  4. Add regexes for JWTs, Google API keys (`AIza...`), OpenAI keys (`sk-proj-...`), and Slack tokens.
+  5. Append per-message random nonces to placeholders (e.g., `[EMAIL_1_a8f3]`).
+* **Done When:** Test suite validates each PII type is redacted when valid and ignored when checksum fails.
+
+### [A10] Contextualize Tech-Terms Whitelist (Surnames vs Tech)
+* **Problem:** `config/tech_terms.txt` contains common surnames (Jenkins, Kafka, Helm, Apollo, Flask, Django). If a customer signs *"Thanks, Jenkins"*, their surname is unmasked. Missing programming languages (Ruby, Rust, Swift, Go).
+* **Solution:**
+  1. Distinguish unambiguous tools from ambiguous nouns/surnames.
+  2. For ambiguous terms, require technical context words nearby (e.g., `Jenkins pipeline`, `Kafka cluster`); if signed alone, mask as person.
+  3. Add missing language terms; add `@unittest.skipUnless(spacy_available)` guards.
+* **Done When:** `"Thanks, Jenkins"` masks the name, while `"our Jenkins pipeline failed"` does not.
+
+### [A11] Concurrency & Atomic SQLite Idempotency Locking
+* **Problem:** `check_and_acquire` executes a `SELECT` followed by an `INSERT`/`UPDATE` in separate statements. Concurrent worker threads race and cause double processing or `sqlite3.IntegrityError` crashes.
+* **Solution:**
+  1. For new emails: `INSERT ... ON CONFLICT(email_id) DO NOTHING` and inspect `cursor.rowcount == 1`.
+  2. For stale lock recovery: conditional `UPDATE email_triage SET status='processing' ... WHERE email_id=? AND status='processing' AND updated_at < ?` and check `cursor.rowcount == 1`.
+* **Done When:** Concurrency test with 8 simultaneous threads attempting to lock the same email results in exactly 1 winner and 0 crashes.
+
+### [A12] Container Security & Environment File Locations
+* **Problem:** Docker container runs as `root`; compose mounts full repository read-write; `DATABASE_PATH` env var is ignored; `*.db` is copied into Docker image; documentation suggests `chmod 777 data`.
+* **Solution:**
+  1. Add non-root `appuser` (`RUN useradd --create-home appuser && USER appuser`).
+  2. Mount only `./data:/app/data` in `docker-compose.yml`.
+  3. Read `DATABASE_PATH` from environment with default fallback to `data/triage.db`.
+  4. Add `*.db` to `.dockerignore`. Update README to use `chown 1000:1000 data`.
+* **Done When:** `docker compose run --rm email-triage whoami` outputs `appuser`, and database file generates inside `./data`.
+
+### [A13] Secrets Hardening & API Environment Controls
+* **Problem:** `load_dotenv(override=True)` overwrites production environment variables; arbitrary `JEV_API_URL` allows secret harvesting; smoke test prints partial API key; raw error response bodies are logged.
+* **Solution:**
+  1. Set `load_dotenv(override=False)`.
+  2. Restrict allowed Jev endpoints strictly to `api.jev.ai` (or configured localhost/test hosts).
+  3. Redact API key characters in smoke test (print only `present` or `missing`).
+  4. Log only HTTP status code on Jev API errors.
+* **Done When:** Config loads without overriding existing environment; invalid URLs are rejected; key secrets never appear in logs.
+
+### [A14] Pin All Dependency Versions
+* **Problem:** `requirements.txt` has unpinned package versions; Dockerfile downloads unpinned spaCy model releases.
+* **Solution:** Pin exact versions (`==`) across all libraries in `requirements.txt` and pin direct release URL for the spaCy model.
+* **Done When:** Every entry in `requirements.txt` has exact `==` version pinning.
 
 ---
 
-### Issue 3: Overly Blunt Billing Keyword False Diversions
-* **Node Affected:** Node 04 (`nodes/sensitive_skip.py` & `config.yaml`).
-* **The Problem:** Single keywords such as `"chargeback"` and `"refund dispute"` triggered immediate diversion to the `Review/Sensitive` queue. Benign customer queries like *"Please refund my $20, I don't want to file a chargeback"* were quarantined, degrading support responsiveness and violating B2B false positive SLAs (<15%).
-* **The Fix:**
-  1. Replaced single-word triggers with multi-word intent phrases: `"will file a chargeback"`, `"filing a chargeback"`, `"chargeback filed"`, `"disputing this charge"`, `"my lawyer"`, `"arbitration demand"`.
-  2. Benign refund requests with polite mentions pass cleanly to normal support triage; hostile legal or financial threats are caught immediately.
-* **Test Verification:**
-  - `test_billing_intent_phrases_vs_benign_refund`: Verifies that *"Please refund my $20, I don't want to file a chargeback"* is NOT quarantined, while *"I will file a chargeback if this isn't fixed"* is flagged and diverted.
+## Part B: Correctness
+
+### [B1] Refine Signature Stripper & Prevent Real Text Loss
+* **Status:** ✅ **Solved & Tested**
+* **Problem:** Top-down search deleted bug reports starting with *"Thanks."*; bare `--` stripped SQL queries; opening disclaimers were cut; no safety check prevented message deletion.
+* **Solution:**
+  1. Search for sign-offs bottom-up within the last 10 non-empty lines.
+  2. Respect RFC 3676 `"-- "` with trailing space; allow bare `"--"` only if followed by $\le 6$ short lines and no code tokens (`SELECT`, `INSERT`, `;`, `{`, `}`, `=>`, `//`).
+  3. Require substantive customer body prior to sign-offs (`has_substantive_body()`).
+  4. Disclaimers at the top treated as customer text; bottom disclaimers require legal boilerplate terms.
+  5. Direct safety size limit: if stripping would remove $> 50\%$ of message text, abort stripping and preserve original.
+* **Done When:** Tests verify bug reports with opening "Thanks", SQL queries with `--`, disclaimers at top, and short 3-line emails are all preserved intact.
+
+### [B2] Eliminate False Positives in Offline Spam Heuristics
+* **Problem:** Offline `SPAM_REGEX` matches ordinary words (`congratulations`, `paypal`, `docusign`, `norton`, `betting`) and dumps valid customer emails straight into Junk. Threats and injections are handled inconsistently.
+* **Solution:**
+  1. Remove generic business terms from `SPAM_REGEX`; preserve only clear spam phrases.
+  2. Route offline heuristic matches to `manual_review` instead of `spam_skipped`.
+  3. Ensure all threats route consistently to `manual_review`.
+* **Done When:** Unit tests verify common inquiries mentioning PayPal or DocuSign do not route to Junk.
+
+### [B3] Consolidate Sensitive Keywords to Intent Phrases
+* **Problem:** Bare words (`gdpr`, `police`, `erasure`) divert normal sales questions to legal review. Keyword list is duplicated across `nodes/sensitive_skip.py` and `config.yaml`.
+* **Solution:**
+  1. Replace bare words with intent phrases (`gdpr erasure request`, `police report`, `under article 17`).
+  2. Establish `config.yaml` as the single source of truth, removing duplicate keyword lists in code.
+* **Done When:** `"Is your product GDPR compliant?"` is not diverted, while explicit erasure requests divert.
+
+### [B4] Synchronize In-Memory State & SQLite Record
+* **Problem:** For approved emails, database row is marked `done` with `gatekeeper_approved`, but returned state says `dispatch_status: 'processing'`. Active thread is conflated with routing status. Database write errors are swallowed.
+* **Solution:**
+  1. Align returned state: `dispatch_status: "done"`, `routing_status: "gatekeeper_approved"`.
+  2. Treat active thread as metadata flag (`is_active_thread: true`), not routing status.
+  3. Fail fast or mark email failed if database write fails.
+  4. Persist masked subject and body in database for downstream Phase 2 workers.
+* **Done When:** Unit test verifies returned state and database row match identically for approved emails.
+
+### [B5] Fail-Fast Config Loader & Environment Variable Overrides
+* **Problem:** `config.yaml` is resolved relative to working directory, causing failures when run from subdirectories. Config errors are caught and swallowed with empty `{}`. Certain env vars are ignored.
+* **Solution:**
+  1. Resolve `config.yaml` relative to project root (`BASE_DIR`).
+  2. Load and validate config once at startup; fail fast with informative errors.
+  3. Apply environment variable overrides for `DATABASE_PATH`, `IDEMPOTENCY_STALE_MINUTES`, and `MAX_DISPATCH_RETRIES`.
+* **Done When:** Invalid configuration causes immediate process exit with clear error; config loads reliably from any execution directory.
+
+### [B6] Optimize Process Lifecycle & Eliminate Repeated Work
+* **Problem:** spaCy model is repeatedly re-attempted on failure; `load_config()` reads YAML from disk on every email; regex patterns are recompiled on every invocation.
+* **Solution:**
+  1. Preload and cache spaCy model once at startup.
+  2. Load configuration once in `main.py` and pass down.
+  3. Precompile all keyword and heuristic regexes at startup.
+* **Done When:** Tests verify that spaCy loading, config I/O, and pattern compilation occur exactly once per process.
 
 ---
 
-### Issue 4: Premature Signature Truncation on Opening "Thank you."
-* **Node Affected:** Node 02 (`nodes/signature_stripper.py`).
-* **The Problem:** Sign-off patterns (e.g., `Thank you`, `Thanks`) were treated as the beginning of a closing signature even when appearing at the very start of an email. For short 3-line emails opening with gratitude (e.g., *"Thank you.\nOur server is crashing.\nPlease help."*), the entire message body was stripped.
-* **The Fix:**
-  1. A sign-off is only recognized as a signature boundary if non-empty body text precedes it, or if it appears within the trailing lines of the message.
-  2. Preserves opening pleasantries while stripping closing signatures.
-* **Test Verification:**
-  - `test_opening_thank_you_three_line_email_preserved`: Verifies that short emails opening with *"Thank you."* retain 100% of their critical body content.
+## Part C: Tests and Documentation
 
----
+### [C1] Comprehensive Benchmark Validation & Offline Default
+* **Problem:** Benchmark runner only validates 5 fields, ignoring discrepancies in `dispatch_status`, `is_threat`, etc. Benchmark defaults to live API keys. Duplicate test fakes state with manual `db.mark_done()`.
+* **Solution:**
+  1. Assert all keys present in scenario `expected` dictionary.
+  2. Default to `--offline` mode; require explicit `--live` flag for network calls.
+  3. Transmit identical email payload twice through pipeline to verify duplicate delivery naturally.
+* **Done When:** Benchmark runner checks 100% of expected fields across all 100 scenarios.
 
-### Issue 5: Infrastructure & Tool Name Redaction False Positives
-* **Node Affected:** Node 03 (`nodes/pii_masker.py`, `config/tech_terms.txt`, `config.yaml`).
-* **The Problem:** The local spaCy NER model (`en_core_web_sm`) occasionally misclassified software libraries, databases, and infrastructure tools (e.g., `"Postgres"`, `"Kubernetes"`, `"Apollo"`, `"Grafana"`) as `PERSON`, redacting them as `[PERSON_1]` and destroying context for engineering triage.
-* **The Fix:**
-  1. **External Whitelist:** Stored in [`config/tech_terms.txt`](./config/tech_terms.txt), editable without touching Python code. Covers databases, cloud tools, frameworks, and support tools.
-  2. **Exact Whole-Entity Match:** Skips masking only when the spaCy entity matches a whitelist term exactly (case-insensitive).
-  3. **Zero Partial Match Risk:** Full names containing tool words (e.g., `"Apollo Chen"`, `"Grafana Smith"`) evaluate to `False` against the whitelist and are strictly masked as `[PERSON_1]`.
-  4. **Zero Logging & Performance:** Loaded once and cached in memory; zero customer text logged.
-* **Test Verification:**
-  - `test_tech_terms_whitelist_prevents_person_masking`: Verifies `"Postgres"` and `"Kubernetes"` remain intact, `"John Doe"` is masked as `[PERSON_1]`, and `"Apollo Chen"` is strictly masked as `[PERSON_1]`.
+### [C2] Deterministic Test Environment Isolation
+* **Problem:** Tests make live calls to external APIs if host `.env` file contains keys, causing flaky tests, rate-limiting, and test data leaks.
+* **Solution:** Use `@patch.dict(os.environ, {}, clear=True)` or pass mock clients directly into nodes to ensure tests run completely isolated from host keys.
+* **Done When:** Full test suite passes deterministically with real keys in `.env` and zero network access.
 
----
+### [C3] Strict Jev Smoke Test Verification
+* **Problem:** `scripts/jev_smoke_test.py` reports success even if Jev returns 401 or 500 and falls back to offline heuristics.
+* **Solution:** Explicitly check `result["classifier_used"] == "jev"`; exit with code 1 (`sys.exit(1)`) on fallback.
+* **Done When:** Running smoke test with an invalid key outputs failure and exits with non-zero exit code.
 
-### Issue 6: TypeSafe System One (Jev AI) API Schema Calibration
-* **Node Affected:** Node 05 (`nodes/jev_gatekeeper.py`, `utils/jev_client.py`).
-* **The Problem:** The initial mock assumed a simple binary `{ "is_spam": bool }` schema. The actual production TypeSafe System One API returns a multi-class probability dictionary (`threat_scores: { "spam": float, "prompt_injection": float, ... }`) requiring calibrated high and low thresholds.
-* **The Fix:**
-  1. Mapped the TypeSafe System One API schema with calibrated dual thresholds (`hi_threshold: 0.85`, `lo_threshold: 0.15`).
-  2. Added telemetry (`classifier_used: 'jev' | 'groq' | 'regex'`) to log the exact engine that evaluated each email.
-  3. Created an isolated connectivity script [`scripts/jev_smoke_test.py`](./scripts/jev_smoke_test.py).
-  4. Provided automatic, non-blocking fallback to Groq (`openai/gpt-oss-20b`) and local deterministic heuristics when offline or without an API key.
-* **Test Verification:**
-  - `test_output_schema_keys`, `test_probability_mapping_table`, and `test_jev_ai_api_legitimate_classification`.
-
----
-
-## 🧪 Comprehensive Verification Evidence
-
-### 1. Automated Test Suite (77 Tests Passing)
-```
-============================= test session starts ==============================
-platform linux -- Python 3.14.4, pytest-9.1.1, pluggy-1.7.0 -- ./venv/bin/python3
-cachedir: .pytest_cache
-rootdir: /mnt/D48444128443F610/Customer-Email-Triage-Automation
-plugins: anyio-4.15.1, langsmith-0.14.11
-collected 77 items
-
-tests/test_ingest_idempotency.py .............                           [ 18%]
-tests/test_jev_client.py .......                                         [ 27%]
-tests/test_jev_gatekeeper.py ........                                    [ 37%]
-tests/test_pii_masker.py ............                                    [ 53%]
-tests/test_pipeline_e2e.py .............                                 [ 70%]
-tests/test_sensitive_skip.py ........                                    [ 80%]
-tests/test_signature_stripper.py ...............                         [100%]
-
-=================== 77 passed, 116 subtests passed in 7.13s ====================
-```
-
-### 2. 100-Scenario Synthetic Benchmark Suite (100% Pass)
-```
-========================================================================
-   CUSTOMER EMAIL TRIAGE AUTOMATION — INGESTION TO JEV AI ENGINE
-   LangGraph Pipeline | Local spaCy NER Redactor | 3-Tier Gatekeeper
-========================================================================
-
-[*] Loaded 100 synthetic benchmark scenarios from: data/benchmark_emails.json
-[*] Average Latency: 43.1ms per email
-[+] Result: 100 of 100 scenarios PASSED successfully! Pipeline is operational.
-```
-
----
-
-## 🤝 Phase 2 Handoff Architecture Contract
-
-Phase 1 completes the critical Ingestion, Privacy, Security, and Gatekeeper stages. Downstream Phase 2 modules can seamlessly integrate via the following defined contract:
-
-1. **Pickup Query:**
-   ```python
-   from db.database import TriageDatabase
-   db = TriageDatabase("triage.db")
-   approved_emails = db.get_gatekeeper_approved(limit=50)
-   ```
-2. **State Contract:**
-   Every approved email in `TriageState` includes:
-   - `cleaned_body`: Stripped of quotes, signatures, and footers.
-   - `masked_body`: Anonymized text with `[TOKEN_N]` placeholders (100% PII-free).
-   - `token_map`: Bidirectional map to restore customer details via `unmask_text()` after LLM reasoning.
-   - `gatekeeper_decision`: `'legitimate'` with calibrated confidence score.
-3. **Phase 2 Nodes to Attach:**
-   - Node 06: Customer Tier & SLA Target Enrichment.
-   - Node 07: Intent & Category Classification (`Engineering`, `Support`, `Sales`, `Billing`).
-   - Node 08: Multi-Channel Dispatch Adapters (GitHub Issues, FreeScout, CRM, Slack).
-
----
-
-## 🚀 Readiness Conclusion
-
-The repository is clean, fully verified, secure, and ready for immediate client demonstration or automated CI/CD deployment.
+### [C4] Documentation Synchronization & Metric Accuracy
+* **Problem:** Test counts in README/ROADMAP are outdated; file tree omits test modules; unbacked marketing claims exist (`enterprise-grade`, `sub-second`); dual naming (`JevClient` vs `JevAIClient`).
+* **Solution:**
+  1. Sync README and ROADMAP with real pytest output and test counts.
+  2. Update file trees.
+  3. Unify client naming to `JevClient`.
+  4. Remove unbacked buzzwords; add measurable latency benchmarks.
+* **Done When:** Every metric, diagram, and code reference in documentation matches codebase reality.
