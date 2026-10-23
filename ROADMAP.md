@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[A2] Suppress Raw `token_map` from CLI and Logs**
+**Next up:** **[A4] Fail-Closed Classifier Normalization**
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -35,7 +35,7 @@ The following foundational improvements were implemented and merged in earlier P
 | # | Code | Area | Description | Status |
 |:---:|:---:|:---|:---|:---:|
 | **1** | **A1** | Security | Mask subject line & sender address domain before egress to Jev/Groq | ✅ Resolved |
-| **2** | **A2** | Security | Suppress raw `token_map` from `main.py` CLI and logs; print entity counts | ⏳ Pending |
+| **2** | **A2** | Security | Suppress raw `token_map` from `main.py` CLI and logs; print entity counts | ✅ Resolved |
 | **3** | **A3** | Security | Guard against Groq prompt injection with pre-filter & randomized delimiter tags | ⏳ Pending |
 | **4** | **A4** | Security | Enforce fail-closed classifier normalization (`normalize_result`) with 0.70 threshold | ⏳ Pending |
 | **5** | **A5** | Security | Harden active-thread detection against spoofing & unapproved thread history | 🟡 Partially Done |
@@ -73,6 +73,7 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Test feeds an email with subject PII and asserts external mocked API calls receive only redacted tokens and domain.
 
 ### [A2] Suppress Raw `token_map` from CLI and Logs
+* **Status:** ✅ **Resolved**
 * **Problem:** `main.py` prints the raw `token_map` dictionary in terminal output and logs, exposing real customer names, card numbers, and credentials.
 * **Solution:** Remove `token_map` from CLI summaries. Display aggregate counts by entity type (e.g., `{"PERSON": 2, "EMAIL": 1}`) without plaintext values.
 * **Done When:** Executing `python main.py --input data/sample_email.json` outputs zero plaintext PII in stdout/stderr.

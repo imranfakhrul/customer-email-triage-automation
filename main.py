@@ -12,6 +12,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 import time
@@ -152,40 +153,77 @@ def run_benchmark_suite(
     return all_passed
 
 
-def process_single_email(json_path: str) -> None:
+def count_pii_entities(token_map: Optional[Dict[str, str]]) -> Dict[str, int]:
+    """Aggregates count of masked PII entities by category without revealing raw values.
+
+    Args:
+        token_map: Mapping of tokens like '[PERSON_1]' to raw values.
+
+    Returns:
+        Dictionary of entity counts by type, e.g. {'PERSON': 2, 'EMAIL': 1}.
+    """
+    counts: Dict[str, int] = {}
+    if not token_map:
+        return counts
+    for token in token_map.keys():
+        m = re.match(r"^\[([A-Z_]+)_\d+\]$", token)
+        if m:
+            etype = m.group(1)
+            counts[etype] = counts.get(etype, 0) + 1
+        else:
+            counts["OTHER"] = counts.get("OTHER", 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def process_single_email(json_path: str, offline: bool = False) -> None:
     """Processes a single email JSON file through the triage pipeline and prints output.
 
     Args:
         json_path: Path to the JSON payload file.
+        offline: Whether to force offline deterministic mode.
     """
     if not os.path.exists(json_path):
-        print(f"[-] Input file does not exist: {json_path}")
+        print(f"[-] Input file does not exist: {json_path}", file=sys.stderr)
         sys.exit(1)
 
-    with open(json_path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
 
-    print(f"[*] Processing email payload: {json_path}")
-    db = TriageDatabase()
-    result = run_triage_pipeline(payload, db=db)
+        print(f"[*] Processing email payload: {json_path}")
+        db = TriageDatabase()
+        from utils.jev_client import JevClient
 
-    print("\n--- Pipeline Triage Result ---")
-    output_summary = {
-        "email_id": result.get("email_id"),
-        "routing_status": result.get("routing_status"),
-        "gatekeeper_decision": result.get("gatekeeper_decision"),
-        "classifier_used": result.get("classifier_used"),
-        "is_sensitive": result.get("is_sensitive"),
-        "sensitive_reason": result.get("sensitive_reason"),
-        "is_spam": result.get("is_spam"),
-        "is_threat": result.get("is_threat"),
-        "labels_to_apply": result.get("labels_to_apply"),
-        "dispatch_target": result.get("dispatch_target"),
-        "dispatch_status": result.get("dispatch_status"),
-        "token_map": result.get("token_map"),
-        "masked_body_preview": (result.get("masked_body") or "")[:200],
-    }
-    print(json.dumps(output_summary, indent=2))
+        client = (
+            JevClient(
+                api_key="your_placeholder_key", groq_api_key="your_placeholder_key"
+            )
+            if offline
+            else None
+        )
+        result = run_triage_pipeline(payload, db=db, client=client)
+
+        print("\n--- Pipeline Triage Result ---")
+        output_summary = {
+            "email_id": result.get("email_id"),
+            "routing_status": result.get("routing_status"),
+            "gatekeeper_decision": result.get("gatekeeper_decision"),
+            "classifier_used": result.get("classifier_used"),
+            "is_sensitive": result.get("is_sensitive"),
+            "sensitive_reason": result.get("sensitive_reason"),
+            "is_spam": result.get("is_spam"),
+            "is_threat": result.get("is_threat"),
+            "labels_to_apply": result.get("labels_to_apply"),
+            "dispatch_target": result.get("dispatch_target"),
+            "dispatch_status": result.get("dispatch_status"),
+            "pii_entity_counts": count_pii_entities(result.get("token_map")),
+            "masked_body_preview": (result.get("masked_body") or "")[:200],
+        }
+        print(json.dumps(output_summary, indent=2))
+    except Exception as exc:
+        # Crucial: Never echo payload contents, token_map, or sensitive values on error
+        print(f"[-] Error processing email: {type(exc).__name__}", file=sys.stderr)
+        sys.exit(1)
 
 
 def main() -> None:
@@ -221,7 +259,7 @@ def main() -> None:
     print_banner()
 
     if args.input:
-        process_single_email(args.input)
+        process_single_email(args.input, offline=args.offline)
     else:
         # Default behavior: run benchmark verification suite
         success = run_benchmark_suite(
