@@ -10,6 +10,7 @@ This node acts as a deterministic, pre-LLM security and regulatory guardrail:
 """
 
 import re
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 from db.database import TriageDatabase
@@ -17,6 +18,18 @@ from state import TriageState
 from utils.config import load_config
 
 logger = logging.getLogger(__name__)
+
+# Homoglyph translation map: Cyrillic and Greek lookalikes mapped to Latin lowercase characters
+HOMOGLYPH_MAP = str.maketrans({
+    # Cyrillic
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
+    "і": "i", "ј": "j", "ѕ": "s", "һ": "h", "ԁ": "d", "ӏ": "l", "ԛ": "q", "ԝ": "w",
+    # Greek
+    "α": "a", "ε": "e", "ο": "o", "ρ": "p", "ν": "v", "ι": "i", "κ": "k",
+    "τ": "t", "υ": "u", "χ": "x",
+})
+
+ZERO_WIDTH_CHARS = re.compile(r"[\u200b\u200c\u200d\u2060\ufeff]")
 
 # Default high-liability keywords and phrases if config is unavailable
 DEFAULT_SENSITIVE_KEYWORDS = [
@@ -31,6 +44,8 @@ DEFAULT_SENSITIVE_KEYWORDS = [
     "subpoena",
     "bank account details",
     "wire transfer routing",
+    "chargeback",
+    "chargebacks",
     "will file a chargeback",
     "filing chargeback",
     "filing a chargeback",
@@ -60,8 +75,29 @@ DEFAULT_SENSITIVE_KEYWORDS = [
 DEFAULT_MAX_CODE_DENSITY = 4
 
 
+def normalize_for_matching(text: str) -> str:
+    """Normalizes text for keyword matching to defeat unicode homoglyph and zero-width evasion.
+
+    Pipeline (in exact order):
+    1. unicodedata.normalize("NFKC", text)
+    2. remove zero-width characters (U+200B, U+200C, U+200D, U+2060, U+FEFF)
+    3. lowercase (casefold)
+    4. translate homoglyphs to Latin with lowercase-only map
+
+    NOTE: This normalized text is used ONLY for internal keyword matching.
+    It is never sent to Jev, Groq, the database, or logs.
+    """
+    if not text:
+        return ""
+    t = unicodedata.normalize("NFKC", text)
+    t = ZERO_WIDTH_CHARS.sub("", t)
+    t = t.casefold()
+    t = t.translate(HOMOGLYPH_MAP)
+    return t
+
+
 def compile_keyword_patterns(keywords: List[str]) -> List[Tuple[str, re.Pattern]]:
-    """Compiles case-insensitive word-boundary regex patterns for keywords.
+    """Compiles regex patterns for sensitive keywords with flexible whitespace/hyphen matching.
 
     Args:
         keywords: List of keyword strings or multi-word phrases.
@@ -70,13 +106,32 @@ def compile_keyword_patterns(keywords: List[str]) -> List[Tuple[str, re.Pattern]
         List of tuples (original_keyword, compiled_regex).
     """
     patterns = []
+    seen = set()
     for kw in keywords:
         clean_kw = kw.strip()
         if not clean_kw:
             continue
-        # Use \b word boundaries so e.g. 'nid' doesn't match 'denied' and 'police' doesn't match 'policy'
-        escaped = re.escape(clean_kw)
-        pattern = re.compile(rf"\b{escaped}\b", re.IGNORECASE)
+
+        # Broad chargeback rule handling
+        if clean_kw.lower() in ("chargeback", "chargebacks"):
+            if "chargeback" not in seen:
+                patterns.append(("chargeback", re.compile(r"\bchargebacks?\b", re.IGNORECASE)))
+                seen.add("chargeback")
+            continue
+
+        words = [w for w in re.split(r"[\s\-]+", clean_kw) if w]
+        if not words:
+            continue
+
+        key = " ".join(words).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        inner = r"[\s\-]+".join(re.escape(w) for w in words)
+        prefix = r"(?<!\w)" if re.match(r"^\w", clean_kw) else r"(?<!\S)"
+        suffix = r"(?!\w)" if re.search(r"\w$", clean_kw) else r"(?!\S)"
+        pattern = re.compile(rf"{prefix}{inner}{suffix}", re.IGNORECASE)
         patterns.append((clean_kw, pattern))
     return patterns
 
@@ -86,6 +141,7 @@ def evaluate_sensitive(
     subject: str = "",
     token_map: Optional[Dict[str, str]] = None,
     config: Optional[Dict[str, Any]] = None,
+    raw_body: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
     """Evaluates whether an email triggers sensitive-skip guardrails.
 
@@ -94,6 +150,7 @@ def evaluate_sensitive(
         subject: Email subject line.
         token_map: Anonymized token dictionary from Node 03.
         config: System configuration dictionary.
+        raw_body: Optional raw uncleaned body (to guard against stripping exploits).
 
     Returns:
         Tuple of (is_sensitive: bool, sensitive_reason: Optional[str]).
@@ -108,13 +165,15 @@ def evaluate_sensitive(
     keywords = privacy_cfg.get("sensitive_keywords", DEFAULT_SENSITIVE_KEYWORDS)
     max_code_density = privacy_cfg.get("max_code_density", DEFAULT_MAX_CODE_DENSITY)
 
-    combined_text = f"{subject}\n{text}" if subject else text
-
-    # 1. Keyword / Phrase Inspection
+    # 1. Keyword / Phrase Inspection across subject, cleaned/masked body, and raw body
     compiled_patterns = compile_keyword_patterns(keywords)
-    for kw, pattern in compiled_patterns:
-        if pattern.search(combined_text):
-            return True, f"Matched sensitive keyword or phrase: '{kw}'"
+    texts_to_check = [t for t in [subject, text, raw_body] if t]
+
+    for candidate_text in texts_to_check:
+        normalized_text = normalize_for_matching(candidate_text)
+        for kw, pattern in compiled_patterns:
+            if pattern.search(normalized_text):
+                return True, f"Matched sensitive keyword or phrase: '{kw}'"
 
     # 2. Token / Credential Density Check
     # High concentrations of leaked credentials or payment info must be diverted to human triage
@@ -167,6 +226,7 @@ def sensitive_skip_node(
         or state.get("raw_body")
         or ""
     )
+    raw_body = state.get("raw_body") or ""
     token_map = state.get("token_map", {})
     email_id = state.get("email_id", "")
 
@@ -175,6 +235,7 @@ def sensitive_skip_node(
         subject=subject,
         token_map=token_map,
         config=config,
+        raw_body=raw_body,
     )
 
     if is_sensitive:

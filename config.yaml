@@ -26,6 +26,7 @@ privacy:
     - "subpoena"
     - "bank account details"
     - "wire transfer routing"
+    - "chargeback"
     - "will file a chargeback"
     - "filing chargeback"
     - "filing a chargeback"
