@@ -38,7 +38,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **2** | **A2** | Security | Suppress raw `token_map` from `main.py` CLI and logs; print entity counts | ✅ Resolved |
 | **3** | **A3** | Security | Guard against Groq prompt injection with pre-filter & randomized delimiter tags | ✅ Resolved |
 | **4** | **A4** | Security | Enforce fail-closed classifier normalization (`normalize_result`) with 0.70 threshold | ✅ Resolved |
-| **5** | **A5** | Security | Harden active-thread detection against spoofing & unapproved thread history | 🟡 Partially Done |
+| **5** | **A5** | Security | Harden active-thread detection against spoofing & unapproved thread history | ✅ Resolved |
 | **6** | **A6** | Security | Eliminate ReDoS vulnerabilities in heuristic regexes & limit input length | ⏳ Pending |
 | **7** | **A7** | Security | Defeat sensitive keyword evasion (NFKC, zero-width, Cyrillic/Greek homoglyphs, broad chargeback) | ✅ Resolved (`c75f0b5`) |
 | **8** | **A8** | Security | Fail fast on startup & runtime safeguard if spaCy model is missing while AI keys active | ✅ Resolved (`8ec99a2`) |
@@ -99,9 +99,7 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Table-driven unit test covers all edge cases (out-of-range confidence, unrecognized decision strings, threat flags).
 
 ### [A5] Harden Active-Thread Verification Against Spoofing
-* **Status:** 🟡 **Partially Done**
-  * *Done earlier:* Verified participant addresses against thread history in Commit `02650f9`.
-  * *Still missing:* (1) Restrict SQL history queries strictly to `routing_status = 'gatekeeper_approved'` (currently counts any `status = 'done'`, including spam/sensitive). (2) Disallow empty sender matching; require non-empty exact equality. (3) Initialize `is_active_thread = None` in initial state, ignoring incoming payload claims.
+* **Status:** ✅ **Resolved**
 * **Problem:** A spammer can send an initial email (caught as spam, marked done), then reply to the thread and have it classified as an active customer conversation. Empty senders match any address. Payloads can inject `is_active_thread: true`.
 * **Solution:**
   1. Restrict SQL history queries strictly to `routing_status = 'gatekeeper_approved'`.

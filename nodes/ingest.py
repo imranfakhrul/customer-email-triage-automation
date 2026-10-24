@@ -64,19 +64,14 @@ def ingest_node(
     email_subject = state.get("email_subject") or ""
     has_attachments = bool(state.get("has_attachments", False))
 
-    # Active Thread Continuity Check
-    # Do not trust In-Reply-To or thread headers alone; also require that sender is a known participant
-    has_prior_thread = db.is_active_thread(thread_id, exclude_email_id=email_id)
+    # Active Thread Continuity Check (A5: Never trust incoming payload claims; require prior approved history)
+    has_prior_thread = db.is_active_thread(thread_id, exclude_email_id=email_id) if db is not None else False
     is_known_participant = (
         db.is_thread_participant(thread_id, sender_email, exclude_email_id=email_id)
-        if has_prior_thread
+        if (has_prior_thread and db is not None)
         else False
     )
-
-    if has_prior_thread:
-        is_active_thread = bool(is_known_participant)
-    else:
-        is_active_thread = bool(state.get("is_active_thread", False))
+    is_active_thread = bool(has_prior_thread and is_known_participant)
 
     # Check and acquire idempotency lock
     allowed, outcome, record = db.check_and_acquire(

@@ -100,6 +100,17 @@ def run_benchmark_suite(
         name = item.get("name", scenario_id)[:28]
         expected = item.get("expected", {})
 
+        # If testing active thread scenario, seed prior approved email in DB with matching participant
+        if item.get("category") == "active_thread" or expected.get("routing_status") == "active_thread_continuation":
+            prior_email_id = f"prior_{item['email_id']}"
+            db.check_and_acquire(
+                email_id=prior_email_id,
+                thread_id=item["thread_id"],
+                message_id=f"<prior-{item['email_id']}@domain.com>",
+                sender_email=item["sender_email"],
+            )
+            db.mark_done(prior_email_id, routing_status="gatekeeper_approved")
+
         # If testing duplicate delivery scenario, mark previous run done in DB first
         if expected.get("routing_status") == "duplicate_skipped":
             db.mark_done(item["email_id"], routing_status="completed")

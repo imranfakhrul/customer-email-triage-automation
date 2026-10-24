@@ -113,7 +113,7 @@ class TriageDatabase:
                 cursor = conn.execute(
                     """
                     SELECT * FROM email_triage
-                    WHERE thread_id = ? AND email_id != ? AND status = 'done'
+                    WHERE thread_id = ? AND email_id != ? AND routing_status = 'gatekeeper_approved'
                     ORDER BY updated_at DESC
                     """,
                     (thread_id, exclude_email_id),
@@ -122,7 +122,7 @@ class TriageDatabase:
                 cursor = conn.execute(
                     """
                     SELECT * FROM email_triage
-                    WHERE thread_id = ? AND status = 'done'
+                    WHERE thread_id = ? AND routing_status = 'gatekeeper_approved'
                     ORDER BY updated_at DESC
                     """,
                     (thread_id,),
@@ -165,7 +165,7 @@ class TriageDatabase:
             return False
         for r in records:
             prev_sender = (r.get("sender_email") or "").strip().lower()
-            if not prev_sender or prev_sender == sender_clean:
+            if prev_sender and prev_sender == sender_clean:
                 return True
         return False
 
