@@ -156,9 +156,9 @@ class TestPipelineE2E(unittest.TestCase):
 
         result = run_triage_pipeline(payload, pipeline=self.pipeline, db=self.db)
 
-        self.assertEqual(result["gatekeeper_decision"], "spam")
+        self.assertEqual(result["gatekeeper_decision"], "manual_review")
         self.assertTrue(result["is_threat"])
-        self.assertEqual(result["routing_status"], "spam_skipped")
+        self.assertEqual(result["routing_status"], "manual_review")
 
     def test_e2e_legal_threat_diversion_stops_before_gatekeeper(self):
         """Verifies cease & desist notice diverts to Review/Sensitive and halts before gatekeeper."""
@@ -276,9 +276,7 @@ class TestPipelineE2E(unittest.TestCase):
         result = run_triage_pipeline(payload, pipeline=self.pipeline, db=self.db)
 
         self.assertTrue(result["is_threat"])
-        self.assertIn(
-            result["routing_status"], ["manual_review", "spam_skipped"]
-        )
+        self.assertEqual(result["routing_status"], "manual_review")
         self.assertEqual(result["dispatch_status"], "done")
 
     def test_e2e_duplicate_delivery_interception(self):

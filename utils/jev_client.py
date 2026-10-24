@@ -11,10 +11,11 @@ import logging
 import math
 import os
 import re
+import secrets
 from typing import Any, Dict, Optional
 
 import requests
-from prompts import GATEKEEPER_SYSTEM_PROMPT
+from prompts import GATEKEEPER_SYSTEM_PROMPT, build_gatekeeper_system_prompt
 from utils.config import get_env_var, load_config
 
 logger = logging.getLogger(__name__)
@@ -348,6 +349,29 @@ class JevClient:
                 - threat_details: Optional[str]
                 - classifier_used: 'jev', 'groq', or 'regex'
         """
+        # Step 0: Prompt Injection Pre-Filter (A3: Defense before any external AI call)
+        # Cap evaluated text to the first 10,000 characters to prevent ReDoS latency
+        eval_text = f"{subject or ''}\n{body or ''}"[:10000]
+        if PROMPT_INJECTION_REGEX.search(eval_text) or PROMPT_INJECTION_REGEX.search((body or "")[:10000]):
+            logger.warning(
+                f"[Gatekeeper] Prompt injection detected by pre-filter regex -> "
+                f"decision='manual_review', confidence=1.00, is_threat=True"
+            )
+            result = {
+                "decision": "manual_review",
+                "confidence": 1.0,
+                "is_spam": False,
+                "is_threat": True,
+                "threat_details": "possible prompt injection",
+                "classifier_used": "regex",
+            }
+            norm_result = normalize_result(result, self.config)
+            logger.info(
+                f"[Gatekeeper] Email evaluated by engine='{norm_result['classifier_used']}' -> "
+                f"decision='{norm_result['decision']}', confidence={norm_result['confidence']:.2f}"
+            )
+            return norm_result
+
         result: Optional[Dict[str, Any]] = None
 
         # Step 1: Attempt Primary Classifier (TypeSafe System One / Jev)
@@ -530,10 +554,18 @@ class JevClient:
                 timeout=5.0,
             )
 
+            marker_nonce = secrets.token_hex(3)
+            marker_tag = f"email-{marker_nonce}"
+            system_prompt = build_gatekeeper_system_prompt(marker_tag)
+
             sender_domain = self._extract_domain(sender)
-            prompt_content = f"Sender: {sender_domain}\nSubject: {subject}\n\nBody:\n{body}"
+            prompt_content = (
+                f"Sender: {sender_domain}\n"
+                f"Subject: {subject}\n\n"
+                f"Body:\n<{marker_tag}>\n{body}\n</{marker_tag}>"
+            )
             messages = [
-                SystemMessage(content=GATEKEEPER_SYSTEM_PROMPT),
+                SystemMessage(content=system_prompt),
                 HumanMessage(content=prompt_content),
             ]
 
@@ -560,13 +592,13 @@ class JevClient:
         text = f"{subject}\n{body}"
 
         # 1. Prompt Injection / Malicious Payloads
-        if PROMPT_INJECTION_REGEX.search(text):
+        if PROMPT_INJECTION_REGEX.search(text[:10000]):
             return {
-                "decision": "spam",
-                "confidence": 0.99,
-                "is_spam": True,
+                "decision": "manual_review",
+                "confidence": 1.0,
+                "is_spam": False,
                 "is_threat": True,
-                "threat_details": "Adversarial prompt injection pattern detected",
+                "threat_details": "possible prompt injection",
                 "classifier_used": "regex",
             }
 
