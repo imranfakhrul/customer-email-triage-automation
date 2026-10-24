@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 import requests
 from prompts import GATEKEEPER_SYSTEM_PROMPT, build_gatekeeper_system_prompt
@@ -332,6 +333,45 @@ class JevClient:
             return False
         return True
 
+    @staticmethod
+    def _is_allowed_url(url: Optional[str]) -> bool:
+        """Validates that Jev endpoint strictly points to allowed hosts:
+        - https://api.typesafe.ai (verified against docs.typesafe.ai)
+        - localhost / 127.0.0.1 (http or https, with or without port) for tests.
+        """
+        if not url or not isinstance(url, str):
+            return False
+        try:
+            parsed = urlparse(url.strip())
+            if not parsed.scheme or not parsed.hostname:
+                return False
+            hostname = parsed.hostname.lower()
+            scheme = parsed.scheme.lower()
+            if hostname in ("localhost", "127.0.0.1"):
+                return scheme in ("http", "https")
+            if hostname == "api.typesafe.ai":
+                return scheme == "https"
+            return False
+        except Exception:
+            return False
+
+    @staticmethod
+    def _sanitize_url_for_logging(url: Optional[str]) -> str:
+        """Strips query strings, credentials, and fragments from a URL before logging."""
+        if not url or not isinstance(url, str):
+            return "<empty>"
+        try:
+            parsed = urlparse(url.strip())
+            scheme = (parsed.scheme or "").lower()
+            host = (parsed.hostname or "").lower()
+            port = f":{parsed.port}" if parsed.port else ""
+            path = parsed.path or ""
+            if scheme and host:
+                return f"{scheme}://{host}{port}{path}"
+            return "<malformed-url>"
+        except Exception:
+            return "<malformed-url>"
+
     def classify(self, subject: str, body: str, sender: str = "") -> Dict[str, Any]:
         """Classifies incoming email using Jev AI with automatic fallbacks.
 
@@ -425,6 +465,16 @@ class JevClient:
         if not is_spacy_available():
             logger.warning("[JevClient] Refusing Jev API call: spaCy is unavailable.")
             return None
+
+        # A13: Validate Jev endpoint allowlist before constructing headers or sending request
+        if not self._is_allowed_url(self.api_url):
+            sanitized_url = self._sanitize_url_for_logging(self.api_url)
+            logger.warning(
+                f"[JevClient] Disallowed Jev API URL '{sanitized_url}'. "
+                "Only https://api.typesafe.ai and localhost/127.0.0.1 are permitted."
+            )
+            return None
+
         truncated_body = body[: self.max_body_chars] if body else ""
 
         headers = {
@@ -466,21 +516,22 @@ class JevClient:
                 json=payload,
                 headers=headers,
                 timeout=self.timeout_seconds,
+                allow_redirects=False,
             )
 
             # Handle 401 Unauthorized: Invalid API key disables Jev for session
             if response.status_code == 401:
                 logger.error(
-                    "Jev API returned 401 Unauthorized: invalid API key. "
+                    "Jev API returned status 401: invalid API key. "
                     "Disabling Jev for this session and falling back."
                 )
                 self._jev_disabled = True
                 return None
 
-            # Handle other client/server error codes
+            # Handle other client/server error codes (log status code only, never response body)
             if response.status_code != 200:
                 logger.warning(
-                    f"Jev API returned status {response.status_code}: {response.text[:200]}"
+                    f"Jev API returned status {response.status_code}."
                 )
                 return None
 
@@ -558,7 +609,7 @@ class JevClient:
             }
 
         except Exception as exc:
-            logger.warning(f"Jev API request failed: {exc}")
+            logger.warning(f"Jev API request failed: {exc.__class__.__name__}")
             return None
 
     def _call_groq_fallback(
@@ -609,7 +660,7 @@ class JevClient:
             data["classifier_used"] = "groq"
             return normalize_result(data, self.config)
         except Exception as exc:
-            logger.warning(f"Groq fallback classifier failed: {exc}")
+            logger.warning(f"Groq fallback classifier failed: {exc.__class__.__name__}")
             return None
 
     def _heuristic_fallback(

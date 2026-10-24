@@ -28,11 +28,12 @@ def main() -> None:
 
     # Check key presence and placeholder status
     if not JevClient._is_valid_key(api_key):
+        print("Jev key: missing")
         print("\n[!] Notice: No valid JEV_API_KEY detected in your environment or .env file.")
         print("    Add a real JEV_API_KEY to .env, then run this again.\n")
         sys.exit(0)
 
-    print(f"[*] Found JEV_API_KEY: {api_key[:4]}...{api_key[-4:] if len(api_key) > 8 else ''}")
+    print("Jev key: present")
     print("[*] Initializing JevClient...")
     client = JevClient(config=config, api_key=api_key)
 

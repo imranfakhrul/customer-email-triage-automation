@@ -46,7 +46,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **10** | **A10** | Privacy | Contextualize technical terms whitelist to protect real surnames (Jenkins, Kafka, etc.) | 🟡 Partially Done |
 | **11** | **A11** | Concurrency | Atomic SQLite idempotency check-and-claim to prevent multi-worker race conditions | ⏳ Pending |
 | **12** | **A12** | Infrastructure | Run container as non-root `appuser`, fix data volume mounts, and honor `DATABASE_PATH` | ⏳ Pending |
-| **13** | **A13** | Security | Hardened secrets handling: `override=False`, enforce `api.typesafe.ai` host, redact debug keys | ⏳ Pending |
+| **13** | **A13** | Security | Hardened secrets handling: `override=False`, enforce `api.typesafe.ai` host, redact debug keys | ✅ Resolved |
 | **14** | **A14** | Infrastructure | Pin exact dependency versions in `requirements.txt` and spaCy language model URL | ⏳ Pending |
 | **15** | **B1** | Correctness | Refine signature stripper: RFC 3676, bare `--` code safety, bottom-up scan, safety size limit | ✅ Resolved (`8c13658`) |
 | **16** | **B2** | Correctness | Remove generic business words from offline spam heuristics; route threats to manual review | ⏳ Pending |
@@ -172,6 +172,7 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** `docker compose run --rm email-triage whoami` outputs `appuser`, and database file generates inside `./data`.
 
 ### [A13] Secrets Hardening & API Environment Controls
+* **Status:** ✅ **Resolved**
 * **Problem:** `load_dotenv(override=True)` overwrites production environment variables; arbitrary `JEV_API_URL` allows secret harvesting; smoke test prints partial API key; raw error response bodies are logged.
 * **Solution:**
   1. Set `load_dotenv(override=False)`.

@@ -10,8 +10,8 @@ from typing import Any, Dict, Optional
 import yaml
 from dotenv import load_dotenv
 
-# Automatically load environment variables from .env if present
-load_dotenv(override=True)
+# Automatically load environment variables from .env if present (preserve existing environment variables)
+load_dotenv(override=False)
 
 
 def validate_config(config: Dict[str, Any]) -> None:

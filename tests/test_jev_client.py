@@ -6,9 +6,11 @@ All tests use mock HTTP responses to run completely offline with zero API calls.
 """
 
 import logging
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 from utils.config import validate_config
 from utils.jev_client import JevClient, normalize_result
@@ -352,6 +354,288 @@ class TestNormalizeResultTableDriven(unittest.TestCase):
                     case["expected_is_spam"],
                     f"Case '{case['name']}' failed is_spam",
                 )
+
+
+# ============================================================================
+# [A13] Secrets Hardening & Endpoint Controls Tests
+# ============================================================================
+
+def test_a13_env_var_already_set_wins_over_dotenv(tmp_path, monkeypatch):
+    """Verifies fix A13: Real environment variable wins over .env with load_dotenv(override=False)."""
+    import inspect
+    import utils.config as config_module
+    from dotenv import load_dotenv
+
+    # 1. Assert utils/config.py specifies override=False
+    source = inspect.getsource(config_module)
+    assert "load_dotenv(override=False)" in source
+
+    # 2. Simulate env var already set before .env
+    test_key = "TRIAGE_TEST_ENV_KEY_A13"
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"{test_key}=value_from_dotenv\nTRIAGE_NEW_VAR=only_in_file\n", encoding="utf-8")
+
+    monkeypatch.setenv(test_key, "value_from_real_environment")
+
+    load_dotenv(dotenv_path=str(env_file), override=False)
+
+    # Environment variable value must win over .env
+    assert os.environ.get(test_key) == "value_from_real_environment"
+    # Unset variable in environment is loaded from .env
+    assert os.environ.get("TRIAGE_NEW_VAR") == "only_in_file"
+
+
+def test_a13_disallowed_jev_api_urls_trigger_fallback_and_leak_no_secret():
+    """Verifies fix A13: Disallowed JEV_API_URL prevents HTTP call, never sends key, and falls back."""
+    disallowed_urls = [
+        "https://evil.example.com",
+        "https://evil.example.com/v1/systemone?secret=super_secret_token_leak",
+        "http://api.typesafe.ai",
+        "http://api.typesafe.ai/v1/systemone",
+        "://malformed-url-format",
+        "not_a_valid_url_at_all",
+        "ftp://localhost",
+        "https://api.typesafe.ai.evil.com",
+    ]
+
+    distinctive_secret_key = "secret_jev_key_classified_12345"
+    mock_config = {
+        "gatekeeper": {
+            "timeout_seconds": 1.0,
+            "max_retries": 1,
+            "fallback_model": "openai/gpt-oss-20b",
+            "jev": {
+                "hi_threshold": 0.85,
+                "lo_threshold": 0.15,
+            },
+        }
+    }
+
+    for url in disallowed_urls:
+        with patch("requests.post") as mock_post:
+            client = JevClient(
+                config=mock_config,
+                api_key=distinctive_secret_key,
+                groq_api_key="",  # fallback directly to regex
+                api_url=url,
+            )
+
+            result = client.classify(
+                subject="Inquiry regarding licensing",
+                body="Hello, what are your enterprise license options?",
+                sender="user@corp.com",
+            )
+
+            # Assert no HTTP request was made
+            mock_post.assert_not_called()
+
+            # Assert secret key was never passed to any call
+            for mock_call in mock_post.mock_calls:
+                assert distinctive_secret_key not in str(mock_call)
+
+            # Assert result was produced by the fallback path
+            assert result["classifier_used"] == "regex"
+            assert result["decision"] == "legitimate"
+
+
+def test_a13_allowed_urls_work_mocked():
+    """Verifies fix A13: Allowed endpoints (https://api.typesafe.ai, localhost, 127.0.0.1) work properly."""
+    allowed_urls = [
+        "https://api.typesafe.ai",
+        "https://api.typesafe.ai/v1/systemone",
+        "http://localhost:8000/v1/systemone",
+        "https://localhost:8000/v1/systemone",
+        "http://127.0.0.1:8000/v1/systemone",
+        "https://127.0.0.1:8000/v1/systemone",
+        "http://localhost",
+        "http://127.0.0.1",
+    ]
+
+    mock_config = {
+        "gatekeeper": {
+            "timeout_seconds": 1.0,
+            "max_retries": 1,
+            "jev": {
+                "hi_threshold": 0.85,
+                "lo_threshold": 0.15,
+            },
+        }
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "answers": {
+            "is_spam": {"type": "noul", "noul": 0.02},
+            "is_threat": {"type": "noul", "noul": 0.01},
+        }
+    }
+
+    for url in allowed_urls:
+        with patch("requests.post", return_value=mock_resp) as mock_post:
+            client = JevClient(
+                config=mock_config,
+                api_key="valid_test_key_123",
+                api_url=url,
+            )
+
+            result = client.classify(
+                subject="Allowed URL test",
+                body="Testing allowed URL endpoint resolution",
+                sender="user@corp.com",
+            )
+
+            mock_post.assert_called_once()
+            called_url = mock_post.call_args[0][0]
+            assert called_url == url
+            assert result["classifier_used"] == "jev"
+            assert result["decision"] == "legitimate"
+
+
+def test_a13_smoke_test_output_contains_no_key_characters(capsys, monkeypatch):
+    """Verifies fix A13: scripts/jev_smoke_test.py prints 'Jev key: present' and zero key characters."""
+    import scripts.jev_smoke_test as smoke_test
+
+    distinctive_fake_key = "JEV_DISTINCTIVE_SECRET_998877_ALPHA"
+    monkeypatch.setenv("JEV_API_KEY", distinctive_fake_key)
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "answers": {
+            "is_spam": {"type": "noul", "noul": 0.05},
+            "is_threat": {"type": "noul", "noul": 0.01},
+        }
+    }
+
+    with patch("requests.post", return_value=mock_resp):
+        smoke_test.main()
+
+    captured = capsys.readouterr()
+    combined_output = captured.out + captured.err
+
+    # Assert "Jev key: present" is printed
+    assert "Jev key: present" in combined_output
+
+    # Assert none of the key characters or parts appear anywhere in stdout/stderr
+    assert distinctive_fake_key not in combined_output
+    assert "JEV_DISTINCTIVE" not in combined_output
+    assert "998877" not in combined_output
+    assert "ALPHA" not in combined_output
+
+    # Check all 4-character slices of the key
+    for i in range(len(distinctive_fake_key) - 3):
+        slice_4 = distinctive_fake_key[i : i + 4]
+        assert slice_4 not in combined_output
+
+
+def test_a13_smoke_test_missing_key_output(capsys, monkeypatch):
+    """Verifies fix A13: scripts/jev_smoke_test.py prints 'Jev key: missing' when key is missing."""
+    import scripts.jev_smoke_test as smoke_test
+
+    monkeypatch.setenv("JEV_API_KEY", "")
+
+    with pytest.raises(SystemExit) as exc_info:
+        smoke_test.main()
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "Jev key: missing" in captured.out
+
+
+def test_a13_logging_status_code_only_on_http_errors(caplog):
+    """Verifies fix A13: 401 and 500 log status code only, never response body text with customer PII."""
+    caplog.set_level(logging.INFO)
+    mock_config = {
+        "gatekeeper": {
+            "timeout_seconds": 1.0,
+            "max_retries": 1,
+            "jev": {
+                "hi_threshold": 0.85,
+                "lo_threshold": 0.15,
+            },
+        }
+    }
+
+    # 1. Test HTTP 401
+    caplog.clear()
+    fake_body_401 = '{"error": "Unauthorized customer account for sarah.connor@cyberdyne.com with CC 4111 2222 3333 4444"}'
+    with patch("requests.post") as mock_post:
+        mock_resp_401 = MagicMock()
+        mock_resp_401.status_code = 401
+        mock_resp_401.text = fake_body_401
+        mock_post.return_value = mock_resp_401
+
+        client = JevClient(config=mock_config, api_key="valid_jev_key", groq_api_key="")
+        client.classify(subject="Billing", body="Please refund my payment", sender="sarah.connor@cyberdyne.com")
+
+        log_text = caplog.text
+        assert "401" in log_text
+        assert "sarah.connor@cyberdyne.com" not in log_text
+        assert "4111 2222 3333 4444" not in log_text
+        assert "Unauthorized customer account" not in log_text
+
+    # 2. Test HTTP 500
+    caplog.clear()
+    fake_body_500 = '{"error": "Internal database crash for customer john.doe@example.org with phone +1-555-867-5309"}'
+    with patch("requests.post") as mock_post:
+        mock_resp_500 = MagicMock()
+        mock_resp_500.status_code = 500
+        mock_resp_500.text = fake_body_500
+        mock_post.return_value = mock_resp_500
+
+        client = JevClient(config=mock_config, api_key="valid_jev_key_2", groq_api_key="")
+        client.classify(subject="Support", body="Service is down", sender="john.doe@example.org")
+
+        log_text = caplog.text
+        assert "500" in log_text
+        assert "john.doe@example.org" not in log_text
+        assert "555-867-5309" not in log_text
+        assert "Internal database crash" not in log_text
+
+
+def test_a13_logging_connection_error_has_class_name_only(caplog):
+    """Verifies fix A13: ConnectionError logs only the class name, never exception text."""
+    caplog.set_level(logging.INFO)
+    mock_config = {
+        "gatekeeper": {
+            "timeout_seconds": 1.0,
+            "max_retries": 1,
+            "jev": {
+                "hi_threshold": 0.85,
+                "lo_threshold": 0.15,
+            },
+        }
+    }
+
+    sensitive_exception_msg = "Connection failed to https://api.typesafe.ai?token=CONFIDENTIAL_API_TOKEN_XYZ"
+
+    # 1. Jev ConnectionError
+    caplog.clear()
+    with patch("requests.post", side_effect=requests.exceptions.ConnectionError(sensitive_exception_msg)):
+        client = JevClient(config=mock_config, api_key="valid_jev_key", groq_api_key="")
+        client.classify(subject="Query", body="Test email content", sender="customer@company.com")
+
+        log_text = caplog.text
+        assert "ConnectionError" in log_text
+        assert "CONFIDENTIAL_API_TOKEN_XYZ" not in log_text
+        assert sensitive_exception_msg not in log_text
+
+    # 2. Groq ConnectionError
+    caplog.clear()
+    with patch("langchain_groq.ChatGroq") as mock_groq_cls:
+        mock_groq_instance = MagicMock()
+        mock_groq_instance.invoke.side_effect = ConnectionError("Groq failure on payload with customer credit card 4111")
+        mock_groq_cls.return_value = mock_groq_instance
+
+        # Client with empty Jev key to invoke Groq fallback
+        client = JevClient(config=mock_config, api_key="", groq_api_key="gsk_valid_key_123")
+        client.classify(subject="Query", body="Test email content", sender="customer@company.com")
+
+        log_text = caplog.text
+        assert "ConnectionError" in log_text
+        assert "4111" not in log_text
+        assert "Groq failure on payload" not in log_text
 
 
 if __name__ == "__main__":
