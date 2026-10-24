@@ -455,5 +455,128 @@ class TestA5ActiveThreadSecurity(unittest.TestCase):
         self.assertEqual(output["routing_status"], "active_thread_continuation")
 
 
+class TestA11ConcurrencyIdempotencyLock(unittest.TestCase):
+    """Concurrency verification suite for Fix A11: Atomic SQLite Idempotency Lock."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "concurrent_triage.db")
+        self.db = TriageDatabase(db_path=self.db_path)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_a11_concurrent_new_email_8_threads_30_trials(self):
+        """Verifies 8 threads with their own DB connections locking the same new email concurrently.
+
+        Over 30 trials, asserts:
+        - exactly 1 winner per trial
+        - 0 exceptions per trial
+        """
+        import threading
+
+        trials_count = 30
+        for trial in range(trials_count):
+            email_id = f"concurrent_new_{trial}"
+            # 8 threads, each with its OWN database connection to the same file
+            thread_dbs = [TriageDatabase(db_path=self.db_path) for _ in range(8)]
+            barrier = threading.Barrier(8)
+            results = []
+            exceptions = []
+
+            def worker(idx):
+                barrier.wait()
+                try:
+                    res = thread_dbs[idx].check_and_acquire(
+                        email_id=email_id,
+                        thread_id="th_concurrent",
+                        sender_email=f"sender_{idx}@example.com",
+                    )
+                    results.append(res)
+                except Exception as exc:
+                    exceptions.append(exc)
+
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            self.assertEqual(len(exceptions), 0, f"Trial {trial} had exceptions: {exceptions}")
+            self.assertEqual(len(results), 8, f"Trial {trial} missing worker results")
+
+            winners = [r for r in results if r[0] is True]
+            self.assertEqual(
+                len(winners), 1, f"Trial {trial} had {len(winners)} winners (expected exactly 1)"
+            )
+            self.assertEqual(winners[0][1], "acquired_new")
+
+            losers = [r for r in results if r[0] is False]
+            self.assertEqual(len(losers), 7)
+            for loser in losers:
+                self.assertEqual(loser[1], "in_flight")
+
+    def test_a11_concurrent_stale_lock_8_threads_30_trials(self):
+        """Verifies 8 threads with their own DB connections recovering the same stale lock concurrently.
+
+        Over 30 trials, asserts:
+        - exactly 1 winner per trial (recovers stale lock)
+        - 0 exceptions per trial
+        """
+        import threading
+
+        trials_count = 30
+        for trial in range(trials_count):
+            email_id = f"concurrent_stale_{trial}"
+            # Pre-acquire email
+            self.db.check_and_acquire(email_id=email_id)
+
+            # Backdate updated_at by 15 minutes (stale threshold = 10 minutes)
+            stale_time = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+            with self.db.get_connection() as conn:
+                conn.execute(
+                    "UPDATE email_triage SET updated_at = ? WHERE email_id = ?",
+                    (stale_time, email_id),
+                )
+
+            # 8 threads, each with its OWN database connection to the same file
+            thread_dbs = [TriageDatabase(db_path=self.db_path) for _ in range(8)]
+            barrier = threading.Barrier(8)
+            results = []
+            exceptions = []
+
+            def worker(idx):
+                barrier.wait()
+                try:
+                    res = thread_dbs[idx].check_and_acquire(
+                        email_id=email_id,
+                        stale_minutes=10,
+                        max_retries=3,
+                    )
+                    results.append(res)
+                except Exception as exc:
+                    exceptions.append(exc)
+
+            threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            self.assertEqual(len(exceptions), 0, f"Trial {trial} had exceptions: {exceptions}")
+            self.assertEqual(len(results), 8, f"Trial {trial} missing worker results")
+
+            winners = [r for r in results if r[0] is True]
+            self.assertEqual(
+                len(winners), 1, f"Trial {trial} had {len(winners)} winners (expected exactly 1)"
+            )
+            self.assertEqual(winners[0][1], "recovered_stale")
+
+            losers = [r for r in results if r[0] is False]
+            self.assertEqual(len(losers), 7)
+            for loser in losers:
+                self.assertEqual(loser[1], "in_flight")
+
+
 if __name__ == "__main__":
     unittest.main()

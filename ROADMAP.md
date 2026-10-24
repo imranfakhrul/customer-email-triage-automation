@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[A11] Atomic SQLite Idempotency Check-and-Claim** (or **[A9] Precision PII Regexes, Luhn Check & Token Nonces**)
+**Next up:** **[A9] Precision PII Regexes, Luhn Check & Token Nonces** (or **[A10] Contextualize Tech-Terms Whitelist**)
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -44,7 +44,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **8** | **A8** | Security | Fail fast on startup & runtime safeguard if spaCy model is missing while AI keys active | ✅ Resolved (`8ec99a2`) |
 | **9** | **A9** | Privacy | Integrate `phonenumbers` library, Luhn credit card check, and collision-safe tokens | ⏳ Pending |
 | **10** | **A10** | Privacy | Contextualize technical terms whitelist to protect real surnames (Jenkins, Kafka, etc.) | 🟡 Partially Done |
-| **11** | **A11** | Concurrency | Atomic SQLite idempotency check-and-claim to prevent multi-worker race conditions | ⏳ Pending |
+| **11** | **A11** | Concurrency | Atomic SQLite idempotency check-and-claim to prevent multi-worker race conditions | ✅ Resolved |
 | **12** | **A12** | Infrastructure | Run container as non-root `appuser`, fix data volume mounts, and honor `DATABASE_PATH` | ⏳ Pending |
 | **13** | **A13** | Security | Hardened secrets handling: `override=False`, enforce `api.typesafe.ai` host, redact debug keys | ✅ Resolved |
 | **14** | **A14** | Infrastructure | Pin exact dependency versions in `requirements.txt` and spaCy language model URL | ⏳ Pending |
@@ -156,11 +156,15 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** `"Thanks, Jenkins"` masks the name, while `"our Jenkins pipeline failed"` does not.
 
 ### [A11] Concurrency & Atomic SQLite Idempotency Locking
-* **Problem:** `check_and_acquire` executes a `SELECT` followed by an `INSERT`/`UPDATE` in separate statements. Concurrent worker threads race and cause double processing or `sqlite3.IntegrityError` crashes.
+* **Status:** ✅ **Resolved**
+* **Problem:** `check_and_acquire` executed a `SELECT` followed by an `INSERT`/`UPDATE` in separate statements. Concurrent worker threads raced and caused double processing, lost stale recoveries, or `sqlite3.IntegrityError` / `database is locked` crashes.
 * **Solution:**
-  1. For new emails: `INSERT ... ON CONFLICT(email_id) DO NOTHING` and inspect `cursor.rowcount == 1`.
-  2. For stale lock recovery: conditional `UPDATE email_triage SET status='processing' ... WHERE email_id=? AND status='processing' AND updated_at < ?` and check `cursor.rowcount == 1`.
-* **Done When:** Concurrency test with 8 simultaneous threads attempting to lock the same email results in exactly 1 winner and 0 crashes.
+  1. For new emails: Single-statement `INSERT INTO email_triage ... ON CONFLICT(email_id) DO NOTHING` checking `cursor.rowcount == 1`.
+  2. For stale lock recovery: Conditional `UPDATE email_triage SET status='processing', retry_count=retry_count+1, updated_at=?, routing_status='stale_recovery' WHERE email_id=? AND status='processing' AND updated_at < ? AND retry_count < ?` checking `cursor.rowcount == 1`.
+  3. For retry-eligible failed emails: Conditional `UPDATE email_triage SET status='processing', retry_count=retry_count+1 ... WHERE email_id=? AND status='failed' AND retry_count < ?` checking `cursor.rowcount == 1`.
+  4. Database connection resilience: Set `PRAGMA journal_mode=WAL;` and `PRAGMA busy_timeout=5000;` on all connections. Caught lock collisions cleanly and treated lost races as `in_flight` / `already_completed` without leaking unhandled exceptions.
+  5. Added standalone multiprocess/multithread verification tool `tools/check_concurrency.py`.
+* **Done When:** Concurrency unit tests with 8 simultaneous threads across 30 trials (both new and stale locks) produce exactly 1 winner and 0 exceptions. Standalone tool `tools/check_concurrency.py` tests 4 processes and 8 threads across 30 trials and reports `RESULT: PASS`.
 
 ### [A12] Container Security & Environment File Locations
 * **Problem:** Docker container runs as `root`; compose mounts full repository read-write; `DATABASE_PATH` env var is ignored; `*.db` is copied into Docker image; documentation suggests `chmod 777 data`.

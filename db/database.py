@@ -6,7 +6,7 @@ tracks active email threads to allow thread-level continuity.
 """
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -203,10 +203,17 @@ class TriageDatabase:
         stale_minutes: int = 10,
         max_retries: int = 3,
     ) -> Tuple[bool, str, Dict[str, Any]]:
-        """Performs idempotency check and attempts to acquire a processing lock.
+        """Performs idempotency check and attempts to acquire an atomic processing lock.
 
-        Handles new emails, duplicate/completed messages, stale locks (> stale_minutes),
-        and retry attempts for failed emails.
+        Follows atomic database invariants:
+        1. Brand new emails are acquired atomically via single-statement
+           `INSERT ... ON CONFLICT(email_id) DO NOTHING` checking cursor.rowcount == 1.
+        2. Stale locks are recovered atomically via conditional
+           `UPDATE ... SET status='processing' WHERE email_id=? AND status='processing' AND updated_at < ? AND retry_count < ?`
+           checking cursor.rowcount == 1 so exactly one concurrent worker wins.
+        3. Retry-eligible failed emails are claimed atomically via conditional
+           `UPDATE ... WHERE email_id=? AND status='failed' AND retry_count < ?`.
+        4. Catches lock contention and integrity collisions cleanly, treating lost races as in-flight / duplicate.
 
         Args:
             email_id: Unique message/email identifier.
@@ -230,116 +237,185 @@ class TriageDatabase:
         """
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
+        stale_cutoff = now - timedelta(minutes=stale_minutes)
+        stale_cutoff_iso = stale_cutoff.isoformat()
 
-        with self.get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT * FROM email_triage WHERE email_id = ?", (email_id,)
-            )
-            row = cursor.fetchone()
-
-            # Case 1: Brand new email
-            if row is None:
-                conn.execute(
+        try:
+            with self.get_connection() as conn:
+                # 1. Atomic insertion for new email: single statement with ON CONFLICT DO NOTHING
+                cursor = conn.execute(
                     """
                     INSERT INTO email_triage (
                         email_id, message_id, thread_id, sender_email,
                         status, retry_count, routing_status, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, 'processing', 0, 'processing', ?, ?)
+                    ON CONFLICT(email_id) DO NOTHING
                     """,
                     (email_id, message_id, thread_id, sender_email, now_iso, now_iso),
                 )
-                record = {
-                    "email_id": email_id,
-                    "message_id": message_id,
-                    "thread_id": thread_id,
-                    "sender_email": sender_email,
-                    "status": "processing",
-                    "retry_count": 0,
-                    "routing_status": "processing",
-                    "dispatch_target": None,
-                    "error_message": None,
-                    "created_at": now_iso,
-                    "updated_at": now_iso,
-                }
-                return True, "acquired_new", record
+                if cursor.rowcount == 1:
+                    record = {
+                        "email_id": email_id,
+                        "message_id": message_id,
+                        "thread_id": thread_id,
+                        "sender_email": sender_email,
+                        "status": "processing",
+                        "retry_count": 0,
+                        "routing_status": "processing",
+                        "dispatch_target": None,
+                        "error_message": None,
+                        "created_at": now_iso,
+                        "updated_at": now_iso,
+                    }
+                    return True, "acquired_new", record
 
-            record = dict(row)
-            current_status = record["status"]
-            retry_count = record.get("retry_count", 0)
+                # 2. Row already exists: inspect current record state
+                cursor = conn.execute(
+                    "SELECT * FROM email_triage WHERE email_id = ?", (email_id,)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return False, "in_flight", {"email_id": email_id, "status": "processing"}
 
-            # Case 2: Already completed
-            if current_status == "done":
-                return False, "already_completed", record
+                record = dict(row)
+                current_status = record.get("status")
+                retry_count = int(record.get("retry_count") or 0)
 
-            # Parse updated_at timestamp to evaluate staleness
-            updated_str = record["updated_at"]
-            try:
-                updated_at = datetime.fromisoformat(updated_str)
-                if updated_at.tzinfo is None:
-                    updated_at = updated_at.replace(tzinfo=timezone.utc)
-            except Exception:
-                updated_at = now
+                # Case 2: Already completed
+                if current_status == "done":
+                    return False, "already_completed", record
 
-            elapsed_minutes = (now - updated_at).total_seconds() / 60.0
+                # Parse updated_at timestamp to evaluate staleness
+                updated_str = record.get("updated_at")
+                try:
+                    updated_at = datetime.fromisoformat(updated_str)
+                    if updated_at.tzinfo is None:
+                        updated_at = updated_at.replace(tzinfo=timezone.utc)
+                except Exception:
+                    updated_at = now
 
-            # Case 3: In-flight processing
-            if current_status == "processing":
-                if elapsed_minutes > stale_minutes:
-                    # Stale lock: attempt recovery
-                    if retry_count < max_retries:
-                        new_retries = retry_count + 1
-                        conn.execute(
-                            """
-                            UPDATE email_triage
-                            SET retry_count = ?, updated_at = ?, routing_status = 'stale_recovery'
-                            WHERE email_id = ?
-                            """,
-                            (new_retries, now_iso, email_id),
-                        )
-                        record["retry_count"] = new_retries
-                        record["routing_status"] = "stale_recovery"
-                        record["updated_at"] = now_iso
-                        return True, "recovered_stale", record
+                elapsed_minutes = (now - updated_at).total_seconds() / 60.0
+
+                # Case 3: In-flight processing
+                if current_status == "processing":
+                    if elapsed_minutes > stale_minutes:
+                        # Lock is stale: attempt recovery if under max_retries
+                        if retry_count < max_retries:
+                            update_cur = conn.execute(
+                                """
+                                UPDATE email_triage
+                                SET status = 'processing', retry_count = retry_count + 1, updated_at = ?, routing_status = 'stale_recovery'
+                                WHERE email_id = ? AND status = 'processing' AND updated_at < ? AND retry_count < ?
+                                """,
+                                (now_iso, email_id, stale_cutoff_iso, max_retries),
+                            )
+                            if update_cur.rowcount == 1:
+                                # Won recovery race
+                                cur = conn.execute(
+                                    "SELECT * FROM email_triage WHERE email_id = ?", (email_id,)
+                                )
+                                r = cur.fetchone()
+                                if r:
+                                    record = dict(r)
+                                else:
+                                    record["status"] = "processing"
+                                    record["retry_count"] = retry_count + 1
+                                    record["routing_status"] = "stale_recovery"
+                                    record["updated_at"] = now_iso
+                                return True, "recovered_stale", record
+                            else:
+                                # Lost race to another concurrent worker
+                                cur = conn.execute(
+                                    "SELECT * FROM email_triage WHERE email_id = ?", (email_id,)
+                                )
+                                r = cur.fetchone()
+                                if r:
+                                    record = dict(r)
+                                if record.get("status") == "done":
+                                    return False, "already_completed", record
+                                elif record.get("status") == "failed":
+                                    return False, "max_retries_exceeded", record
+                                else:
+                                    return False, "in_flight", record
+                        else:
+                            # Max retries exceeded on stale lock
+                            conn.execute(
+                                """
+                                UPDATE email_triage
+                                SET status = 'failed', error_message = 'Max retries exceeded on stale lock recovery', updated_at = ?
+                                WHERE email_id = ? AND status = 'processing'
+                                """,
+                                (now_iso, email_id),
+                            )
+                            cur = conn.execute(
+                                "SELECT * FROM email_triage WHERE email_id = ?", (email_id,)
+                            )
+                            r = cur.fetchone()
+                            if r:
+                                record = dict(r)
+                            else:
+                                record["status"] = "failed"
+                                record["error_message"] = "Max retries exceeded on stale lock recovery"
+                                record["updated_at"] = now_iso
+                            return False, "max_retries_exceeded", record
                     else:
-                        conn.execute(
+                        # In-flight and active within stale window
+                        return False, "in_flight", record
+
+                # Case 4: Previously failed
+                if current_status == "failed":
+                    if retry_count < max_retries:
+                        update_cur = conn.execute(
                             """
                             UPDATE email_triage
-                            SET status = 'failed', error_message = 'Max retries exceeded on stale lock recovery', updated_at = ?
-                            WHERE email_id = ?
+                            SET status = 'processing', retry_count = retry_count + 1, updated_at = ?, routing_status = 'retry'
+                            WHERE email_id = ? AND status = 'failed' AND retry_count < ?
                             """,
-                            (now_iso, email_id),
+                            (now_iso, email_id, max_retries),
                         )
-                        record["status"] = "failed"
-                        record["error_message"] = (
-                            "Max retries exceeded on stale lock recovery"
-                        )
-                        record["updated_at"] = now_iso
+                        if update_cur.rowcount == 1:
+                            cur = conn.execute(
+                                "SELECT * FROM email_triage WHERE email_id = ?", (email_id,)
+                            )
+                            r = cur.fetchone()
+                            if r:
+                                record = dict(r)
+                            else:
+                                record["status"] = "processing"
+                                record["retry_count"] = retry_count + 1
+                                record["routing_status"] = "retry"
+                                record["updated_at"] = now_iso
+                            return True, "retry_failed", record
+                        else:
+                            # Lost race
+                            cur = conn.execute(
+                                "SELECT * FROM email_triage WHERE email_id = ?", (email_id,)
+                            )
+                            r = cur.fetchone()
+                            if r:
+                                record = dict(r)
+                            if record.get("status") == "done":
+                                return False, "already_completed", record
+                            elif record.get("status") == "processing":
+                                return False, "in_flight", record
+                            else:
+                                return False, "max_retries_exceeded", record
+                    else:
                         return False, "max_retries_exceeded", record
-                else:
-                    # In-flight and active
+
+                return False, "unknown_status", record
+
+        except (sqlite3.OperationalError, sqlite3.IntegrityError):
+            # Treat concurrency collisions or lock contention as a lost race
+            try:
+                record = self.get_record(email_id)
+                if record:
+                    if record.get("status") == "done":
+                        return False, "already_completed", record
                     return False, "in_flight", record
-
-            # Case 4: Previously failed
-            if current_status == "failed":
-                if retry_count < max_retries:
-                    new_retries = retry_count + 1
-                    conn.execute(
-                        """
-                        UPDATE email_triage
-                        SET status = 'processing', retry_count = ?, updated_at = ?, routing_status = 'retry'
-                        WHERE email_id = ?
-                        """,
-                        (new_retries, now_iso, email_id),
-                    )
-                    record["status"] = "processing"
-                    record["retry_count"] = new_retries
-                    record["routing_status"] = "retry"
-                    record["updated_at"] = now_iso
-                    return True, "retry_failed", record
-                else:
-                    return False, "max_retries_exceeded", record
-
-            return False, "unknown_status", record
+            except Exception:
+                pass
+            return False, "in_flight", {"email_id": email_id, "status": "processing"}
 
     def mark_processing(self, email_id: str, retry_count: Optional[int] = None) -> None:
         """Sets status to processing and refreshes updated_at."""
