@@ -14,10 +14,14 @@ This node performs 100% on-premise PII redaction:
 4. Guarantees 0% customer PII leaves local infrastructure to third-party LLMs.
 """
 
+import ipaddress
 import logging
 import os
 import re
+import secrets
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+import phonenumbers
 
 from state import TriageState
 from utils.config import load_config
@@ -174,37 +178,101 @@ def validate_startup(
                 _SPACY_WARNED_STARTUP = True
 
 
+def luhn_checksum(candidate: str) -> bool:
+    """Validates credit card candidate string using ISO/IEC 7812 Luhn checksum algorithm."""
+    digits = [int(c) for c in candidate if c.isdigit()]
+    if not (13 <= len(digits) <= 19):
+        return False
+    checksum = 0
+    for i, d in enumerate(digits[::-1]):
+        if i % 2 == 1:
+            doubled = d * 2
+            checksum += (doubled - 9) if doubled > 9 else doubled
+        else:
+            checksum += d
+    return checksum % 10 == 0
+
+
+def iban_checksum(candidate: str) -> bool:
+    """Validates an IBAN candidate string using ISO 7064 Mod 97-10 check."""
+    clean = re.sub(r"[\s-]+", "", candidate).upper()
+    if not re.match(r"^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$", clean):
+        return False
+    rearranged = clean[4:] + clean[:4]
+    num_str = "".join(str(ord(c) - 55) if c.isalpha() else c for c in rearranged)
+    try:
+        return int(num_str) % 97 == 1
+    except (ValueError, ArithmeticError):
+        return False
+
+
 # Regex definitions for structured PII entities (with upper length bounds to prevent ReDoS)
+# Keys & secrets: run BEFORE phone pass so parts of tokens are not eaten by the phone rule
+JWT_REGEX = re.compile(r"\beyJ[\w-]+\.[\w-]+\.[\w-]+\b")
+GOOGLE_KEY_REGEX = re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")
+OPENAI_KEY_REGEX = re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_\-]{20,}\b")
+SLACK_KEY_REGEX = re.compile(r"\bxox[abpr]-[A-Za-z0-9-]+\b")
+AWS_KEY_REGEX = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
+GITHUB_KEY_REGEX = re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")
+PASSWORD_REGEX = re.compile(r"(?i)\b(?:password|passwd|pwd)\s*[:=]\s*(\S+)")
+
 API_KEY_PATTERNS = [
-    # Common prefix API keys: sk_..., rk_..., ghp_..., gho_..., AKIA...
-    re.compile(
-        r"\b(?:[sr]k_[a-zA-Z0-9_\-]{14,256}|ghp_[a-zA-Z0-9]{30,256}|gho_[a-zA-Z0-9]{30,256}|AKIA[0-9A-Z]{16})\b"
-    ),
+    JWT_REGEX,
+    GOOGLE_KEY_REGEX,
+    OPENAI_KEY_REGEX,
+    SLACK_KEY_REGEX,
+    AWS_KEY_REGEX,
+    GITHUB_KEY_REGEX,
     # Bearer tokens
     re.compile(r"(?i)\bBearer\s+([a-zA-Z0-9_\-]{14,256})\b"),
+    # Common prefix API keys: sk_..., rk_..., ghp_..., gho_..., AKIA...
+    re.compile(
+        r"\b(?:[sr]k_[a-zA-Z0-9_\-]{14,256}|ghp_[a-zA-Z0-9]{30,256}|gho_[a-zA-Z0-9]{30,256})\b"
+    ),
     # Explicit secret assignments (e.g. api_key = "...", secret_token: ...)
     re.compile(
         r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret)\s*[:=]\s*['\"]?([a-zA-Z0-9_\-]{14,256})['\"]?"
     ),
+    PASSWORD_REGEX,
 ]
 
-CREDIT_CARD_REGEX = re.compile(
-    r"\b(?:\d{4}[ -]?){3}\d{4}\b|\b\d{4}[ -]?\d{6}[ -]?\d{5}\b"
+CREDIT_CARD_CANDIDATE_REGEX = re.compile(r"\b\d(?:[ -]?\d){12,18}\b")
+# Backward-compatibility alias
+CREDIT_CARD_REGEX = CREDIT_CARD_CANDIDATE_REGEX
+
+IBAN_CANDIDATE_REGEX = re.compile(
+    r"\b[A-Za-z]{2}\d{2}(?:[ ]?[A-Za-z0-9]{4}){2,7}(?:[ ]?[A-Za-z0-9]{1,4})?\b|\b[A-Za-z]{2}\d{2}[A-Za-z0-9]{11,30}\b"
 )
 
 SSN_REGEX = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 
-# North American & common international phone number formats
+# Negative lookbehind / prefix indicator words for national-format phone numbers
+PHONE_INDICATOR_REGEX = re.compile(
+    r"(?i)(?:\b(?:invoice|order|ticket|ref|id|no|tracking)\b|#)"
+)
+# Backward-compatibility alias for phone regex tests
 PHONE_REGEX = re.compile(
     r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b|"
     r"\+\d{1,3}[-.\s]\d{1,4}[-.\s]\d{3,4}[-.\s]\d{3,4}\b"
 )
 
+# Standard IPv6 candidate addresses
+IPV6_REGEX = re.compile(
+    r"(?:::)?\b[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{0,4}){1,7}(?:::)?\b|::[0-9a-fA-F]{1,4}\b|::1\b"
+)
+
 # Standard IPv4 addresses (excluding non-routable versions like software releases 3.11.2)
-IP_REGEX = re.compile(
+IPV4_REGEX = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"
+)
+# Backward-compatibility alias
+IP_REGEX = IPV4_REGEX
+
+# Prefix words for software version / build / release tags that must stay unmasked
+VERSION_PREFIX_REGEX = re.compile(
+    r"(?i)(?:\b(?:version|build|release|ver)\b|v)\s*[:=]?\s*$"
 )
 
 # Technical terms and common false positives that small NER models occasionally misclassify
@@ -306,6 +374,7 @@ def mask_pii(
     text: str,
     spacy_model_name: Optional[str] = None,
     token_map: Optional[Dict[str, str]] = None,
+    default_phone_region: Optional[str] = None,
 ) -> Tuple[str, Dict[str, str]]:
     """Sanitizes text by replacing PII with anonymized placeholder tokens.
 
@@ -313,11 +382,15 @@ def mask_pii(
         text: Input text string to sanitize.
         spacy_model_name: Optional spaCy model override.
         token_map: Optional existing token map to reuse tokens and counters across texts.
+        default_phone_region: Optional default region code for parsing national phone numbers.
 
     Returns:
-        Tuple of (masked_text, token_map) where token_map maps [TOKEN_N] -> original value.
+        Tuple of (masked_text, token_map) where token_map maps [TOKEN_N_nonce] -> original value.
     """
     global _SPACY_FAILED
+
+    if not text:
+        return "", {} if token_map is None else token_map
 
     if token_map is None:
         token_map = {}
@@ -325,6 +398,7 @@ def mask_pii(
         entity_counters: Dict[str, int] = {
             "API_KEY": 0,
             "CREDIT_CARD": 0,
+            "IBAN": 0,
             "SSN": 0,
             "EMAIL": 0,
             "PHONE": 0,
@@ -333,10 +407,11 @@ def mask_pii(
         }
     else:
         token_map = dict(token_map)
-        value_to_token = {v: k for k, v in token_map.items()}
+        value_to_token = {v: k for k, v in token_map.items() if not k.startswith("__")}
         entity_counters = {
             "API_KEY": 0,
             "CREDIT_CARD": 0,
+            "IBAN": 0,
             "SSN": 0,
             "EMAIL": 0,
             "PHONE": 0,
@@ -344,11 +419,19 @@ def mask_pii(
             "PERSON": 0,
         }
         for tok in token_map.keys():
-            m = re.match(r"^\[([A-Z_]+)_(\d+)\]$", tok)
+            if tok.startswith("__"):
+                continue
+            m = re.match(r"^\[([A-Z_]+)_(\d+)(?:_[0-9a-fA-F]+)?\]$", tok)
             if m:
                 etype, idx = m.group(1), int(m.group(2))
                 if etype in entity_counters:
                     entity_counters[etype] = max(entity_counters[etype], idx)
+
+    # Per-email nonce (4 hex chars)
+    nonce = token_map.get("__nonce__")
+    if not nonce:
+        nonce = secrets.token_hex(2)
+        token_map["__nonce__"] = nonce
 
     if not text:
         return "", token_map
@@ -357,14 +440,14 @@ def mask_pii(
         if original_val in value_to_token:
             return value_to_token[original_val]
         entity_counters[entity_type] += 1
-        token = f"[{entity_type}_{entity_counters[entity_type]}]"
+        token = f"[{entity_type}_{entity_counters[entity_type]}_{nonce}]"
         token_map[token] = original_val
         value_to_token[original_val] = token
         return token
 
     working = text
 
-    # 1. Regex Pass: API Keys & Secrets
+    # 1. Regex Pass: API Keys & Secrets (executed BEFORE phone pass)
     for pattern in API_KEY_PATTERNS:
         matches = list(pattern.finditer(working))
         for match in reversed(matches):
@@ -381,47 +464,92 @@ def mask_pii(
             )
             working = working[:start] + token + working[end:]
 
-    # 2. Regex Pass: Credit Cards
-    matches = list(CREDIT_CARD_REGEX.finditer(working))
+    # 2. Regex Pass: Credit Cards (Luhn validated)
+    matches = list(CREDIT_CARD_CANDIDATE_REGEX.finditer(working))
     for match in reversed(matches):
         val = match.group(0)
-        # Avoid matching simple 16-character alphanumeric words or tokens
-        digits_only = re.sub(r"\D", "", val)
-        if 13 <= len(digits_only) <= 19:
+        if luhn_checksum(val):
             token = get_or_create_token("CREDIT_CARD", val)
             working = working[: match.start()] + token + working[match.end() :]
 
-    # 3. Regex Pass: SSN / Tax IDs
+    # 3. Regex Pass: IBAN (ISO mod-97 validated)
+    matches = list(IBAN_CANDIDATE_REGEX.finditer(working))
+    for match in reversed(matches):
+        val = match.group(0)
+        if iban_checksum(val):
+            token = get_or_create_token("IBAN", val)
+            working = working[: match.start()] + token + working[match.end() :]
+
+    # 4. Regex Pass: SSN / Tax IDs
     matches = list(SSN_REGEX.finditer(working))
     for match in reversed(matches):
         val = match.group(0)
         token = get_or_create_token("SSN", val)
         working = working[: match.start()] + token + working[match.end() :]
 
-    # 4. Regex Pass: Email Addresses
+    # 5. Regex Pass: Email Addresses
     matches = list(EMAIL_REGEX.finditer(working))
     for match in reversed(matches):
         val = match.group(0)
         token = get_or_create_token("EMAIL", val)
         working = working[: match.start()] + token + working[match.end() :]
 
-    # 5. Regex Pass: Phone Numbers
-    matches = list(PHONE_REGEX.finditer(working))
-    for match in reversed(matches):
-        val = match.group(0)
-        # Verify it has at least 7 digits to avoid matching date snippets
-        if len(re.findall(r"\d", val)) >= 7:
-            token = get_or_create_token("PHONE", val)
-            working = working[: match.start()] + token + working[match.end() :]
+    # 6. Library Pass: Phone Numbers (phonenumbers library)
+    if default_phone_region is None:
+        try:
+            cfg = load_config()
+            default_phone_region = cfg.get("privacy", {}).get(
+                "default_phone_region", "US"
+            )
+        except Exception:
+            default_phone_region = "US"
 
-    # 6. Regex Pass: IP Addresses
-    matches = list(IP_REGEX.finditer(working))
+    phone_spans: List[Tuple[int, int, str]] = []
+    for m in phonenumbers.PhoneNumberMatcher(working, default_phone_region):
+        start, end = m.start, m.end
+        raw = m.raw_string
+        if raw.startswith("(") and ")" not in raw:
+            start += 1
+            raw = raw[1:]
+        is_intl = raw.strip().startswith("+")
+        num = m.number
+        if is_intl:
+            if phonenumbers.is_valid_number(num):
+                phone_spans.append((start, end, raw))
+        else:
+            if phonenumbers.is_valid_number(num):
+                prefix = working[max(0, start - 18) : start]
+                if not PHONE_INDICATOR_REGEX.search(prefix):
+                    phone_spans.append((start, end, raw))
+
+    for start, end, val in sorted(phone_spans, key=lambda x: x[0], reverse=True):
+        token = get_or_create_token("PHONE", val)
+        working = working[:start] + token + working[end:]
+
+    # 7. Regex Pass: IP Addresses (IPv6 + IPv4 with version exclusion)
+    # 7a. IPv6
+    matches = list(IPV6_REGEX.finditer(working))
     for match in reversed(matches):
         val = match.group(0)
+        try:
+            ip = ipaddress.ip_address(val)
+            if ip.version == 6:
+                token = get_or_create_token("IP_ADDRESS", val)
+                working = working[: match.start()] + token + working[match.end() :]
+        except ValueError:
+            pass
+
+    # 7b. IPv4 (excluding preceding software version/build/release tags)
+    matches = list(IPV4_REGEX.finditer(working))
+    for match in reversed(matches):
+        val = match.group(0)
+        prefix = working[max(0, match.start() - 15) : match.start()]
+        if VERSION_PREFIX_REGEX.search(prefix):
+            continue
         token = get_or_create_token("IP_ADDRESS", val)
         working = working[: match.start()] + token + working[match.end() :]
 
-    # 7. spaCy NER Pass: Person Names
+    # 8. spaCy NER Pass: Person Names
     if spacy_model_name is None:
         try:
             cfg = load_config()
@@ -441,8 +569,17 @@ def mask_pii(
             for ent in doc.ents:
                 if ent.label_ == "PERSON":
                     ent_text = ent.text.strip()
-                    # Skip if already a token like [EMAIL_1]
+                    # Skip if already a token like [EMAIL_1] or inside brackets like [EMAIL_1_b9a9]
                     if ent_text.startswith("[") and ent_text.endswith("]"):
+                        continue
+                    if (
+                        ent.start_char > 0
+                        and working[ent.start_char - 1] == "["
+                        and ent.end_char < len(working)
+                        and working[ent.end_char] == "]"
+                    ):
+                        continue
+                    if re.match(r"^[A-Z_]+_\d+(?:_[0-9a-fA-F]+)?$", ent_text):
                         continue
                     # Skip masking only if the entity matches a whitelist term exactly (case-insensitive, whole entity)
                     if ent_text.lower() in whitelist:
@@ -463,7 +600,7 @@ def mask_pii(
     else:
         _SPACY_FAILED = True
 
-    # 8. Consistency Pass: Ensure any pre-existing tokens from token_map are replaced
+    # 9. Consistency Pass: Ensure any pre-existing tokens from token_map are replaced
     for val, token in sorted(value_to_token.items(), key=lambda x: len(x[0]), reverse=True):
         if len(val) >= 2 and val in working:
             pattern = re.compile(rf"\b{re.escape(val)}\b")
@@ -477,7 +614,7 @@ def unmask_text(text: str, token_map: Dict[str, str]) -> str:
 
     Args:
         text: Masked text string.
-        token_map: Dictionary mapping [TOKEN_N] -> original value.
+        token_map: Dictionary mapping [TOKEN_N_nonce] -> original value.
 
     Returns:
         Original unmasked text string.
@@ -488,6 +625,8 @@ def unmask_text(text: str, token_map: Dict[str, str]) -> str:
     restored = text
     # Sort tokens by length in descending order to prevent sub-token replacement collisions
     for token in sorted(token_map.keys(), key=len, reverse=True):
+        if token.startswith("__"):
+            continue
         restored = restored.replace(token, token_map[token])
 
     return restored
@@ -498,6 +637,7 @@ def pii_masker_node(
     spacy_model_name: Optional[str] = None,
     client: Optional[Any] = None,
     offline: bool = False,
+    config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """LangGraph node execution function for local PII masking.
 
@@ -506,6 +646,7 @@ def pii_masker_node(
         spacy_model_name: Optional spaCy model override.
         client: Optional AI client instance.
         offline: Whether pipeline is running in offline mode.
+        config: Optional configuration dictionary.
 
     Returns:
         Dictionary update with 'masked_subject', 'masked_body', and 'token_map'.
@@ -517,12 +658,25 @@ def pii_masker_node(
 
     email_id = state.get("email_id") or "unknown"
 
+    if config is None:
+        try:
+            config = load_config()
+        except Exception:
+            config = {}
+    default_region = config.get("privacy", {}).get("default_phone_region", "US")
+
     token_map = dict(state.get("token_map") or {})
     masked_subject, token_map = mask_pii(
-        subject, spacy_model_name=spacy_model_name, token_map=token_map
+        subject,
+        spacy_model_name=spacy_model_name,
+        token_map=token_map,
+        default_phone_region=default_region,
     )
     masked_body, token_map = mask_pii(
-        body, spacy_model_name=spacy_model_name, token_map=token_map
+        body,
+        spacy_model_name=spacy_model_name,
+        token_map=token_map,
+        default_phone_region=default_region,
     )
 
     updates: Dict[str, Any] = {

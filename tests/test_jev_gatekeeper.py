@@ -334,7 +334,7 @@ class TestJevGatekeeper(unittest.TestCase):
 
         raw_person = "Alice Smith"
         raw_email = "alice.smith@corporate.com"
-        raw_card = "4111 2222 3333 4444"
+        raw_card = "4111 1111 1111 1111"
         raw_sender = "Alice Smith <alice.smith@corporate.com>"
 
         payload = {
@@ -374,12 +374,12 @@ class TestJevGatekeeper(unittest.TestCase):
         self.assertNotIn("alice.smith", sent_sender)
         self.assertEqual(sent_sender, "corporate.com")
 
-        # 3. Assert tokens are present
-        self.assertIn("[PERSON_1]", sent_subject)
-        self.assertIn("[PERSON_1]", sent_body)
-        self.assertIn("[EMAIL_1]", sent_subject)
-        self.assertIn("[EMAIL_1]", sent_body)
-        self.assertIn("[CREDIT_CARD_1]", sent_subject)
+        # 3. Assert tokens with nonce are present
+        self.assertRegex(sent_subject, r"\[PERSON_1_[0-9a-f]{4}\]")
+        self.assertRegex(sent_body, r"\[PERSON_1_[0-9a-f]{4}\]")
+        self.assertRegex(sent_subject, r"\[EMAIL_1_[0-9a-f]{4}\]")
+        self.assertRegex(sent_body, r"\[EMAIL_1_[0-9a-f]{4}\]")
+        self.assertRegex(sent_subject, r"\[CREDIT_CARD_1_[0-9a-f]{4}\]")
 
         # 4. Assert final state in pipeline has masked subject and body
         self.assertNotIn(raw_person, final_state["masked_subject"])
@@ -407,7 +407,7 @@ class TestJevGatekeeper(unittest.TestCase):
 
         raw_person = "Alice Smith"
         raw_email = "alice.smith@corporate.com"
-        raw_card = "4111 2222 3333 4444"
+        raw_card = "4111 1111 1111 1111"
         raw_sender = "Alice Smith <alice.smith@corporate.com>"
 
         payload = {
@@ -439,10 +439,10 @@ class TestJevGatekeeper(unittest.TestCase):
         self.assertNotIn("alice.smith", prompt_content)
         self.assertIn("Sender: corporate.com", prompt_content)
 
-        # 3. Assert tokens are present in prompt
-        self.assertIn("[PERSON_1]", prompt_content)
-        self.assertIn("[EMAIL_1]", prompt_content)
-        self.assertIn("[CREDIT_CARD_1]", prompt_content)
+        # 3. Assert tokens with nonce are present in prompt
+        self.assertRegex(prompt_content, r"\[PERSON_1_[0-9a-f]{4}\]")
+        self.assertRegex(prompt_content, r"\[EMAIL_1_[0-9a-f]{4}\]")
+        self.assertRegex(prompt_content, r"\[CREDIT_CARD_1_[0-9a-f]{4}\]")
 
         # 4. Assert final state is still masked
         self.assertNotIn(raw_person, final_state["masked_subject"])

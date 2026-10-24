@@ -185,13 +185,19 @@ def evaluate_sensitive(
             for token in token_map.keys()
             if any(
                 token.startswith(prefix)
-                for prefix in ("[API_KEY_", "[CREDIT_CARD_", "[SSN_", "[TAX_ID_")
+                for prefix in (
+                    "[API_KEY_",
+                    "[CREDIT_CARD_",
+                    "[SSN_",
+                    "[TAX_ID_",
+                    "[IBAN_",
+                )
             )
         )
-        if sensitive_token_count > max_code_density:
+        if sensitive_token_count >= max_code_density:
             return (
                 True,
-                f"High credential density detected ({sensitive_token_count} tokens > max {max_code_density})",
+                f"High credential density detected ({sensitive_token_count} tokens >= max {max_code_density})",
             )
 
         api_keys_leaked = [k for k in token_map.keys() if k.startswith("[API_KEY_")]

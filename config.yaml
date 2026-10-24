@@ -13,6 +13,8 @@ privacy:
   spacy_model: "en_core_web_sm"
   # Technical terms and infrastructure tools whitelist for PII masker
   tech_terms_file: "config/tech_terms.txt"
+  # Default country region code for parsing national-format phone numbers (ISO 3166-1 alpha-2)
+  default_phone_region: "US"
   # Tuned sensitive keywords for B2B (<15% false diversion SLA)
   sensitive_keywords:
     - "passport"

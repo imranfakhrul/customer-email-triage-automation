@@ -177,7 +177,9 @@ def count_pii_entities(token_map: Optional[Dict[str, str]]) -> Dict[str, int]:
     if not token_map:
         return counts
     for token in token_map.keys():
-        m = re.match(r"^\[([A-Z_]+)_\d+\]$", token)
+        if token.startswith("__"):
+            continue
+        m = re.match(r"^\[([A-Z_]+)_\d+(?:_[0-9a-fA-F]+)?\]$", token)
         if m:
             etype = m.group(1)
             counts[etype] = counts.get(etype, 0) + 1

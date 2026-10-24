@@ -19,7 +19,7 @@ class TestMainCliPiiSuppression(unittest.TestCase):
         """Verifies running main.py --input on email with PII outputs zero plaintext values in stdout/stderr."""
         raw_name = "Jane Doe"
         raw_email = "jane.doe@enterprise-triage.org"
-        raw_card = "4111 2222 3333 4444"
+        raw_card = "4111 1111 1111 1111"
 
         email_payload = {
             "email_id": f"em_cli_test_{os.getpid()}_01",

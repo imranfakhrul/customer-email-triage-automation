@@ -24,33 +24,34 @@ from utils.jev_client import JevClient
 
 class TestPiiMasker(unittest.TestCase):
     def test_mask_email_addresses(self):
-        """Verifies email addresses are replaced with [EMAIL_N] and duplicates reuse the same token."""
+        """Verifies email addresses are replaced with [EMAIL_N_nonce] and duplicates reuse the same token."""
         text = (
             "Please contact alice@acme.com for billing or support@corp.co.uk. "
             "You can also reach alice@acme.com later."
         )
         masked, token_map = mask_pii(text)
 
-        self.assertIn("[EMAIL_1]", masked)
-        self.assertIn("[EMAIL_2]", masked)
         self.assertNotIn("alice@acme.com", masked)
         self.assertNotIn("support@corp.co.uk", masked)
 
-        # Verify duplicate reuse
-        self.assertEqual(token_map["[EMAIL_1]"], "alice@acme.com")
-        self.assertEqual(token_map["[EMAIL_2]"], "support@corp.co.uk")
-        self.assertEqual(masked.count("[EMAIL_1]"), 2)
+        email_1 = [k for k, v in token_map.items() if v == "alice@acme.com"][0]
+        email_2 = [k for k, v in token_map.items() if v == "support@corp.co.uk"][0]
+        self.assertIn(email_1, masked)
+        self.assertIn(email_2, masked)
+        self.assertRegex(email_1, r"^\[EMAIL_1_[0-9a-f]{4}\]$")
+        self.assertRegex(email_2, r"^\[EMAIL_2_[0-9a-f]{4}\]$")
+        self.assertEqual(masked.count(email_1), 2)
 
     def test_mask_phone_numbers(self):
         """Verifies US and international phone numbers are redacted."""
         text = (
-            "Call our support line at (555) 123-4567 or cell +1-555-987-6543. "
+            "Call our support line at (415) 555-2671 or cell +1-212-555-0188. "
             "Our UK office is +44 20 7946 0958."
         )
         masked, token_map = mask_pii(text)
 
-        self.assertNotIn("(555) 123-4567", masked)
-        self.assertNotIn("+1-555-987-6543", masked)
+        self.assertNotIn("(415) 555-2671", masked)
+        self.assertNotIn("+1-212-555-0188", masked)
         self.assertNotIn("+44 20 7946 0958", masked)
         self.assertTrue(any(k.startswith("[PHONE_") for k in token_map.keys()))
 
@@ -69,10 +70,10 @@ class TestPiiMasker(unittest.TestCase):
 
     def test_mask_credit_cards(self):
         """Verifies credit card numbers (16 digits and Amex 15 digits) are redacted."""
-        text = "Card details: 4111 2222 3333 4444 and Amex 3782-822463-10005."
+        text = "Card details: 4111 1111 1111 1111 and Amex 3782-822463-10005."
         masked, token_map = mask_pii(text)
 
-        self.assertNotIn("4111 2222 3333 4444", masked)
+        self.assertNotIn("4111 1111 1111 1111", masked)
         self.assertNotIn("3782-822463-10005", masked)
         self.assertTrue(any(k.startswith("[CREDIT_CARD_") for k in token_map.keys()))
 
@@ -82,7 +83,7 @@ class TestPiiMasker(unittest.TestCase):
         masked, token_map = mask_pii(text)
 
         self.assertNotIn("123-45-6789", masked)
-        self.assertEqual(token_map.get("[SSN_1]"), "123-45-6789")
+        self.assertTrue(any(k.startswith("[SSN_1_") and v == "123-45-6789" for k, v in token_map.items()))
 
     def test_mask_ip_addresses(self):
         """Verifies IPv4 addresses are redacted."""
@@ -90,7 +91,7 @@ class TestPiiMasker(unittest.TestCase):
         masked, token_map = mask_pii(text)
 
         self.assertNotIn("192.168.1.105", masked)
-        self.assertEqual(token_map.get("[IP_ADDRESS_1]"), "192.168.1.105")
+        self.assertTrue(any(k.startswith("[IP_ADDRESS_1_") and v == "192.168.1.105" for k, v in token_map.items()))
 
     def test_mask_person_names_via_spacy(self):
         """Verifies spaCy NER detects person names and masks them as [PERSON_N]."""
@@ -106,7 +107,7 @@ class TestPiiMasker(unittest.TestCase):
         """Verifies unmask_text restores all tokens back to their exact original text."""
         original = (
             "Hello, my name is John Doe. Email me at john@example.com or "
-            "call 555-432-1098. Our server is 10.0.0.1."
+            "call (415) 555-2671. Our server is 10.0.0.1."
         )
         masked, token_map = mask_pii(original)
         restored = unmask_text(masked, token_map)
@@ -138,7 +139,7 @@ class TestPiiMasker(unittest.TestCase):
             "email_body": "Cleaned body from prior node",
             "raw_body": "Cleaned body from prior node",
             "has_attachments": False,
-            "cleaned_body": "Please contact Robert at robert@client.com or call 555-888-9999.",
+            "cleaned_body": "Please contact Robert at robert@client.com or call (415) 555-2671.",
             "masked_body": None,
             "masked_subject": None,
             "token_map": {},
@@ -169,8 +170,8 @@ class TestPiiMasker(unittest.TestCase):
         self.assertEqual(output["masked_subject"], "Leaked Token Issue")
         self.assertIn("token_map", output)
         self.assertNotIn("robert@client.com", output["masked_body"])
-        self.assertNotIn("555-888-9999", output["masked_body"])
-        self.assertIn("[EMAIL_1]", output["masked_body"])
+        self.assertNotIn("(415) 555-2671", output["masked_body"])
+        self.assertTrue(any(k.startswith("[EMAIL_1_") for k in output["token_map"].keys()))
 
     def test_subject_and_body_shared_token_map(self):
         """Verifies subject and body share the same token_map, matching the same entities."""
@@ -180,7 +181,7 @@ class TestPiiMasker(unittest.TestCase):
             "thread_id": "th_pii_shared_01",
             "sender_email": "alice.smith@corporate.com",
             "sender_domain": "corporate.com",
-            "email_subject": "Billing issue for Alice Smith (alice.smith@corporate.com) card 4111 2222 3333 4444",
+            "email_subject": "Billing issue for Alice Smith (alice.smith@corporate.com) card 4111 1111 1111 1111",
             "email_body": "Hello, my name is Alice Smith and my email is alice.smith@corporate.com.",
             "raw_body": "Hello, my name is Alice Smith and my email is alice.smith@corporate.com.",
             "has_attachments": False,
@@ -213,27 +214,24 @@ class TestPiiMasker(unittest.TestCase):
         # Subject assertions
         self.assertNotIn("Alice Smith", output["masked_subject"])
         self.assertNotIn("alice.smith@corporate.com", output["masked_subject"])
-        self.assertNotIn("4111 2222 3333 4444", output["masked_subject"])
+        self.assertNotIn("4111 1111 1111 1111", output["masked_subject"])
 
         # Body assertions
         self.assertNotIn("Alice Smith", output["masked_body"])
         self.assertNotIn("alice.smith@corporate.com", output["masked_body"])
 
         # Token map consistency: same entity gets same token in subject and body
-        person_token = output["token_map"].get("[PERSON_1]")
-        self.assertEqual(person_token, "Alice Smith")
-        self.assertIn("[PERSON_1]", output["masked_subject"])
-        self.assertIn("[PERSON_1]", output["masked_body"])
+        person_token = [k for k, v in output["token_map"].items() if v == "Alice Smith"][0]
+        self.assertIn(person_token, output["masked_subject"])
+        self.assertIn(person_token, output["masked_body"])
 
-        email_token = output["token_map"].get("[EMAIL_1]")
-        self.assertEqual(email_token, "alice.smith@corporate.com")
-        self.assertIn("[EMAIL_1]", output["masked_subject"])
-        self.assertIn("[EMAIL_1]", output["masked_body"])
+        email_token = [k for k, v in output["token_map"].items() if v == "alice.smith@corporate.com"][0]
+        self.assertIn(email_token, output["masked_subject"])
+        self.assertIn(email_token, output["masked_body"])
 
         # Credit card token present in token_map
-        card_token = output["token_map"].get("[CREDIT_CARD_1]")
-        self.assertEqual(card_token, "4111 2222 3333 4444")
-        self.assertIn("[CREDIT_CARD_1]", output["masked_subject"])
+        card_token = [k for k, v in output["token_map"].items() if v == "4111 1111 1111 1111"][0]
+        self.assertIn(card_token, output["masked_subject"])
 
         # Bidirectional unmasking restores original strings exactly
         self.assertEqual(unmask_text(output["masked_subject"], output["token_map"]), state["email_subject"])
@@ -255,8 +253,7 @@ class TestPiiMasker(unittest.TestCase):
         text2 = "Hi, I'm John Doe, our Postgres pool is exhausted"
         m2, t2 = mask_pii(text2)
         self.assertNotIn("John Doe", m2)
-        self.assertIn("[PERSON_1]", m2)
-        self.assertEqual(t2.get("[PERSON_1]"), "John Doe")
+        self.assertTrue(any(k.startswith("[PERSON_1_") and v == "John Doe" for k, v in t2.items()))
         self.assertIn("Postgres", m2)
         self.assertNotIn("Postgres", t2.values())
 
@@ -264,8 +261,7 @@ class TestPiiMasker(unittest.TestCase):
         text3 = "Please contact Apollo Chen"
         m3, t3 = mask_pii(text3)
         self.assertNotIn("Apollo Chen", m3)
-        self.assertIn("[PERSON_1]", m3)
-        self.assertEqual(t3.get("[PERSON_1]"), "Apollo Chen")
+        self.assertTrue(any(k.startswith("[PERSON_1_") and v == "Apollo Chen" for k, v in t3.items()))
 
         # 4. Case variations: "postgres", "POSTGRES" are not masked
         text4 = "Our postgres instance failed while POSTGRES replica was restarting."
@@ -284,8 +280,7 @@ class TestPiiMasker(unittest.TestCase):
         text6 = "Please escalate this to Grafana Smith immediately."
         m6, t6 = mask_pii(text6)
         self.assertNotIn("Grafana Smith", m6)
-        self.assertIn("[PERSON_1]", m6)
-        self.assertEqual(t6.get("[PERSON_1]"), "Grafana Smith")
+        self.assertTrue(any(k.startswith("[PERSON_1_") and v == "Grafana Smith" for k, v in t6.items()))
 
     def test_tech_terms_whitelist_loading(self):
         """Verifies loading external tech terms file populates whitelist correctly."""
@@ -473,11 +468,196 @@ class TestPiiMaskerSpacySafeguardA8(unittest.TestCase):
         text = "Please reach out to Alexander Hamilton regarding the project update."
         masked, token_map = mask_pii(text)
         self.assertNotIn("Alexander Hamilton", masked)
-        self.assertIn("[PERSON_1]", masked)
-        self.assertEqual(token_map.get("[PERSON_1]"), "Alexander Hamilton")
+        self.assertTrue(any(k.startswith("[PERSON_1_") and v == "Alexander Hamilton" for k, v in token_map.items()))
 
         restored = unmask_text(masked, token_map)
         self.assertEqual(restored, text)
+
+
+class TestFixA9PrecisionPiiMasking(unittest.TestCase):
+    """Dedicated test suite for Fix A9: Precision PII masking in nodes/pii_masker.py."""
+
+    def test_a9_table_driven_detection_rules(self):
+        """Table-driven test with every specified A9 example asserting masking or unchanged state."""
+        cases = [
+            # 1. Phones: valid international format (+country code) must always be masked
+            ("+44 7911 123456", "Contact us at +44 7911 123456 for help", True),
+            ("+880 1712-345678", "Call Dhaka office at +880 1712-345678 now", True),
+            ("+49 30 1234567", "Berlin office line is +49 30 1234567", True),
+            ("+33 6 12 34 56 78", "Paris hotline: +33 6 12 34 56 78", True),
+            ("+91 98765 43210", "India support: +91 98765 43210", True),
+            # National-format (no +): masked if valid US number and not preceded by indicator
+            ("(415) 555-2671", "Direct desk phone: (415) 555-2671", True),
+            ("415-555-2671", "Reach me on mobile 415-555-2671 please", True),
+            # National-format preceded within ~15 chars by indicator words must stay unchanged
+            ("4155552671", "Invoice 4155552671 is due tomorrow", False),
+            ("4155552671", "Please check order 4155552671 status", False),
+            ("4155552671", "Support ticket 4155552671 updated", False),
+            ("4155552671", "Internal ref 4155552671 assigned", False),
+            ("4155552671", "Account id 4155552671 confirmed", False),
+            ("4155552671", "Shipment no 4155552671 dispatched", False),
+            ("4155552671", "Ref # 4155552671 processed", False),
+            ("4155552671", "FedEx tracking 4155552671 delivered", False),
+            # 2. Cards: 13-19 digits masked only if passing Luhn check
+            ("4111 1111 1111 1111", "Visa card 4111 1111 1111 1111 charged", True),
+            ("1234567890123456", "Fails Luhn 1234567890123456 must stay", False),
+            # 3. IBAN: ISO mod-97 check; mask the WHOLE IBAN (no partial leftovers)
+            ("GB82 WEST 1234 5698 7654 32", "Wire funds to GB82 WEST 1234 5698 7654 32 today", True),
+            ("GB82 WEST 1234 5698 7654 33", "Invalid IBAN GB82 WEST 1234 5698 7654 33 stays", False),
+            # 4. Keys and secrets
+            ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J_dummy", "JWT token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J_dummy issued", True),
+            ("AIzaSyD-1234567890abcdefghijklmnopqrstu", "Google API key AIzaSyD-1234567890abcdefghijklmnopqrstu active", True),
+            ("sk-proj-abc1234567890def1234567890", "OpenAI key sk-proj-abc1234567890def1234567890 leaked", True),
+            ("sk-1234567890abcdef1234567890", "OpenAI key sk-1234567890abcdef1234567890 leaked", True),
+            ("xoxb-1234567890-abcdef12345", "Slack bot token xoxb-1234567890-abcdef12345 registered", True),
+            ("AKIAIOSFODNN7EXAMPLE", "AWS root access key AKIAIOSFODNN7EXAMPLE in config", True),
+            ("ghp_1234567890abcdefghijklmnopqrstuvwxyz12", "GitHub token ghp_1234567890abcdefghijklmnopqrstuvwxyz12 exposed", True),
+            ("SuperSecretPass123!", "login password: SuperSecretPass123! confirmed", True),
+            ("AdminP@ss999", "admin passwd: AdminP@ss999 confirmed", True),
+            ("VaultPwd456!", "server pwd = VaultPwd456! confirmed", True),
+            # 5. IPv6 & IPv4
+            ("2001:0db8:85a3:0000:0000:8a2e:0370:7334", "IPv6 address 2001:0db8:85a3:0000:0000:8a2e:0370:7334 down", True),
+            ("2001:db8::1", "IPv6 router 2001:db8::1 unreachable", True),
+            ("192.168.1.1", "IPv4 gateway 192.168.1.1 responsive", True),
+            ("10.2.33.4", "Running version 10.2.33.4 on production", False),
+            ("10.2.33.4", "Deployed build 10.2.33.4 yesterday", False),
+            ("10.2.33.4", "Current release 10.2.33.4 stable", False),
+            ("10.2.33.4", "Upgraded ver 10.2.33.4 smoothly", False),
+            ("10.2.33.4", "Kernel v 10.2.33.4 active", False),
+        ]
+
+        for target_val, input_text, should_mask in cases:
+            with self.subTest(target_val=target_val, should_mask=should_mask, input_text=input_text):
+                masked, token_map = mask_pii(input_text)
+                if should_mask:
+                    self.assertNotIn(
+                        target_val,
+                        masked,
+                        f"Expected '{target_val}' to be masked in: '{input_text}', but got '{masked}'"
+                    )
+                    # For IBAN: assert no partial leftover words
+                    if "WEST" in target_val:
+                        self.assertNotIn("WEST", masked)
+                        self.assertNotIn("7654", masked)
+                else:
+                    self.assertIn(
+                        target_val,
+                        masked,
+                        f"Expected '{target_val}' to stay unchanged in: '{input_text}', but got '{masked}'"
+                    )
+
+    def test_a9_round_trip_preserves_literal_token(self):
+        """A literal '[EMAIL_1]' typed by the customer must survive mask -> unmask unchanged."""
+        original = (
+            "Hi Support, our automated template shows [EMAIL_1] when contacting "
+            "alice.smith@corporate-domain.com about issue #99."
+        )
+        masked, token_map = mask_pii(original)
+
+        # Literal '[EMAIL_1]' typed by customer was NOT replaced by an entity token
+        self.assertIn("[EMAIL_1]", masked)
+        # Real email address was masked with a nonce
+        self.assertNotIn("alice.smith@corporate-domain.com", masked)
+        self.assertTrue(any(k.startswith("[EMAIL_1_") for k in token_map.keys()))
+
+        # Unmask restores original text exactly
+        restored = unmask_text(masked, token_map)
+        self.assertEqual(restored, original)
+
+    def test_a9_subject_and_body_share_tokens_and_nonce(self):
+        """Subject and body of the same email share the same tokens and the same 4-hex-char nonce."""
+        state: TriageState = {
+            "email_id": "em_a9_nonce_test_01",
+            "message_id": "<a9_nonce@example.com>",
+            "thread_id": "th_a9_nonce_01",
+            "sender_email": "jane.doe@example.com",
+            "sender_domain": "example.com",
+            "email_subject": "Urgent inquiry from Jane Doe (jane.doe@example.com)",
+            "email_body": "Hello, my name is Jane Doe and my email is jane.doe@example.com. Server 192.168.1.1 is down.",
+            "raw_body": "Hello, my name is Jane Doe and my email is jane.doe@example.com. Server 192.168.1.1 is down.",
+            "has_attachments": False,
+            "cleaned_body": "Hello, my name is Jane Doe and my email is jane.doe@example.com. Server 192.168.1.1 is down.",
+            "masked_body": None,
+            "masked_subject": None,
+            "token_map": {},
+            "is_sensitive": False,
+            "sensitive_reason": None,
+            "is_spam": None,
+            "gatekeeper_decision": None,
+            "gatekeeper_confidence": None,
+            "is_threat": None,
+            "threat_details": None,
+            "customer_tier": None,
+            "sla_target": None,
+            "classification": None,
+            "labels_to_apply": [],
+            "is_starred": False,
+            "dispatch_target": None,
+            "dispatch_status": "processing",
+            "retry_count": 0,
+            "error_message": None,
+            "routing_status": "processing",
+            "is_active_thread": False,
+        }
+
+        output = pii_masker_node(state)
+        token_map = output["token_map"]
+
+        # 1. Nonce exists and is exactly 4 hex characters
+        nonce = token_map.get("__nonce__")
+        self.assertIsNotNone(nonce)
+        self.assertEqual(len(nonce), 4)
+        self.assertTrue(all(c in "0123456789abcdef" for c in nonce))
+
+        # 2. Both subject and body contain the identical person token with this nonce
+        person_token = [k for k, v in token_map.items() if v == "Jane Doe"][0]
+        self.assertEqual(person_token, f"[PERSON_1_{nonce}]")
+        self.assertIn(person_token, output["masked_subject"])
+        self.assertIn(person_token, output["masked_body"])
+
+        # 3. Both subject and body contain the identical email token with this nonce
+        email_token = [k for k, v in token_map.items() if v == "jane.doe@example.com"][0]
+        self.assertEqual(email_token, f"[EMAIL_1_{nonce}]")
+        self.assertIn(email_token, output["masked_subject"])
+        self.assertIn(email_token, output["masked_body"])
+
+        # 4. Bidirectional restoration reproduces original strings
+        self.assertEqual(unmask_text(output["masked_subject"], token_map), state["email_subject"])
+        self.assertEqual(unmask_text(output["masked_body"], token_map), state["cleaned_body"])
+
+    def test_a9_egress_behavior_holds(self):
+        """Fix A1 egress behavior still holds: outbound payloads to external AI contain zero raw PII."""
+        temp_dir = tempfile.TemporaryDirectory()
+        try:
+            db_path = os.path.join(temp_dir.name, "egress_a9.db")
+            db = TriageDatabase(db_path=db_path)
+
+            raw_person = "Dr. Marcus Brody"
+            raw_email = "marcus.brody@archeology-trust.org"
+            raw_card = "4111 1111 1111 1111"
+            raw_phone = "+44 7911 123456"
+
+            payload = {
+                "email_id": "em_a9_egress_01",
+                "message_id": "<a9_egress@trust.org>",
+                "thread_id": "th_a9_egress_01",
+                "sender_email": f"{raw_person} <{raw_email}>",
+                "sender_domain": "archeology-trust.org",
+                "email_subject": f"Inquiry from {raw_person} card {raw_card}",
+                "email_body": f"Please call me at {raw_phone} or email {raw_email}. Card {raw_card}.",
+            }
+
+            from pipeline import create_triage_pipeline, run_triage_pipeline
+            pipeline = create_triage_pipeline(db=db, offline=True)
+            res = run_triage_pipeline(payload, pipeline=pipeline, db=db, offline=True)
+
+            self.assertNotIn(raw_person, res["masked_subject"])
+            self.assertNotIn(raw_card, res["masked_subject"])
+            self.assertNotIn(raw_phone, res["masked_body"])
+            self.assertNotIn(raw_email, res["masked_body"])
+            self.assertNotIn(raw_card, res["masked_body"])
+        finally:
+            temp_dir.cleanup()
 
 
 if __name__ == "__main__":

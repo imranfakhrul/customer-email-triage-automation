@@ -6,3 +6,4 @@ python-dotenv
 pyyaml
 spacy
 requests
+phonenumbers==9.0.41

@@ -138,14 +138,17 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Unit test mocking `spacy.load` to raise verifies that the pipeline refuses to boot with active API keys, runtime fallback routes to `manual_review` without external network calls, offline run logs exactly one warning, and spaCy available path is unchanged.
 
 ### [A9] Precision PII Regexes, Luhn Check & Token Nonces
-* **Problem:** Masker misses international phone numbers (`+44...`, `+880...`), truncated IBANs, JWTs, and API keys; falsely redacts 16-digit order numbers as credit cards without Luhn verification; corrupts text when customers quote earlier tokens like `[EMAIL_1]`.
+* **Status:** ✅ **Resolved**
+* **Problem:** Masker missed international phone numbers (`+44...`, `+880...`), truncated IBANs, JWTs, and API keys; falsely redacted 16-digit order numbers as credit cards without Luhn verification; corrupted text when customers quote earlier tokens like `[EMAIL_1]`.
 * **Solution:**
-  1. Use Google's `phonenumbers` library for international phone number parsing.
-  2. Implement Luhn checksum algorithm for credit card matching.
-  3. Add IBAN mod-97 validation.
-  4. Add regexes for JWTs, Google API keys (`AIza...`), OpenAI keys (`sk-proj-...`), and Slack tokens.
-  5. Append per-message random nonces to placeholders (e.g., `[EMAIL_1_a8f3]`).
-* **Done When:** Test suite validates each PII type is redacted when valid and ignored when checksum fails.
+  1. Integrated Google's `phonenumbers` library (`phonenumbers==9.0.41`). Always masks valid international phone numbers (`+...`); masks national-format numbers (no `+`) only if valid for configured `default_phone_region` (default `"US"`) and not preceded within ~18 chars by indicator keywords like `invoice`, `order`, `ticket`, `ref`, `id`, `no`, `#`, `tracking`.
+  2. Implemented ISO/IEC 7812 Luhn checksum algorithm for 13-19 digit card candidates (`4111 1111 1111 1111` masked; `1234567890123456` unchanged).
+  3. Added ISO 7064 Mod 97-10 IBAN validation (`GB82 WEST 1234 5698 7654 32` fully masked with zero partial leftovers).
+  4. Added regex passes for JWTs, Google AIza (`AIza[0-9A-Za-z_\-]{35}`), OpenAI keys (`sk-(proj-)?[A-Za-z0-9_\-]{20,}`), Slack tokens (`xox[abpr]-...`), AWS keys (`AKIA...`), GitHub tokens (`gh[pousr]_...`), and password assignments (`password: ...`), executed before the phone pass so tokens aren't eaten by phone rules.
+  5. Added IPv6 validation via `ipaddress.ip_address` and guarded IPv4 masking against version/build/release numbers (`"version 10.2.33.4"` stays unchanged).
+  6. Implemented per-email 4-hex-char random nonce (`secrets.token_hex(2)`) for every token (e.g. `[EMAIL_1_a8f3]`), stored with `token_map["__nonce__"]` so subject and body share tokens and nonce without colliding with literal customer text like `[EMAIL_1]`.
+  7. Updated consumers (`count_pii_entities` in `main.py`, `evaluate_sensitive` in `nodes/sensitive_skip.py`, `unmask_text`, and test suites).
+* **Done When:** Table-driven test suite validates every PII type is redacted when valid and ignored when checksum/preceding-word rules apply; customer literal `[EMAIL_1]` survives round-trip; subject and body share tokens; egress invariant holds; all 129 tests and 100/100 benchmark pass.
 
 ### [A10] Contextualize Tech-Terms Whitelist (Surnames vs Tech)
 * **Status:** 🟡 **Partially Done**
