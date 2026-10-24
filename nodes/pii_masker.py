@@ -174,17 +174,17 @@ def validate_startup(
                 _SPACY_WARNED_STARTUP = True
 
 
-# Regex definitions for structured PII entities
+# Regex definitions for structured PII entities (with upper length bounds to prevent ReDoS)
 API_KEY_PATTERNS = [
     # Common prefix API keys: sk_..., rk_..., ghp_..., gho_..., AKIA...
     re.compile(
-        r"\b(?:[sr]k_[a-zA-Z0-9_\-]{14,}|ghp_[a-zA-Z0-9]{30,}|gho_[a-zA-Z0-9]{30,}|AKIA[0-9A-Z]{16})\b"
+        r"\b(?:[sr]k_[a-zA-Z0-9_\-]{14,256}|ghp_[a-zA-Z0-9]{30,256}|gho_[a-zA-Z0-9]{30,256}|AKIA[0-9A-Z]{16})\b"
     ),
     # Bearer tokens
-    re.compile(r"(?i)\bBearer\s+([a-zA-Z0-9_\-]{14,})\b"),
+    re.compile(r"(?i)\bBearer\s+([a-zA-Z0-9_\-]{14,256})\b"),
     # Explicit secret assignments (e.g. api_key = "...", secret_token: ...)
     re.compile(
-        r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret)\s*[:=]\s*['\"]?([a-zA-Z0-9_\-]{14,})['\"]?"
+        r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret)\s*[:=]\s*['\"]?([a-zA-Z0-9_\-]{14,256})['\"]?"
     ),
 ]
 

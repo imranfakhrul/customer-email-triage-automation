@@ -15,12 +15,13 @@ import re
 from typing import Any, Dict
 
 from state import TriageState
+from utils.text_tools import bounded_scan_text
 
 # Regular expressions for reply thread boundaries
 QUOTE_HEADERS = [
-    # On <date> ... wrote / writes: (handles single-line and multi-line headers)
+    # On <date> ... wrote / writes: (handles single-line and multi-line headers up to 500 chars)
     re.compile(
-        r"(?mi)^\s*On\s+(?:(?!(?:\r?\n){2,})[\s\S])+?\s+(?:wrote|writes|schrieb|a écrit|escribió):\s*$"
+        r"(?mi)^\s*On\s+(?:(?!(?:\r?\n){2,})[\s\S]){1,500}?\s+(?:wrote|writes|schrieb|a écrit|escribió):\s*$"
     ),
     # -----Original Message----- or -----Forwarded Message-----
     re.compile(
@@ -28,9 +29,9 @@ QUOTE_HEADERS = [
     ),
     # 5+ underscores/hyphens used as divider
     re.compile(r"(?mi)^\s*_{5,}\s*$"),
-    # Outlook header block: From: ... \n Sent/Date: ... \n To/Subject: ...
+    # Outlook header block: From: ... \n Sent/Date: ... \n To/Subject: ... (bounded to 200 chars per line)
     re.compile(
-        r"(?mi)^\s*From:\s+.*?\r?\n\s*(?:Sent|Date):\s+.*?\r?\n\s*(?:To|Subject):\s+.*$"
+        r"(?mi)^\s*From:\s+.{0,200}?\r?\n\s*(?:Sent|Date):\s+.{0,200}?\r?\n\s*(?:To|Subject):\s+.{0,200}$"
     ),
 ]
 
@@ -47,12 +48,12 @@ CODE_INDICATORS = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-# Mobile device signatures
+# Mobile device signatures (bounded to 200 chars to prevent ReDoS)
 MOBILE_SIGS = re.compile(
     r"(?mi)^\s*(?:Sent\s+from\s+my\s+(?:iPhone|iPad|Galaxy|Android|phone|mobile|smartphone|BlackBerry)|"
     r"Sent\s+from\s+Mail\s+for\s+\w+|"
     r"Get\s+Outlook\s+for\s+(?:iOS|Android)|"
-    r"Sent\s+via\s+Superhuman).*$"
+    r"Sent\s+via\s+Superhuman)[^\r\n]{0,200}$"
 )
 
 # Patterns verifying legal disclaimer boilerplate
@@ -66,13 +67,14 @@ DISCLAIMER_PATTERNS = [
 ]
 
 GREETING_REGEX = re.compile(
-    r"(?i)^\s*(?:hi\b|hello\b|hey\b|dear\b|good\s+(?:morning|afternoon|evening))\s*.*[,\.!?-]?\s*$"
+    r"(?i)^\s*(?:hi\b|hello\b|hey\b|dear\b|good\s+(?:morning|afternoon|evening))\s*.{0,200}[,\.!?-]?\s*$"
 )
 
 
 def is_legal_disclaimer(text: str) -> bool:
     """Checks whether the text block contains actual legal boilerplate terms."""
-    return any(p.search(text) for p in DISCLAIMER_PATTERNS)
+    scan = bounded_scan_text(text)
+    return any(p.search(scan) for p in DISCLAIMER_PATTERNS)
 
 
 def has_substantive_body(preceding_lines: list) -> bool:

@@ -16,6 +16,7 @@ import logging
 from db.database import TriageDatabase
 from state import TriageState
 from utils.config import load_config
+from utils.text_tools import bounded_scan_text
 
 logger = logging.getLogger(__name__)
 
@@ -171,8 +172,9 @@ def evaluate_sensitive(
 
     for candidate_text in texts_to_check:
         normalized_text = normalize_for_matching(candidate_text)
+        scan_text = bounded_scan_text(normalized_text, config=config)
         for kw, pattern in compiled_patterns:
-            if pattern.search(normalized_text):
+            if pattern.search(scan_text):
                 return True, f"Matched sensitive keyword or phrase: '{kw}'"
 
     # 2. Token / Credential Density Check

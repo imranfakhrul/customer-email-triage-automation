@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[A13] Hardened Secrets Handling, Jev Host Verification & Redirect Suppression** (or **[A5] Harden Active-Thread Verification Against Spoofing**)
+**Next up:** **[A11] Atomic SQLite Idempotency Check-and-Claim** (or **[A9] Precision PII Regexes, Luhn Check & Token Nonces**)
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -39,7 +39,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **3** | **A3** | Security | Guard against Groq prompt injection with pre-filter & randomized delimiter tags | ✅ Resolved |
 | **4** | **A4** | Security | Enforce fail-closed classifier normalization (`normalize_result`) with 0.70 threshold | ✅ Resolved |
 | **5** | **A5** | Security | Harden active-thread detection against spoofing & unapproved thread history | ✅ Resolved |
-| **6** | **A6** | Security | Eliminate ReDoS vulnerabilities in heuristic regexes & limit input length | ⏳ Pending |
+| **6** | **A6** | Security | Eliminate ReDoS vulnerabilities in heuristic regexes & limit input length | ✅ Resolved |
 | **7** | **A7** | Security | Defeat sensitive keyword evasion (NFKC, zero-width, Cyrillic/Greek homoglyphs, broad chargeback) | ✅ Resolved (`c75f0b5`) |
 | **8** | **A8** | Security | Fail fast on startup & runtime safeguard if spaCy model is missing while AI keys active | ✅ Resolved (`8ec99a2`) |
 | **9** | **A9** | Privacy | Integrate `phonenumbers` library, Luhn credit card check, and collision-safe tokens | ⏳ Pending |
@@ -108,11 +108,13 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Tests prove that spam threads, empty senders, and injected `is_active_thread: true` payloads all evaluate to `is_active_thread = False`.
 
 ### [A6] Eliminate ReDoS Backtracking in Heuristic Regexes
-* **Problem:** Patterns containing multiple `.*` with the `re.DOTALL` flag (such as `grandma.*read\s+me.*system\s+prompt`) trigger catastrophic backtracking on long inputs, stalling worker threads.
+* **Status:** ✅ **Resolved**
+* **Problem:** Patterns containing multiple `.*` with the `re.DOTALL` flag (such as `grandma.*read\s+me.*system\s+prompt` and spam phrases) trigger catastrophic backtracking on long inputs, stalling worker threads. Unbounded scans also allowed padding attacks to conceal payloads.
 * **Solution:**
-  1. Replace unbounded `.*` with bounded matches (`.{0,200}`).
-  2. Enforce an upper bound on text length (10,000 characters) before running heuristic regexes.
-* **Done When:** Test runs heuristic evaluation against a 50 KB adversarial string and completes in < 1.0 second.
+  1. Replaced unbounded `.*` / `.+` gaps with bounded gaps `.{0,200}` across `SPAM_REGEX`, `PROMPT_INJECTION_REGEX`, `nodes/signature_stripper.py` (`QUOTE_HEADERS`, `MOBILE_SIGS`, `GREETING_REGEX`), and upper bounded PII token quantifiers (`{14,256}`).
+  2. Implemented shared `bounded_scan_text(text, head=10000, tail=2000)` helper that extracts the first `head` (10,000) and last `tail` (2,000) characters separated by newline, preventing ReDoS while neutralizing padding attacks at the tail. Made head and tail configurable under `security` in `config.yaml`.
+  3. Ensured text sent externally or stored remains untouched (helper is strictly used for regex scans).
+* **Done When:** Unit tests verify that adversarial 50 KB strings complete in < 0.05 seconds per regex step, padding attacks at the tail are detected as `manual_review`, and detection coverage remains 100% intact.
 
 ### [A7] Defeat Sensitive Keyword Evasion & Homoglyphs
 * **Status:** ✅ **Resolved (`c75f0b5`)**

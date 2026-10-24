@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import requests
 from prompts import GATEKEEPER_SYSTEM_PROMPT, build_gatekeeper_system_prompt
 from utils.config import get_env_var, load_config
+from utils.text_tools import bounded_scan_text
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +31,17 @@ SPAM_REGEX = re.compile(
     r"abandoned\s+[\$]?[\d.,]+M|next\s+of\s+kin|beneficiary\s+to\s+claim|transfer\s+of\s+[\$]?[\d.,]+|prince\s+\w+|"
     r"customs\s+clearance|receipt\.zip|belly\s+fat|slimming\s+drops|lose\s+weight\s+effortlessly|"
     r"docusign|document\s+ready\s+for\s+signature|pump\s+and\s+dump|telegram\s+signals|100x\s+gem|"
-    r"account\s+has\s+been\s+restricted|verify\s+your\s+identity.*login|reset\s+your\s+password.*http|"
+    r"account\s+has\s+been\s+restricted|verify\s+your\s+identity.{0,200}login|reset\s+your\s+password.{0,200}http|"
     r"password\s+reset\s+for\s+your\s+account|password\s+expires|mailbox\s+deactivation|portal-verify|paypa[l1]|"
     r"icloud\s+storage\s+is\s+full|storage\s+limit\s+has\s+been\s+exceeded|mailbox\s+is\s+\d+%\s+full|"
     r"office\s+suites\s+available|luxury\s+class\s+a\s+office|commercial\s+spaces\s+realty|"
-    r"redesign\s+your\s+website\s+for|cheap.*developers|cheap\s+meds|without\s+prescription|"
-    r"apple\s+gift\s+cards?|purchase.*gift\s+cards?|"
-    r"get\s+#1\s+on\s+google|page\s+1.*satisfied\s+clients|"
-    r"parcel.*could\s+not\s+be\s+delivered|redelivery\s+fee|reschedule\s+your\s+package|"
-    r"earn\s+[\$]?\d+.*working\s+from\s+home|whatsapp\s+number|"
-    r"scraped\s+your\s+email|database\s+of.*contacts\s+available\s+for\s+purchase|"
-    r"verified\s+decision\s+maker\s+emails|verified\s+database\s+of.*emails)\b",
+    r"redesign\s+your\s+website\s+for|cheap.{0,200}developers|cheap\s+meds|without\s+prescription|"
+    r"apple\s+gift\s+cards?|purchase.{0,200}gift\s+cards?|"
+    r"get\s+#1\s+on\s+google|page\s+1.{0,200}satisfied\s+clients|"
+    r"parcel.{0,200}could\s+not\s+be\s+delivered|redelivery\s+fee|reschedule\s+your\s+package|"
+    r"earn\s+[\$]?\d+.{0,200}working\s+from\s+home|whatsapp\s+number|"
+    r"scraped\s+your\s+email|database\s+of.{0,200}contacts\s+available\s+for\s+purchase|"
+    r"verified\s+decision\s+maker\s+emails|verified\s+database\s+of.{0,200}emails)\b",
     flags=re.IGNORECASE | re.DOTALL,
 )
 
@@ -55,7 +56,7 @@ PROMPT_INJECTION_REGEX = re.compile(
     r"FreeBot|AI\s+with\s+no\s+filters|secret\s+instructions\s+it\s+was\s+given|"
     r"notice\s+to\s+the\s+ai\s+assistant|your\s+policies\s+have\s+been\s+updated|"
     r"must\s+bypass\s+all\s+filters|ignore\s+any\s+safety\s+checks|"
-    r"pretend\s+you\s+are.*grandmother|grandma.*read\s+me.*system\s+prompt)\b)",
+    r"pretend\s+you\s+are.{0,200}grandmother|grandma.{0,200}read\s+me.{0,200}system\s+prompt)\b)",
     flags=re.IGNORECASE | re.DOTALL,
 )
 
@@ -408,10 +409,11 @@ class JevClient:
                 self.config,
             )
 
-        # Step 0: Prompt Injection Pre-Filter (A3: Defense before any external AI call)
-        # Cap evaluated text to the first 10,000 characters to prevent ReDoS latency
-        eval_text = f"{subject or ''}\n{body or ''}"[:10000]
-        if PROMPT_INJECTION_REGEX.search(eval_text) or PROMPT_INJECTION_REGEX.search((body or "")[:10000]):
+        # Step 0: Prompt Injection Pre-Filter (A3 & A6: Defense before any external AI call)
+        # Scan bounded head and tail slices to prevent ReDoS and padding attacks
+        eval_text = f"{subject or ''}\n{body or ''}"
+        scan_text = bounded_scan_text(eval_text, config=self.config)
+        if PROMPT_INJECTION_REGEX.search(scan_text):
             logger.warning(
                 f"[Gatekeeper] Prompt injection detected by pre-filter regex -> "
                 f"decision='manual_review', confidence=1.00, is_threat=True"
@@ -668,9 +670,10 @@ class JevClient:
     ) -> Dict[str, Any]:
         """Deterministic rule-based classification when all external APIs are unreachable."""
         text = f"{subject}\n{body}"
+        scan_text = bounded_scan_text(text, config=self.config)
 
         # 1. Prompt Injection / Malicious Payloads
-        if PROMPT_INJECTION_REGEX.search(text[:10000]):
+        if PROMPT_INJECTION_REGEX.search(scan_text):
             return {
                 "decision": "manual_review",
                 "confidence": 1.0,
@@ -681,7 +684,7 @@ class JevClient:
             }
 
         # 2. Known Spam & Phishing Patterns
-        if SPAM_REGEX.search(text):
+        if SPAM_REGEX.search(scan_text):
             return {
                 "decision": "spam",
                 "confidence": 0.95,

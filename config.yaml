@@ -54,6 +54,11 @@ privacy:
   # Max count of [NUM] / [CODE] tokens before triggering sensitive-skip
   max_code_density: 4
 
+security:
+  # Heuristic regex scan bounds to mitigate ReDoS and padding attacks
+  regex_scan_head: 10000
+  regex_scan_tail: 2000
+
 gatekeeper:
   # Primary gatekeeper: TypeSafe System One (Jev)
   timeout_seconds: 5.0
