@@ -6,9 +6,14 @@ from nodes.signature_stripper import (
     strip_signatures_and_quotes,
 )
 from nodes.pii_masker import (
+    get_spacy_nlp,
+    is_external_ai_enabled,
+    is_spacy_available,
     mask_pii,
     pii_masker_node,
+    reset_spacy_cache,
     unmask_text,
+    validate_startup,
 )
 from nodes.sensitive_skip import (
     evaluate_sensitive,
@@ -27,6 +32,7 @@ __all__ = [
     "strip_signatures_and_quotes",
     "mask_pii",
     "pii_masker_node",
+    "is_spacy_available",
     "unmask_text",
     "evaluate_sensitive",
     "sensitive_skip_node",

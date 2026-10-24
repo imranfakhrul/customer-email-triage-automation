@@ -23,6 +23,7 @@ def jev_gatekeeper_node(
     state: TriageState,
     client: Optional[JevClient] = None,
     db: Optional[TriageDatabase] = None,
+    offline: bool = False,
 ) -> Dict[str, Any]:
     """LangGraph node execution function for Jev AI spam & threat gatekeeping.
 
@@ -30,6 +31,7 @@ def jev_gatekeeper_node(
         state: Pipeline state.
         client: Optional JevClient instance (initialized from config if None).
         db: Optional TriageDatabase instance.
+        offline: Whether the pipeline is running in offline mode.
 
     Returns:
         State dictionary updates including gatekeeper decision, confidence, and routing.
@@ -67,6 +69,44 @@ def jev_gatekeeper_node(
             "gatekeeper_confidence": 0.0,
             "is_threat": False,
             "threat_details": "Missing masked_subject privacy safeguard triggered",
+            "classifier_used": "fail_closed",
+            "labels_to_apply": existing_labels,
+            "is_starred": True,
+            "dispatch_target": "Review/Manual",
+            "dispatch_status": "done",
+            "routing_status": "manual_review",
+        }
+
+    # Fail-closed privacy safeguard (A8): if spaCy is missing or failed while external AI is enabled,
+    # send nothing outside (no Jev, no Groq call) and route to manual_review with dispatch_status done.
+    from nodes.pii_masker import is_spacy_available, is_external_ai_enabled
+
+    ext_ai = is_external_ai_enabled(client=client, offline=offline)
+    if ext_ai and (state.get("spacy_failed") or not is_spacy_available()):
+        logger.warning(
+            f"[Gatekeeper] spaCy unavailable for email '{email_id}' while external AI enabled; "
+            "failing closed to manual_review without external AI calls."
+        )
+        existing_labels = list(state.get("labels_to_apply") or [])
+        if "Review/Manual" not in existing_labels:
+            existing_labels.append("Review/Manual")
+
+        if db is not None and email_id:
+            try:
+                db.mark_done(
+                    email_id=email_id,
+                    routing_status="manual_review",
+                    dispatch_target="Review/Manual",
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to record manual review diversion in DB: {exc}")
+
+        return {
+            "gatekeeper_decision": "manual_review",
+            "is_spam": False,
+            "gatekeeper_confidence": 0.0,
+            "is_threat": False,
+            "threat_details": "spaCy model unavailable while external AI enabled",
             "classifier_used": "fail_closed",
             "labels_to_apply": existing_labels,
             "is_starred": True,

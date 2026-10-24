@@ -14,44 +14,164 @@ This node performs 100% on-premise PII redaction:
 4. Guarantees 0% customer PII leaves local infrastructure to third-party LLMs.
 """
 
+import logging
+import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
-import logging
 
 from state import TriageState
 from utils.config import load_config
 
 logger = logging.getLogger(__name__)
 
-# Cached spaCy NLP model instance
+# Cached spaCy NLP model state
 _SPACY_NLP = None
+_SPACY_INITIALIZED: bool = False
+_SPACY_FAILED: bool = False
+_SPACY_WARNED_STARTUP: bool = False
 
 
-def get_spacy_nlp(model_name: str = "en_core_web_sm"):
-    """Loads and caches the spaCy language pipeline model.
+def is_valid_api_key(key: Optional[str]) -> bool:
+    """Determines if an API key string is non-empty and not a placeholder."""
+    if not key or not isinstance(key, str):
+        return False
+    k = key.strip().lower()
+    if not k:
+        return False
+    if k.startswith("your_") or "placeholder" in k or "your_jev_api_key_here" in k:
+        return False
+    return True
+
+
+def is_external_ai_enabled(
+    client: Optional[Any] = None,
+    config: Optional[Dict[str, Any]] = None,
+    offline: bool = False,
+) -> bool:
+    """Determines whether external AI (Jev or Groq) is currently enabled.
+
+    External AI is enabled iff:
+    1. The run is not offline (offline=False).
+    2. A valid (non-empty, non-placeholder) JEV_API_KEY or GROQ_API_KEY is configured.
+    """
+    if offline:
+        return False
+
+    # Check client instance if provided
+    if client is not None:
+        client_jev = getattr(client, "api_key", None)
+        client_groq = getattr(client, "groq_api_key", None)
+        if is_valid_api_key(client_jev) or is_valid_api_key(client_groq):
+            return True
+        if client_jev is not None and client_groq is not None:
+            return False
+
+    if config is None:
+        try:
+            config = load_config()
+        except Exception:
+            config = None
+
+    jev_env = "JEV_API_KEY"
+    groq_env = "GROQ_API_KEY"
+    if config is not None:
+        jev_env = config.get("jev", {}).get("api_key_env", "JEV_API_KEY")
+        groq_env = config.get("groq", {}).get("api_key_env", "GROQ_API_KEY")
+
+    jev_key = os.environ.get(jev_env) or os.environ.get("JEV_API_KEY")
+    groq_key = os.environ.get(groq_env) or os.environ.get("GROQ_API_KEY")
+
+    return is_valid_api_key(jev_key) or is_valid_api_key(groq_key)
+
+
+def get_spacy_nlp(model_name: Optional[str] = None):
+    """Loads and caches the spaCy language pipeline model once at startup.
+
+    Remembers a failure and does not retry on every email.
 
     Args:
-        model_name: Name of the spaCy model.
+        model_name: Optional name of the spaCy model. Defaults to config or 'en_core_web_sm'.
 
     Returns:
         Loaded Language pipeline, or None if unavailable.
     """
-    global _SPACY_NLP
-    if _SPACY_NLP is not None:
+    global _SPACY_NLP, _SPACY_INITIALIZED, _SPACY_FAILED, _SPACY_WARNED_STARTUP
+    if _SPACY_INITIALIZED:
         return _SPACY_NLP
+
+    _SPACY_INITIALIZED = True
+    if model_name is None:
+        try:
+            cfg = load_config()
+            model_name = cfg.get("privacy", {}).get("spacy_model", "en_core_web_sm")
+        except Exception:
+            model_name = "en_core_web_sm"
 
     try:
         import spacy
 
         _SPACY_NLP = spacy.load(model_name)
+        _SPACY_FAILED = False
     except Exception as exc:
-        logger.warning(
-            f"Failed to load spaCy model '{model_name}': {exc}. "
-            "Continuing with regex PII masking."
-        )
         _SPACY_NLP = None
+        _SPACY_FAILED = True
+        if not is_external_ai_enabled():
+            if not _SPACY_WARNED_STARTUP:
+                logger.warning(
+                    "spaCy model unavailable and external AI is disabled; "
+                    "names will only be masked by regex rules."
+                )
+                _SPACY_WARNED_STARTUP = True
 
     return _SPACY_NLP
+
+
+def is_spacy_available(model_name: Optional[str] = None) -> bool:
+    """Returns True if spaCy NLP is loaded and has not failed at runtime."""
+    nlp = get_spacy_nlp(model_name)
+    return (nlp is not None) and (not _SPACY_FAILED)
+
+
+def reset_spacy_cache() -> None:
+    """Resets cached spaCy NLP state (for unit testing)."""
+    global _SPACY_NLP, _SPACY_INITIALIZED, _SPACY_FAILED, _SPACY_WARNED_STARTUP
+    _SPACY_NLP = None
+    _SPACY_INITIALIZED = False
+    _SPACY_FAILED = False
+    _SPACY_WARNED_STARTUP = False
+
+
+def validate_startup(
+    client: Optional[Any] = None,
+    config: Optional[Dict[str, Any]] = None,
+    offline: bool = False,
+    spacy_model_name: Optional[str] = None,
+) -> None:
+    """Startup guard for spaCy availability.
+
+    1. If external AI is enabled and the spaCy model cannot be loaded,
+       raises a clear RuntimeError at startup.
+    2. If external AI is not enabled (no keys, or --offline), keeps working
+       without spaCy but logs ONE warning at startup.
+    """
+    global _SPACY_WARNED_STARTUP
+
+    ext_ai = is_external_ai_enabled(client=client, config=config, offline=offline)
+    nlp = get_spacy_nlp(model_name=spacy_model_name)
+
+    if nlp is None:
+        if ext_ai:
+            raise RuntimeError(
+                "Startup guard failed: spaCy model could not be loaded while external AI "
+                "(Jev/Groq) is enabled. Refusing to start to prevent unmasked PII egress."
+            )
+        else:
+            if not _SPACY_WARNED_STARTUP:
+                logger.warning(
+                    "spaCy model unavailable and external AI is disabled; "
+                    "names will only be masked by regex rules."
+                )
+                _SPACY_WARNED_STARTUP = True
 
 
 # Regex definitions for structured PII entities
@@ -197,6 +317,8 @@ def mask_pii(
     Returns:
         Tuple of (masked_text, token_map) where token_map maps [TOKEN_N] -> original value.
     """
+    global _SPACY_FAILED
+
     if token_map is None:
         token_map = {}
         value_to_token: Dict[str, str] = {}
@@ -311,29 +433,35 @@ def mask_pii(
 
     nlp = get_spacy_nlp(spacy_model_name)
     if nlp is not None:
-        doc = nlp(working)
-        whitelist = load_tech_terms_whitelist()
-        # Collect PERSON entities that are not part of an existing token
-        person_spans: List[Tuple[int, int, str]] = []
-        for ent in doc.ents:
-            if ent.label_ == "PERSON":
-                ent_text = ent.text.strip()
-                # Skip if already a token like [EMAIL_1]
-                if ent_text.startswith("[") and ent_text.endswith("]"):
-                    continue
-                # Skip masking only if the entity matches a whitelist term exactly (case-insensitive, whole entity)
-                if ent_text.lower() in whitelist:
-                    continue
-                if len(ent_text) < 2:
-                    continue
-                person_spans.append((ent.start_char, ent.end_char, ent_text))
+        try:
+            doc = nlp(working)
+            whitelist = load_tech_terms_whitelist()
+            # Collect PERSON entities that are not part of an existing token
+            person_spans: List[Tuple[int, int, str]] = []
+            for ent in doc.ents:
+                if ent.label_ == "PERSON":
+                    ent_text = ent.text.strip()
+                    # Skip if already a token like [EMAIL_1]
+                    if ent_text.startswith("[") and ent_text.endswith("]"):
+                        continue
+                    # Skip masking only if the entity matches a whitelist term exactly (case-insensitive, whole entity)
+                    if ent_text.lower() in whitelist:
+                        continue
+                    if len(ent_text) < 2:
+                        continue
+                    person_spans.append((ent.start_char, ent.end_char, ent_text))
 
-        # Replace person entities from back to front to preserve string offsets
-        for start_char, end_char, val in sorted(
-            person_spans, key=lambda x: x[0], reverse=True
-        ):
-            token = get_or_create_token("PERSON", val)
-            working = working[:start_char] + token + working[end_char:]
+            # Replace person entities from back to front to preserve string offsets
+            for start_char, end_char, val in sorted(
+                person_spans, key=lambda x: x[0], reverse=True
+            ):
+                token = get_or_create_token("PERSON", val)
+                working = working[:start_char] + token + working[end_char:]
+        except Exception as exc:
+            _SPACY_FAILED = True
+            logger.warning(f"spaCy NER processing failed at runtime: {exc}")
+    else:
+        _SPACY_FAILED = True
 
     # 8. Consistency Pass: Ensure any pre-existing tokens from token_map are replaced
     for val, token in sorted(value_to_token.items(), key=lambda x: len(x[0]), reverse=True):
@@ -368,12 +496,16 @@ def unmask_text(text: str, token_map: Dict[str, str]) -> str:
 def pii_masker_node(
     state: TriageState,
     spacy_model_name: Optional[str] = None,
+    client: Optional[Any] = None,
+    offline: bool = False,
 ) -> Dict[str, Any]:
     """LangGraph node execution function for local PII masking.
 
     Args:
         state: Pipeline state containing 'cleaned_body' or 'email_body' and 'email_subject'.
         spacy_model_name: Optional spaCy model override.
+        client: Optional AI client instance.
+        offline: Whether pipeline is running in offline mode.
 
     Returns:
         Dictionary update with 'masked_subject', 'masked_body', and 'token_map'.
@@ -383,6 +515,8 @@ def pii_masker_node(
     if body is None:
         body = state.get("email_body") or state.get("raw_body") or ""
 
+    email_id = state.get("email_id") or "unknown"
+
     token_map = dict(state.get("token_map") or {})
     masked_subject, token_map = mask_pii(
         subject, spacy_model_name=spacy_model_name, token_map=token_map
@@ -391,8 +525,22 @@ def pii_masker_node(
         body, spacy_model_name=spacy_model_name, token_map=token_map
     )
 
-    return {
+    updates: Dict[str, Any] = {
         "masked_subject": masked_subject,
         "masked_body": masked_body,
         "token_map": token_map,
     }
+
+    # Runtime guard (A8): if spaCy is missing or fails during processing while external AI is enabled
+    spacy_unavailable = not is_spacy_available(spacy_model_name)
+    if spacy_unavailable and is_external_ai_enabled(client=client, offline=offline):
+        logger.warning(
+            f"spaCy model unavailable during processing for email '{email_id}' while external AI enabled."
+        )
+        updates["spacy_failed"] = True
+        updates["routing_status"] = "manual_review"
+        updates["dispatch_status"] = "done"
+        updates["dispatch_target"] = "Review/Manual"
+        updates["gatekeeper_decision"] = "manual_review"
+
+    return updates

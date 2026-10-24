@@ -85,7 +85,7 @@ def run_benchmark_suite(
         if offline
         else None
     )
-    pipeline = create_triage_pipeline(db=db, client=client)
+    pipeline = create_triage_pipeline(db=db, client=client, offline=offline)
 
     print(
         f"{'#':<3} | {'Scenario Name':<28} | {'Routing Status':<26} | {'Decision':<12} | {'Engine':<7} | {'Time (ms)':<9} | {'Status'}"
@@ -201,7 +201,7 @@ def process_single_email(json_path: str, offline: bool = False) -> None:
             if offline
             else None
         )
-        result = run_triage_pipeline(payload, db=db, client=client)
+        result = run_triage_pipeline(payload, db=db, client=client, offline=offline)
 
         print("\n--- Pipeline Triage Result ---")
         output_summary = {
@@ -257,6 +257,9 @@ def main() -> None:
     args = parser.parse_args()
 
     print_banner()
+
+    from nodes.pii_masker import validate_startup
+    validate_startup(offline=args.offline)
 
     if args.input:
         process_single_email(args.input, offline=args.offline)

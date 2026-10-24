@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[A8] Fail-Fast on Missing Local spaCy Model with External AI Active**
+**Next up:** **[A13] Hardened Secrets Handling, Jev Host Verification & Redirect Suppression** (or **[A5] Harden Active-Thread Verification Against Spoofing**)
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -41,7 +41,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **5** | **A5** | Security | Harden active-thread detection against spoofing & unapproved thread history | 🟡 Partially Done |
 | **6** | **A6** | Security | Eliminate ReDoS vulnerabilities in heuristic regexes & limit input length | ⏳ Pending |
 | **7** | **A7** | Security | Defeat sensitive keyword evasion (NFKC, zero-width, Cyrillic/Greek homoglyphs, broad chargeback) | ✅ Resolved (`c75f0b5`) |
-| **8** | **A8** | Security | Fail fast on startup & runtime safeguard if spaCy model is missing while AI keys active | ⏳ Pending |
+| **8** | **A8** | Security | Fail fast on startup & runtime safeguard if spaCy model is missing while AI keys active | ✅ Resolved (`8ec99a2`) |
 | **9** | **A9** | Privacy | Integrate `phonenumbers` library, Luhn credit card check, and collision-safe tokens | ⏳ Pending |
 | **10** | **A10** | Privacy | Contextualize technical terms whitelist to protect real surnames (Jenkins, Kafka, etc.) | 🟡 Partially Done |
 | **11** | **A11** | Concurrency | Atomic SQLite idempotency check-and-claim to prevent multi-worker race conditions | ⏳ Pending |
@@ -129,11 +129,13 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Unit tests verify diversion for all homoglyph, zero-width, full-width, spacing, and chargeback variants, and prove zero leakage of normalized text.
 
 ### [A8] Fail Fast on Startup & Runtime Safeguard for spaCy Failures
+* **Status:** ✅ **Resolved**
 * **Problem:** If spaCy fails to load (missing package, missing model, out-of-memory), the node currently logs a warning and proceeds, silently transmitting unmasked person names to external AI APIs.
 * **Solution:**
-  1. Startup: If external AI keys (Jev or Groq) are configured and spaCy fails to load, raise `RuntimeError` at startup to halt container initialization immediately.
-  2. Runtime safeguard: If the spaCy model is missing or unavailable at runtime while Jev or Groq is enabled, send nothing outside and divert the email to `manual_review`.
-* **Done When:** Unit test mocking `spacy.load` to raise verifies that the pipeline refuses to boot with active API keys, and runtime fallback routes to `manual_review` without external network calls.
+  1. Startup: If external AI keys (Jev or Groq) are configured and spaCy fails to load, raise `RuntimeError` at startup to halt container initialization immediately. Load once and remember failure without retrying per email.
+  2. Runtime safeguard: If the spaCy model is missing or unavailable at runtime while Jev or Groq is enabled, send nothing outside and divert the email to `manual_review` with `dispatch_status: "done"` and log warning with `email_id` only (no email content).
+  3. Offline/no-keys fallback: If external AI is not enabled (no keys or `--offline`), keep working without spaCy but log exactly one warning at startup (`"names will only be masked by regex rules"`).
+* **Done When:** Unit test mocking `spacy.load` to raise verifies that the pipeline refuses to boot with active API keys, runtime fallback routes to `manual_review` without external network calls, offline run logs exactly one warning, and spaCy available path is unchanged.
 
 ### [A9] Precision PII Regexes, Luhn Check & Token Nonces
 * **Problem:** Masker misses international phone numbers (`+44...`, `+880...`), truncated IBANs, JWTs, and API keys; falsely redacts 16-digit order numbers as credit cards without Luhn verification; corrupts text when customers quote earlier tokens like `[EMAIL_1]`.

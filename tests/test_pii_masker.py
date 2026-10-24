@@ -1,15 +1,25 @@
 """Unit tests for Node 03 Local spaCy NER and Regex PII Masker."""
 
+import os
+import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
+from db.database import TriageDatabase
 from nodes.pii_masker import (
+    get_spacy_nlp,
+    is_external_ai_enabled,
     load_tech_terms_whitelist,
     mask_pii,
     pii_masker_node,
+    reset_spacy_cache,
     reset_tech_terms_cache,
     unmask_text,
+    validate_startup,
 )
+from pipeline import create_triage_pipeline, run_triage_pipeline
 from state import TriageState
+from utils.jev_client import JevClient
 
 
 class TestPiiMasker(unittest.TestCase):
@@ -312,6 +322,162 @@ class TestPiiMasker(unittest.TestCase):
         ]
         for term in expected_terms:
             self.assertIn(term, whitelist)
+
+
+class TestPiiMaskerSpacySafeguardA8(unittest.TestCase):
+    """Test suite for Fix A8: Never send unmasked names to external AI when spaCy is unavailable."""
+
+    def setUp(self):
+        reset_spacy_cache()
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test_pii_a8.db")
+        self.db = TriageDatabase(db_path=self.db_path)
+
+    def tearDown(self):
+        reset_spacy_cache()
+        self.temp_dir.cleanup()
+
+    @patch.dict(os.environ, {"JEV_API_KEY": "fake_real_jev_key", "GROQ_API_KEY": ""})
+    @patch("spacy.load", side_effect=OSError("spacy model 'en_core_web_sm' not found"))
+    def test_a8_startup_guard_raises_runtime_error_with_fake_jev_key(self, mock_load):
+        """Mock spacy.load to raise; with a fake Jev key set, startup raises RuntimeError."""
+        reset_spacy_cache()
+
+        # 1. Direct validate_startup call
+        with self.assertRaises(RuntimeError) as ctx:
+            validate_startup(offline=False)
+        self.assertIn("Startup guard failed: spaCy model could not be loaded", str(ctx.exception))
+
+        # 2. Pipeline creation invocation
+        with self.assertRaises(RuntimeError) as ctx2:
+            create_triage_pipeline(db=self.db, offline=False)
+        self.assertIn("Startup guard failed: spaCy model could not be loaded", str(ctx2.exception))
+
+        # 3. SpaCy failure is remembered and not retried on every email
+        self.assertIsNone(get_spacy_nlp())
+        # spacy.load should only have been called once
+        self.assertEqual(mock_load.call_count, 1)
+
+    @patch.dict(
+        os.environ,
+        {"JEV_API_KEY": "fake_real_jev_key", "GROQ_API_KEY": "fake_real_groq_key"},
+    )
+    @patch("requests.post")
+    def test_a8_runtime_guard_prevents_jev_and_groq_and_routes_to_manual_review(
+        self, mock_requests_post
+    ):
+        """Mock spacy so it fails at runtime; with a fake key, assert mocked Jev and Groq are never called and email ends in manual_review."""
+        reset_spacy_cache()
+
+        mock_nlp = MagicMock()
+        mock_nlp.side_effect = RuntimeError("Simulated spaCy C-extension/OOM runtime crash")
+
+        with patch("spacy.load", return_value=mock_nlp):
+            with patch("langchain_groq.ChatGroq") as mock_groq_cls:
+                client = JevClient()
+                with patch.object(
+                    client, "_call_jev_api", wraps=client._call_jev_api
+                ) as spy_jev, patch.object(
+                    client, "_call_groq_fallback", wraps=client._call_groq_fallback
+                ) as spy_groq:
+                    pipeline = create_triage_pipeline(
+                        db=self.db, client=client, offline=False
+                    )
+
+                    payload = {
+                        "email_id": "em_test_runtime_fail",
+                        "sender_email": "customer@acme.com",
+                        "email_subject": "Urgent Question about Service Outage",
+                        "email_body": "Hello my name is John Doe and our server is down.",
+                    }
+
+                    with self.assertLogs(level="WARNING") as log_capture:
+                        result = run_triage_pipeline(
+                            payload, pipeline=pipeline, db=self.db, offline=False
+                        )
+
+                    # Assert mocked Jev and Groq were never called
+                    mock_requests_post.assert_not_called()
+                    mock_groq_cls.assert_not_called()
+                    spy_jev.assert_not_called()
+                    spy_groq.assert_not_called()
+
+                    # Assert routed to manual_review and dispatch_status is done
+                    self.assertEqual(result.get("routing_status"), "manual_review")
+                    self.assertEqual(result.get("dispatch_status"), "done")
+                    self.assertEqual(result.get("dispatch_target"), "Review/Manual")
+
+                    # Assert DB record marked done with manual_review
+                    record = self.db.get_record("em_test_runtime_fail")
+                    self.assertIsNotNone(record)
+                    self.assertEqual(record["status"], "done")
+                    self.assertEqual(record["routing_status"], "manual_review")
+
+                    # Check warning log contains email_id only, and zero email content
+                    combined_logs = " ".join(log_capture.output)
+                    self.assertIn("em_test_runtime_fail", combined_logs)
+                    self.assertNotIn("John Doe", combined_logs)
+                    self.assertNotIn("Service Outage", combined_logs)
+                    self.assertNotIn("customer@acme.com", combined_logs)
+
+    @patch.dict(os.environ, {"JEV_API_KEY": "", "GROQ_API_KEY": ""})
+    @patch("spacy.load", side_effect=OSError("spacy model not found"))
+    def test_a8_no_keys_and_spacy_unavailable_runs_and_logs_one_warning(self, mock_load):
+        """With no keys and spaCy unavailable, pipeline still runs and logs exactly one warning."""
+        reset_spacy_cache()
+
+        client = JevClient(api_key="", groq_api_key="")
+
+        with self.assertLogs("nodes.pii_masker", level="WARNING") as log_capture:
+            pipeline = create_triage_pipeline(db=self.db, client=client, offline=True)
+
+            payload_1 = {
+                "email_id": "em_no_ai_1",
+                "sender_email": "user1@example.com",
+                "email_subject": "General inquiry 1",
+                "email_body": "Looking for pricing details please.",
+            }
+            res1 = run_triage_pipeline(payload_1, pipeline=pipeline, db=self.db, offline=True)
+            self.assertIsNotNone(res1)
+
+            payload_2 = {
+                "email_id": "em_no_ai_2",
+                "sender_email": "user2@example.com",
+                "email_subject": "General inquiry 2",
+                "email_body": "Another question about features.",
+            }
+            res2 = run_triage_pipeline(payload_2, pipeline=pipeline, db=self.db, offline=True)
+            self.assertIsNotNone(res2)
+
+        # Check that the startup warning appeared exactly once
+        warning_matches = [
+            msg
+            for msg in log_capture.output
+            if "names will only be masked by regex rules" in msg
+        ]
+        self.assertEqual(
+            len(warning_matches),
+            1,
+            f"Expected exactly ONE startup warning, but got {len(warning_matches)}: {warning_matches}",
+        )
+
+    def test_a8_normal_path_spacy_available_behavior_unchanged(self):
+        """Normal path: spaCy available, behavior unchanged (all existing tests still pass)."""
+        reset_spacy_cache()
+
+        validate_startup()
+
+        nlp = get_spacy_nlp()
+        self.assertIsNotNone(nlp)
+
+        text = "Please reach out to Alexander Hamilton regarding the project update."
+        masked, token_map = mask_pii(text)
+        self.assertNotIn("Alexander Hamilton", masked)
+        self.assertIn("[PERSON_1]", masked)
+        self.assertEqual(token_map.get("[PERSON_1]"), "Alexander Hamilton")
+
+        restored = unmask_text(masked, token_map)
+        self.assertEqual(restored, text)
 
 
 if __name__ == "__main__":

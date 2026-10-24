@@ -71,6 +71,7 @@ class TriageState(TypedDict):
     masked_body: Optional[str]
     masked_subject: Optional[str]
     token_map: Dict[str, str]
+    spacy_failed: Optional[bool]
 
     # Sensitive-Skip Guardrail (Node 04)
     is_sensitive: bool

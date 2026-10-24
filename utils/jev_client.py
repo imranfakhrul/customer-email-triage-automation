@@ -349,6 +349,25 @@ class JevClient:
                 - threat_details: Optional[str]
                 - classifier_used: 'jev', 'groq', or 'regex'
         """
+        # Step -1: Privacy Guardrail (A8: Never send unmasked data to external AI when spaCy is unavailable)
+        from nodes.pii_masker import is_spacy_available
+        if (self._is_valid_key(self.api_key) or self._is_valid_key(self.groq_api_key)) and not is_spacy_available():
+            logger.warning(
+                "[Gatekeeper] spaCy unavailable while external AI enabled; "
+                "refusing external AI dispatch and routing to manual_review."
+            )
+            return normalize_result(
+                {
+                    "decision": "manual_review",
+                    "confidence": 0.0,
+                    "is_spam": False,
+                    "is_threat": False,
+                    "threat_details": "spaCy unavailable while external AI enabled",
+                    "classifier_used": "fail_closed",
+                },
+                self.config,
+            )
+
         # Step 0: Prompt Injection Pre-Filter (A3: Defense before any external AI call)
         # Cap evaluated text to the first 10,000 characters to prevent ReDoS latency
         eval_text = f"{subject or ''}\n{body or ''}"[:10000]
@@ -402,6 +421,10 @@ class JevClient:
         self, subject: str, body: str, sender: str
     ) -> Optional[Dict[str, Any]]:
         """Makes HTTP request to the TypeSafe System One evaluation endpoint."""
+        from nodes.pii_masker import is_spacy_available
+        if not is_spacy_available():
+            logger.warning("[JevClient] Refusing Jev API call: spaCy is unavailable.")
+            return None
         truncated_body = body[: self.max_body_chars] if body else ""
 
         headers = {
@@ -542,6 +565,10 @@ class JevClient:
         self, subject: str, body: str, sender: str
     ) -> Optional[Dict[str, Any]]:
         """Invokes Groq fast model as fallback classifier."""
+        from nodes.pii_masker import is_spacy_available
+        if not is_spacy_available():
+            logger.warning("[JevClient] Refusing Groq API call: spaCy is unavailable.")
+            return None
         try:
             from langchain_groq import ChatGroq
             from langchain_core.messages import HumanMessage, SystemMessage

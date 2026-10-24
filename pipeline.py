@@ -70,6 +70,7 @@ def prepare_initial_state(payload: Dict[str, Any]) -> TriageState:
         "masked_body": payload.get("masked_body"),
         "masked_subject": payload.get("masked_subject"),
         "token_map": dict(payload.get("token_map") or {}),
+        "spacy_failed": payload.get("spacy_failed", False),
         "is_sensitive": bool(payload.get("is_sensitive", False)),
         "sensitive_reason": payload.get("sensitive_reason"),
         "is_spam": payload.get("is_spam"),
@@ -96,6 +97,7 @@ def create_triage_pipeline(
     db: Optional[TriageDatabase] = None,
     config: Optional[Dict[str, Any]] = None,
     client: Optional[JevAIClient] = None,
+    offline: bool = False,
 ) -> CompiledStateGraph:
     """Builds and compiles the LangGraph StateGraph for email triage up to Gatekeeper.
 
@@ -103,10 +105,15 @@ def create_triage_pipeline(
         db: Optional TriageDatabase instance.
         config: Optional system configuration dict.
         client: Optional JevAIClient instance.
+        offline: Whether pipeline is running in offline mode.
 
     Returns:
         CompiledStateGraph ready to invoke with TriageState.
     """
+    # Startup guard (A8): validate spaCy availability against external AI configuration
+    from nodes.pii_masker import validate_startup
+    validate_startup(client=client, config=config, offline=offline)
+
     builder = StateGraph(TriageState)
 
     if client is None and config is not None:
@@ -115,14 +122,17 @@ def create_triage_pipeline(
     # 1. Register Nodes with bound dependencies
     builder.add_node("ingest", lambda state: ingest_node(state, db=db))
     builder.add_node("signature_stripper", signature_stripper_node)
-    builder.add_node("pii_masker", pii_masker_node)
+    builder.add_node(
+        "pii_masker",
+        lambda state: pii_masker_node(state, client=client, offline=offline),
+    )
     builder.add_node(
         "sensitive_skip",
         lambda state: sensitive_skip_node(state, db=db, config=config),
     )
     builder.add_node(
         "jev_gatekeeper",
-        lambda state: jev_gatekeeper_node(state, client=client, db=db),
+        lambda state: jev_gatekeeper_node(state, client=client, db=db, offline=offline),
     )
 
     # 2. Wire Entry Point & Graph Routing Edges
@@ -171,6 +181,7 @@ def run_triage_pipeline(
     db: Optional[TriageDatabase] = None,
     config: Optional[Dict[str, Any]] = None,
     client: Optional[JevAIClient] = None,
+    offline: bool = False,
 ) -> TriageState:
     """Executes an email payload through the triage pipeline and returns final state.
 
@@ -180,6 +191,7 @@ def run_triage_pipeline(
         db: Optional TriageDatabase instance.
         config: Optional configuration dictionary.
         client: Optional JevAIClient instance.
+        offline: Whether pipeline is running in offline mode.
 
     Returns:
         Final TriageState after pipeline completion.
@@ -187,7 +199,9 @@ def run_triage_pipeline(
     initial_state = prepare_initial_state(payload)
 
     if pipeline is None:
-        pipeline = create_triage_pipeline(db=db, config=config, client=client)
+        pipeline = create_triage_pipeline(
+            db=db, config=config, client=client, offline=offline
+        )
 
     final_state = pipeline.invoke(initial_state)
     return final_state
