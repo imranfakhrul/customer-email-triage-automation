@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[A9] Precision PII Regexes, Luhn Check & Token Nonces** (or **[A10] Contextualize Tech-Terms Whitelist**)
+**Next up:** **[A10] Contextualize Tech-Terms Whitelist** (or **[A12] Container Security & Environment File Locations**)
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -42,7 +42,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **6** | **A6** | Security | Eliminate ReDoS vulnerabilities in heuristic regexes & limit input length | ✅ Resolved |
 | **7** | **A7** | Security | Defeat sensitive keyword evasion (NFKC, zero-width, Cyrillic/Greek homoglyphs, broad chargeback) | ✅ Resolved (`c75f0b5`) |
 | **8** | **A8** | Security | Fail fast on startup & runtime safeguard if spaCy model is missing while AI keys active | ✅ Resolved (`8ec99a2`) |
-| **9** | **A9** | Privacy | Integrate `phonenumbers` library, Luhn credit card check, and collision-safe tokens | ⏳ Pending |
+| **9** | **A9** | Privacy | Integrate `phonenumbers` library, Luhn credit card check, and collision-safe tokens | ✅ Resolved |
 | **10** | **A10** | Privacy | Contextualize technical terms whitelist to protect real surnames (Jenkins, Kafka, etc.) | 🟡 Partially Done |
 | **11** | **A11** | Concurrency | Atomic SQLite idempotency check-and-claim to prevent multi-worker race conditions | ✅ Resolved |
 | **12** | **A12** | Infrastructure | Run container as non-root `appuser`, fix data volume mounts, and honor `DATABASE_PATH` | ⏳ Pending |

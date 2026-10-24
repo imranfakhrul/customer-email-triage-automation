@@ -506,7 +506,7 @@ class TestFixA9PrecisionPiiMasking(unittest.TestCase):
             ("GB82 WEST 1234 5698 7654 33", "Invalid IBAN GB82 WEST 1234 5698 7654 33 stays", False),
             # 4. Keys and secrets
             ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J_dummy", "JWT token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J_dummy issued", True),
-            ("AIzaSyD-1234567890abcdefghijklmnopqrstu", "Google API key AIzaSyD-1234567890abcdefghijklmnopqrstu active", True),
+            ("AIza00000000000000000000000000000000000", "Google API key AIza00000000000000000000000000000000000 active", True),
             ("sk-proj-abc1234567890def1234567890", "OpenAI key sk-proj-abc1234567890def1234567890 leaked", True),
             ("sk-1234567890abcdef1234567890", "OpenAI key sk-1234567890abcdef1234567890 leaked", True),
             ("xoxb-1234567890-abcdef12345", "Slack bot token xoxb-1234567890-abcdef12345 registered", True),
