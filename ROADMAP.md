@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[A10] Contextualize Tech-Terms Whitelist** (or **[A12] Container Security & Environment File Locations**)
+**Next up:** **[A12] Container Security & Environment File Locations** (or **[B2] Offline Heuristics Refinement**)
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -43,7 +43,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **7** | **A7** | Security | Defeat sensitive keyword evasion (NFKC, zero-width, Cyrillic/Greek homoglyphs, broad chargeback) | ✅ Resolved (`c75f0b5`) |
 | **8** | **A8** | Security | Fail fast on startup & runtime safeguard if spaCy model is missing while AI keys active | ✅ Resolved (`8ec99a2`) |
 | **9** | **A9** | Privacy | Integrate `phonenumbers` library, Luhn credit card check, and collision-safe tokens | ✅ Resolved |
-| **10** | **A10** | Privacy | Contextualize technical terms whitelist to protect real surnames (Jenkins, Kafka, etc.) | 🟡 Partially Done |
+| **10** | **A10** | Privacy | Contextualize technical terms whitelist to protect real surnames (Jenkins, Kafka, etc.) | ✅ Resolved |
 | **11** | **A11** | Concurrency | Atomic SQLite idempotency check-and-claim to prevent multi-worker race conditions | ✅ Resolved |
 | **12** | **A12** | Infrastructure | Run container as non-root `appuser`, fix data volume mounts, and honor `DATABASE_PATH` | ⏳ Pending |
 | **13** | **A13** | Security | Hardened secrets handling: `override=False`, enforce `api.typesafe.ai` host, redact debug keys | ✅ Resolved |
@@ -151,12 +151,18 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Table-driven test suite validates every PII type is redacted when valid and ignored when checksum/preceding-word rules apply; customer literal `[EMAIL_1]` survives round-trip; subject and body share tokens; egress invariant holds; all 129 tests and 100/100 benchmark pass.
 
 ### [A10] Contextualize Tech-Terms Whitelist (Surnames vs Tech)
-* **Status:** 🟡 **Partially Done**
-  * *Done earlier:* Externalized tech terms whitelist in `config/tech_terms.txt`, cached loader, and whole-entity matching for `PERSON` spans in Commit `03867d1`.
-  * *Still missing:* Ambiguous names (Jenkins, Kafka, Helm, Apollo, Flask, Django) must be kept only when a technical context word is directly adjacent (e.g., `Jenkins pipeline`, `Kafka cluster`); a lone name (for example after a greeting or sign-off like *"Thanks, Jenkins"*) must always be masked. Add `@unittest.skipUnless(spacy_available)` guards to tests.
-* **Problem:** Common surnames in the whitelist allow customer surnames to be sent to external AI unmasked when signed alone.
-* **Solution:** Implement contextual adjacency verification: ambiguous terms are skipped only if accompanied by directly adjacent technical context words; otherwise, mask as person.
-* **Done When:** `"Thanks, Jenkins"` masks the name, while `"our Jenkins pipeline failed"` does not.
+* **Status:** ✅ **Resolved**
+* **Problem:** Common surnames in the whitelist (Jenkins, Kafka, Helm, Apollo, Flask, Django) allowed customer names to be sent to external AI unmasked when signed alone or after a greeting/sign-off.
+* **Solution:**
+  1. Split `config/tech_terms.txt` into two tiers: `[unambiguous]` (infrastructure tools like Postgres, Kubernetes, Docker, always kept unmasked) and `[ambiguous]` (Jenkins, Kafka, Helm, Apollo, Flask, Django; no Ruby/Rust/Swift/Go).
+  2. Implemented `load_tech_terms_tiers` returning `(unambiguous, ambiguous)` and updated `load_tech_terms_whitelist` to return the union for backward compatibility.
+  3. Configured 26 technical context words under `privacy.tech_context_words` in `config.yaml` (`load_tech_context_words`).
+  4. Context word adjacency rule: Ambiguous terms tagged as PERSON are kept unmasked ONLY if a technical context word is directly adjacent (within 2 words before or after, same sentence).
+  5. Greeting/sign-off override: Lone ambiguous names directly after a greeting or sign-off (`Thanks, Jenkins`, `Hi Kafka,`, `Dear Mr. Helm`, `Regards,\nApollo`) are ALWAYS masked as PERSON.
+  6. Exact whole-entity match preserved for multi-word entities (`Apollo Chen`, `Grafana Smith` are never whitelisted).
+  7. Consistency Pass (Pass 9) updated to respect ambiguous context words and greeting overrides.
+  8. Added `nlp_override` to `mask_pii` and `pii_masker_node` for deterministic logic tests independent of spaCy statistical NER quirks; added `@unittest.skipUnless(is_spacy_available(), ...)` guards to real-model tests.
+* **Done When:** All logic tests and real-model tests pass; `"Thanks, Jenkins"` masked; `"Our Jenkins pipeline failed"` kept; `"Kafka broker unreachable"` kept; `"Hi Kafka,"` masked; `"Dear Mr. Helm"` masked; `"Please escalate to Apollo Chen"` masked; `"Grafana Smith"` masked; `"Postgres is down"` kept; `"Thanks, Jenkins. Our Jenkins pipeline failed"` sign-off masked and pipeline kept; case variations work; full pytest suite (154 passed) and offline benchmark (100/100) pass with zero row changes.
 
 ### [A11] Concurrency & Atomic SQLite Idempotency Locking
 * **Status:** ✅ **Resolved**

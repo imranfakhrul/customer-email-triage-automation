@@ -1,6 +1,8 @@
 # Technical terms, software libraries, and infrastructure tools whitelist for PII masker
-# One term per line (case-insensitive). Exact whole-entity matches will not be masked as PERSON.
+# Two tiers: [unambiguous] and [ambiguous]
+# One term per line (case-insensitive). Exact whole-entity matches are processed according to tier rules.
 
+[unambiguous]
 # Databases & Storage
 Postgres
 PostgreSQL
@@ -16,7 +18,6 @@ Kubernetes
 Docker
 Terraform
 Ansible
-Helm
 AWS
 GCP
 Azure
@@ -26,14 +27,11 @@ Nginx
 Apache
 
 # Streaming & Messaging
-Kafka
 RabbitMQ
 
 # Monitoring & CI/CD
 Grafana
 Prometheus
-Jenkins
-Apollo
 
 # Frameworks & Languages
 Python
@@ -42,8 +40,6 @@ TypeScript
 React
 Node.js
 FastAPI
-Flask
-Django
 GraphQL
 
 # Collaboration, Ticketing & Support Tools
@@ -54,3 +50,14 @@ Slack
 Zendesk
 FreeScout
 Stripe
+
+[ambiguous]
+# Tools that are also common surnames or first names.
+# Only kept unmasked if directly adjacent to a technical context word and not in a greeting or sign-off.
+# (Do NOT add Ruby, Rust, Swift or Go)
+Jenkins
+Kafka
+Helm
+Apollo
+Flask
+Django

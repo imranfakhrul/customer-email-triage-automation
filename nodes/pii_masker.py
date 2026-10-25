@@ -305,28 +305,75 @@ NON_PERSON_ENTITIES = {
     "false",
 }
 
-# Cached tech-terms whitelist set loaded from config
+# Default technical context words for disambiguating ambiguous tools (A10)
+DEFAULT_TECH_CONTEXT_WORDS: Set[str] = {
+    "pipeline",
+    "job",
+    "jobs",
+    "build",
+    "builds",
+    "cluster",
+    "broker",
+    "brokers",
+    "topic",
+    "topics",
+    "server",
+    "node",
+    "nodes",
+    "version",
+    "release",
+    "error",
+    "app",
+    "chart",
+    "deployment",
+    "container",
+    "plugin",
+    "agent",
+    "queue",
+    "consumer",
+    "producer",
+    "instance",
+}
+
+# Regex to detect greetings, salutations, sign-offs, and honorific prefixes (A10)
+GREETING_SIGNOFF_REGEX = re.compile(
+    r"(?i)(?:"
+    r"\b(?:thanks|thank\s+you|many\s+thanks|regards|best\s+regards|warm\s+regards|kind\s+regards|best|sincerely|cheers|yours(?:\s+truly|\s+sincerely|\s+faithfully)?)\b"
+    r"|"
+    r"\b(?:hi|hello|hey|dear|greetings)\b(?:\s+(?:mr|mrs|ms|dr|prof)\.?)?"
+    r"|"
+    r"\b(?:mr|mrs|ms|dr|prof)\.?"
+    r")\s*[,:\-\s]*$"
+)
+
+# Cached tech-terms sets loaded from config
 _TECH_TERMS_CACHE: Optional[Set[str]] = None
+_UNAMBIGUOUS_CACHE: Optional[Set[str]] = None
+_AMBIGUOUS_CACHE: Optional[Set[str]] = None
+_TECH_CONTEXT_WORDS_CACHE: Optional[Set[str]] = None
 
 
-def load_tech_terms_whitelist(filepath: Optional[str] = None) -> Set[str]:
-    """Loads and caches technical terms whitelist from external file.
+def load_tech_terms_tiers(
+    filepath: Optional[str] = None,
+) -> Tuple[Set[str], Set[str]]:
+    """Loads and caches technical terms in two tiers: (unambiguous, ambiguous).
 
-    Terms are matched case-insensitively as exact whole entities to prevent
-    spaCy NER from misclassifying infrastructure and developer tools as PERSON.
-    Falls back safely to internal NON_PERSON_ENTITIES if file is unavailable.
+    [unambiguous]: Tools/libraries that are never used as human names (e.g. Postgres, Kubernetes, Docker).
+    [ambiguous]: Names like Jenkins, Kafka, Helm, Apollo, Flask, Django that can be either tools or persons.
 
     Args:
         filepath: Optional path to tech terms file. If None, checks config.yaml.
 
     Returns:
-        Set of lowercase whitelist terms.
+        Tuple of (unambiguous_terms_set, ambiguous_terms_set), all lowercased.
     """
-    global _TECH_TERMS_CACHE
-    if _TECH_TERMS_CACHE is not None and filepath is None:
-        return _TECH_TERMS_CACHE
+    global _UNAMBIGUOUS_CACHE, _AMBIGUOUS_CACHE, _TECH_TERMS_CACHE
+    if _UNAMBIGUOUS_CACHE is not None and _AMBIGUOUS_CACHE is not None and filepath is None:
+        return _UNAMBIGUOUS_CACHE, _AMBIGUOUS_CACHE
 
-    terms = set(NON_PERSON_ENTITIES)
+    unambiguous: Set[str] = set(NON_PERSON_ENTITIES)
+    ambiguous: Set[str] = set()
+
     target_path = filepath
     if target_path is None:
         try:
@@ -342,32 +389,133 @@ def load_tech_terms_whitelist(filepath: Optional[str] = None) -> Set[str]:
 
         candidate = Path(target_path)
         if not candidate.is_absolute():
-            # Resolve relative to project root
             repo_root = Path(__file__).resolve().parent.parent
             resolved = repo_root / target_path
             if resolved.exists():
                 candidate = resolved
 
         if candidate.exists():
+            current_section = "unambiguous"
             try:
                 with open(candidate, "r", encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
-                        if line and not line.startswith("#"):
-                            terms.add(line.lower())
+                        if not line or line.startswith("#"):
+                            continue
+                        if line.startswith("[") and line.endswith("]"):
+                            sec = line[1:-1].strip().lower()
+                            if sec in ("unambiguous", "ambiguous"):
+                                current_section = sec
+                            continue
+                        if current_section == "ambiguous":
+                            ambiguous.add(line.lower())
+                        else:
+                            unambiguous.add(line.lower())
             except Exception:
-                # Log nothing about customer text or specific terms
                 pass
 
     if filepath is None:
-        _TECH_TERMS_CACHE = terms
-    return terms
+        _UNAMBIGUOUS_CACHE = unambiguous
+        _AMBIGUOUS_CACHE = ambiguous
+        _TECH_TERMS_CACHE = unambiguous | ambiguous
+
+    return unambiguous, ambiguous
+
+
+def load_tech_terms_whitelist(filepath: Optional[str] = None) -> Set[str]:
+    """Loads and caches technical terms whitelist from external file.
+
+    Maintains backward compatibility by returning the union of both tiers.
+    """
+    global _TECH_TERMS_CACHE
+    if _TECH_TERMS_CACHE is not None and filepath is None:
+        return _TECH_TERMS_CACHE
+    unambiguous, ambiguous = load_tech_terms_tiers(filepath=filepath)
+    combined = unambiguous | ambiguous
+    if filepath is None:
+        _TECH_TERMS_CACHE = combined
+    return combined
 
 
 def reset_tech_terms_cache() -> None:
     """Resets cached tech terms whitelist (used for testing or dynamic reloads)."""
-    global _TECH_TERMS_CACHE
+    global _TECH_TERMS_CACHE, _UNAMBIGUOUS_CACHE, _AMBIGUOUS_CACHE, _TECH_CONTEXT_WORDS_CACHE
     _TECH_TERMS_CACHE = None
+    _UNAMBIGUOUS_CACHE = None
+    _AMBIGUOUS_CACHE = None
+    _TECH_CONTEXT_WORDS_CACHE = None
+
+
+def load_tech_context_words(config: Optional[Dict[str, Any]] = None) -> Set[str]:
+    """Loads technical context words from config or defaults."""
+    global _TECH_CONTEXT_WORDS_CACHE
+    if _TECH_CONTEXT_WORDS_CACHE is not None and config is None:
+        return _TECH_CONTEXT_WORDS_CACHE
+
+    words = set(DEFAULT_TECH_CONTEXT_WORDS)
+    cfg = config
+    if cfg is None:
+        try:
+            cfg = load_config()
+        except Exception:
+            cfg = None
+
+    if cfg:
+        custom_words = cfg.get("privacy", {}).get("tech_context_words")
+        if custom_words and isinstance(custom_words, (list, set, tuple)):
+            words = {str(w).strip().lower() for w in custom_words if w}
+
+    if config is None:
+        _TECH_CONTEXT_WORDS_CACHE = words
+    return words
+
+
+def is_greeting_or_signoff(text: str, start_char: int) -> bool:
+    """Checks if the span starting at start_char is directly preceded by a greeting or sign-off."""
+    prefix = text[:start_char]
+    return bool(GREETING_SIGNOFF_REGEX.search(prefix))
+
+
+def has_adjacent_tech_context(
+    text: str,
+    start_char: int,
+    end_char: int,
+    context_words: Set[str],
+) -> bool:
+    """Determines if a technical context word is directly adjacent (within 2 words before or after in the same sentence).
+
+    Args:
+        text: Full working text string.
+        start_char: Start index of the ambiguous entity in text.
+        end_char: End index of the ambiguous entity in text.
+        context_words: Set of lowercase technical context words.
+
+    Returns:
+        True if an adjacent technical context word is found within 2 words in the same sentence.
+    """
+    before_text = text[:start_char]
+    sentence_start = 0
+    boundary_matches_before = list(re.finditer(r"[\r\n]+|[.!?](?:\s+|$)", before_text))
+    if boundary_matches_before:
+        sentence_start = boundary_matches_before[-1].end()
+
+    after_text = text[end_char:]
+    sentence_end = len(text)
+    boundary_match_after = re.search(r"[\r\n]+|[.!?](?:\s+|$)", after_text)
+    if boundary_match_after:
+        sentence_end = end_char + boundary_match_after.start()
+
+    same_sentence_before = text[sentence_start:start_char]
+    same_sentence_after = text[end_char:sentence_end]
+
+    words_before = re.findall(r"\b[A-Za-z0-9_-]+\b", same_sentence_before)
+    words_after = re.findall(r"\b[A-Za-z0-9_-]+\b", same_sentence_after)
+
+    adjacent_before = [w.lower() for w in words_before[-2:]]
+    adjacent_after = [w.lower() for w in words_after[:2]]
+
+    adjacent_words = set(adjacent_before + adjacent_after)
+    return bool(adjacent_words & context_words)
 
 
 def mask_pii(
@@ -375,6 +523,7 @@ def mask_pii(
     spacy_model_name: Optional[str] = None,
     token_map: Optional[Dict[str, str]] = None,
     default_phone_region: Optional[str] = None,
+    nlp_override: Optional[Any] = None,
 ) -> Tuple[str, Dict[str, str]]:
     """Sanitizes text by replacing PII with anonymized placeholder tokens.
 
@@ -550,20 +699,24 @@ def mask_pii(
         working = working[: match.start()] + token + working[match.end() :]
 
     # 8. spaCy NER Pass: Person Names
-    if spacy_model_name is None:
-        try:
-            cfg = load_config()
-            spacy_model_name = cfg.get("privacy", {}).get(
-                "spacy_model", "en_core_web_sm"
-            )
-        except Exception:
-            spacy_model_name = "en_core_web_sm"
+    if nlp_override is not None:
+        nlp = nlp_override
+    else:
+        if spacy_model_name is None:
+            try:
+                cfg = load_config()
+                spacy_model_name = cfg.get("privacy", {}).get(
+                    "spacy_model", "en_core_web_sm"
+                )
+            except Exception:
+                spacy_model_name = "en_core_web_sm"
+        nlp = get_spacy_nlp(spacy_model_name)
 
-    nlp = get_spacy_nlp(spacy_model_name)
     if nlp is not None:
         try:
             doc = nlp(working)
-            whitelist = load_tech_terms_whitelist()
+            unambiguous_terms, ambiguous_terms = load_tech_terms_tiers()
+            context_words = load_tech_context_words()
             # Collect PERSON entities that are not part of an existing token
             person_spans: List[Tuple[int, int, str]] = []
             for ent in doc.ents:
@@ -581,11 +734,26 @@ def mask_pii(
                         continue
                     if re.match(r"^[A-Z_]+_\d+(?:_[0-9a-fA-F]+)?$", ent_text):
                         continue
-                    # Skip masking only if the entity matches a whitelist term exactly (case-insensitive, whole entity)
-                    if ent_text.lower() in whitelist:
-                        continue
                     if len(ent_text) < 2:
                         continue
+
+                    ent_lower = ent_text.lower()
+                    # Tier 1: Unambiguous tools are always kept unmasked (exact whole-entity match)
+                    if ent_lower in unambiguous_terms:
+                        continue
+
+                    # Tier 2: Ambiguous terms (Jenkins, Kafka, Helm, Apollo, Flask, Django)
+                    if ent_lower in ambiguous_terms:
+                        # Rule 3: Direct greeting/sign-off must ALWAYS be masked
+                        if is_greeting_or_signoff(working, ent.start_char):
+                            pass
+                        # Rule 2: Keep unmasked ONLY if a technical context word is directly adjacent (<=2 words, same sentence)
+                        elif has_adjacent_tech_context(
+                            working, ent.start_char, ent.end_char, context_words
+                        ):
+                            continue
+
+                    # Multi-word entities (Apollo Chen, Grafana Smith) or unrecognized names are masked
                     person_spans.append((ent.start_char, ent.end_char, ent_text))
 
             # Replace person entities from back to front to preserve string offsets
@@ -601,10 +769,24 @@ def mask_pii(
         _SPACY_FAILED = True
 
     # 9. Consistency Pass: Ensure any pre-existing tokens from token_map are replaced
+    unambiguous_terms, ambiguous_terms = load_tech_terms_tiers()
+    context_words = load_tech_context_words()
     for val, token in sorted(value_to_token.items(), key=lambda x: len(x[0]), reverse=True):
         if len(val) >= 2 and val in working:
+            val_lower = val.lower()
+            if val_lower in unambiguous_terms:
+                continue
             pattern = re.compile(rf"\b{re.escape(val)}\b")
-            working = pattern.sub(token, working)
+            if val_lower in ambiguous_terms:
+                for m in reversed(list(pattern.finditer(working))):
+                    start, end = m.start(), m.end()
+                    if not is_greeting_or_signoff(working, start) and has_adjacent_tech_context(
+                        working, start, end, context_words
+                    ):
+                        continue
+                    working = working[:start] + token + working[end:]
+            else:
+                working = pattern.sub(token, working)
 
     return working, token_map
 
@@ -638,6 +820,7 @@ def pii_masker_node(
     client: Optional[Any] = None,
     offline: bool = False,
     config: Optional[Dict[str, Any]] = None,
+    nlp_override: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """LangGraph node execution function for local PII masking.
 
@@ -647,6 +830,7 @@ def pii_masker_node(
         client: Optional AI client instance.
         offline: Whether pipeline is running in offline mode.
         config: Optional configuration dictionary.
+        nlp_override: Optional spaCy model or mock override for testing.
 
     Returns:
         Dictionary update with 'masked_subject', 'masked_body', and 'token_map'.
@@ -671,12 +855,14 @@ def pii_masker_node(
         spacy_model_name=spacy_model_name,
         token_map=token_map,
         default_phone_region=default_region,
+        nlp_override=nlp_override,
     )
     masked_body, token_map = mask_pii(
         body,
         spacy_model_name=spacy_model_name,
         token_map=token_map,
         default_phone_region=default_region,
+        nlp_override=nlp_override,
     )
 
     updates: Dict[str, Any] = {

@@ -9,6 +9,9 @@ from db.database import TriageDatabase
 from nodes.pii_masker import (
     get_spacy_nlp,
     is_external_ai_enabled,
+    is_spacy_available,
+    load_tech_context_words,
+    load_tech_terms_tiers,
     load_tech_terms_whitelist,
     mask_pii,
     pii_masker_node,
@@ -93,6 +96,7 @@ class TestPiiMasker(unittest.TestCase):
         self.assertNotIn("192.168.1.105", masked)
         self.assertTrue(any(k.startswith("[IP_ADDRESS_1_") and v == "192.168.1.105" for k, v in token_map.items()))
 
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
     def test_mask_person_names_via_spacy(self):
         """Verifies spaCy NER detects person names and masks them as [PERSON_N]."""
         text = "My name is John Doe and my colleague is Jane Miller."
@@ -173,6 +177,7 @@ class TestPiiMasker(unittest.TestCase):
         self.assertNotIn("(415) 555-2671", output["masked_body"])
         self.assertTrue(any(k.startswith("[EMAIL_1_") for k in output["token_map"].keys()))
 
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
     def test_subject_and_body_shared_token_map(self):
         """Verifies subject and body share the same token_map, matching the same entities."""
         state: TriageState = {
@@ -237,6 +242,7 @@ class TestPiiMasker(unittest.TestCase):
         self.assertEqual(unmask_text(output["masked_subject"], output["token_map"]), state["email_subject"])
         self.assertEqual(unmask_text(output["masked_body"], output["token_map"]), state["cleaned_body"])
 
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
     def test_tech_terms_whitelist_prevents_person_masking(self):
         """Verifies tech whitelist keeps infrastructure and tool names intact while masking person names."""
         reset_tech_terms_cache()
@@ -625,6 +631,7 @@ class TestFixA9PrecisionPiiMasking(unittest.TestCase):
         self.assertEqual(unmask_text(output["masked_subject"], token_map), state["email_subject"])
         self.assertEqual(unmask_text(output["masked_body"], token_map), state["cleaned_body"])
 
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
     def test_a9_egress_behavior_holds(self):
         """Fix A1 egress behavior still holds: outbound payloads to external AI contain zero raw PII."""
         temp_dir = tempfile.TemporaryDirectory()
@@ -658,6 +665,316 @@ class TestFixA9PrecisionPiiMasking(unittest.TestCase):
             self.assertNotIn(raw_card, res["masked_body"])
         finally:
             temp_dir.cleanup()
+
+
+class MockSpan:
+    """Mock spaCy entity Span for deterministic NER logic testing."""
+
+    def __init__(self, text: str, label: str, start_char: int, end_char: int):
+        self.text = text
+        self.label_ = label
+        self.start_char = start_char
+        self.end_char = end_char
+
+
+class MockDoc:
+    """Mock spaCy Doc with injected entities."""
+
+    def __init__(self, text: str, ents: list):
+        self.text = text
+        self.ents = ents
+
+
+def make_mock_nlp(entities_map):
+    """Returns an nlp callable that injects entities at exact character offsets."""
+
+    def _nlp(text: str):
+        ents = []
+        for ent_text, label in entities_map:
+            idx = 0
+            while True:
+                idx = text.find(ent_text, idx)
+                if idx == -1:
+                    break
+                ents.append(MockSpan(ent_text, label, idx, idx + len(ent_text)))
+                idx += len(ent_text)
+        # Sort by start_char ascending
+        ents.sort(key=lambda e: e.start_char)
+        return MockDoc(text, ents)
+
+    return _nlp
+
+
+class TestFixA10ContextualTechTerms(unittest.TestCase):
+    """Comprehensive test suite for Fix A10: Contextual tech-terms whitelist."""
+
+    def setUp(self):
+        reset_tech_terms_cache()
+
+    def tearDown(self):
+        reset_tech_terms_cache()
+
+    # --- Tier Loading and Configuration Tests ---
+
+    def test_two_tier_whitelist_loading(self):
+        """Verifies whitelist is correctly partitioned into unambiguous and ambiguous tiers."""
+        unambiguous, ambiguous = load_tech_terms_tiers()
+
+        # Unambiguous expected terms
+        expected_unambiguous = [
+            "postgres", "postgresql", "mysql", "redis", "mongodb",
+            "elasticsearch", "cassandra", "sqlite", "kubernetes",
+            "docker", "terraform", "ansible", "aws", "gcp", "azure",
+            "linux", "ubuntu", "nginx", "apache", "rabbitmq",
+            "grafana", "prometheus", "python", "javascript",
+            "typescript", "react", "node.js", "fastapi", "graphql",
+            "github", "gitlab", "jira", "slack", "zendesk",
+            "freescout", "stripe",
+        ]
+        for term in expected_unambiguous:
+            self.assertIn(term, unambiguous, f"{term} should be in unambiguous tier")
+            self.assertNotIn(term, ambiguous, f"{term} should NOT be in ambiguous tier")
+
+        # Ambiguous expected terms
+        expected_ambiguous = [
+            "jenkins", "kafka", "helm", "apollo", "flask", "django"
+        ]
+        for term in expected_ambiguous:
+            self.assertIn(term, ambiguous, f"{term} should be in ambiguous tier")
+            self.assertNotIn(term, unambiguous, f"{term} should NOT be in ambiguous tier")
+
+        # Must NOT contain Ruby, Rust, Swift, Go
+        forbidden = ["ruby", "rust", "swift", "go"]
+        for term in forbidden:
+            self.assertNotIn(term, ambiguous, f"{term} must NOT be added")
+            self.assertNotIn(term, unambiguous, f"{term} must NOT be added")
+
+        # Backward-compatible full whitelist union
+        full_whitelist = load_tech_terms_whitelist()
+        self.assertEqual(full_whitelist, unambiguous | ambiguous)
+
+    def test_tech_context_words_loading(self):
+        """Verifies the 26 standard technical context words are loaded."""
+        words = load_tech_context_words()
+        expected_words = {
+            "pipeline", "job", "jobs", "build", "builds", "cluster",
+            "broker", "brokers", "topic", "topics", "server", "node",
+            "nodes", "version", "release", "error", "app", "chart",
+            "deployment", "container", "plugin", "agent", "queue",
+            "consumer", "producer", "instance",
+        }
+        self.assertTrue(expected_words.issubset(words))
+
+    # --- Mocked / Injected Logic Tests (Independent of statistical spaCy NER) ---
+
+    def test_logic_thanks_jenkins_masked(self):
+        """Thanks, Jenkins (sign-off) must ALWAYS be masked as PERSON."""
+        text = "Thanks, Jenkins"
+        mock_nlp = make_mock_nlp([("Jenkins", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        self.assertNotIn("Jenkins", masked)
+        self.assertRegex(masked, r"^Thanks, \[PERSON_1_[0-9a-f]{4}\]$")
+        self.assertEqual(unmask_text(masked, token_map), text)
+
+    def test_logic_our_jenkins_pipeline_failed_kept(self):
+        """Our Jenkins pipeline failed (adjacent context 'pipeline') kept unmasked."""
+        text = "Our Jenkins pipeline failed"
+        mock_nlp = make_mock_nlp([("Jenkins", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        self.assertEqual(masked, text)
+        self.assertNotIn("[PERSON", masked)
+
+    def test_logic_kafka_broker_unreachable_kept(self):
+        """Kafka broker unreachable (adjacent context 'broker') kept unmasked."""
+        text = "Kafka broker unreachable"
+        mock_nlp = make_mock_nlp([("Kafka", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        self.assertEqual(masked, text)
+        self.assertNotIn("[PERSON", masked)
+
+    def test_logic_hi_kafka_masked(self):
+        """Hi Kafka, (greeting) must ALWAYS be masked."""
+        text = "Hi Kafka,"
+        mock_nlp = make_mock_nlp([("Kafka", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        self.assertNotIn("Kafka", masked)
+        self.assertRegex(masked, r"^Hi \[PERSON_1_[0-9a-f]{4}\],$")
+        self.assertEqual(unmask_text(masked, token_map), text)
+
+    def test_logic_dear_mr_helm_masked(self):
+        """Dear Mr. Helm (greeting + honorific) must ALWAYS be masked."""
+        text = "Dear Mr. Helm"
+        mock_nlp = make_mock_nlp([("Helm", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        self.assertNotIn("Helm", masked)
+        self.assertRegex(masked, r"^Dear Mr\. \[PERSON_1_[0-9a-f]{4}\]$")
+        self.assertEqual(unmask_text(masked, token_map), text)
+
+    def test_logic_please_escalate_to_apollo_chen_masked(self):
+        """Multi-word entity 'Apollo Chen' is never whitelisted (exact match only)."""
+        text = "Please escalate to Apollo Chen"
+        mock_nlp = make_mock_nlp([("Apollo Chen", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        self.assertNotIn("Apollo Chen", masked)
+        self.assertRegex(masked, r"^Please escalate to \[PERSON_1_[0-9a-f]{4}\]$")
+        self.assertEqual(unmask_text(masked, token_map), text)
+
+    def test_logic_grafana_smith_masked(self):
+        """Multi-word entity 'Grafana Smith' is never whitelisted."""
+        text = "Grafana Smith"
+        mock_nlp = make_mock_nlp([("Grafana Smith", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        self.assertNotIn("Grafana Smith", masked)
+        self.assertRegex(masked, r"^\[PERSON_1_[0-9a-f]{4}\]$")
+        self.assertEqual(unmask_text(masked, token_map), text)
+
+    def test_logic_postgres_is_down_kept(self):
+        """Unambiguous tier 'Postgres' is always kept even if tagged as PERSON."""
+        text = "Postgres is down"
+        mock_nlp = make_mock_nlp([("Postgres", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        self.assertEqual(masked, text)
+        self.assertNotIn("[PERSON", masked)
+
+    def test_logic_two_occurrences_signoff_masked_pipeline_kept(self):
+        """'Thanks, Jenkins. Our Jenkins pipeline failed' -> sign-off masked, pipeline kept."""
+        text = "Thanks, Jenkins. Our Jenkins pipeline failed"
+        mock_nlp = make_mock_nlp([("Jenkins", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        # Sign-off Jenkins is replaced, pipeline Jenkins is kept
+        self.assertRegex(masked, r"^Thanks, \[PERSON_1_[0-9a-f]{4}\]\. Our Jenkins pipeline failed$")
+        self.assertEqual(unmask_text(masked, token_map), text)
+
+    def test_logic_case_variations_jenkins_pipeline_kept(self):
+        """Case variation 'jenkins pipeline' keeps ambiguous tool intact."""
+        text = "jenkins pipeline"
+        mock_nlp = make_mock_nlp([("jenkins", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        self.assertEqual(masked, text)
+        self.assertNotIn("[PERSON", masked)
+
+    def test_logic_other_ambiguous_tools_with_context(self):
+        """Verifies Helm, Apollo, Flask, Django with adjacent context words."""
+        examples = [
+            ("The helm chart failed to deploy", "helm", "chart"),
+            ("Apollo server crashed during query execution", "Apollo", "server"),
+            ("Our flask app encountered an internal server error", "flask", "app"),
+            ("The django deployment finished successfully", "django", "deployment"),
+        ]
+        for sentence, tool, ctx_word in examples:
+            mock_nlp = make_mock_nlp([(tool, "PERSON")])
+            masked, _ = mask_pii(sentence, nlp_override=mock_nlp)
+            self.assertEqual(masked, sentence, f"Failed for {tool} with context {ctx_word}")
+
+    def test_logic_other_greetings_and_signoffs_masked(self):
+        """Verifies various greeting/signoff patterns mask the ambiguous tool."""
+        examples = [
+            ("Regards,\nApollo", "Apollo"),
+            ("Best regards,\nDjango", "Django"),
+            ("Hello Flask", "Flask"),
+            ("Sincerely, Helm", "Helm"),
+            ("Cheers, Jenkins", "Jenkins"),
+        ]
+        for sentence, tool in examples:
+            mock_nlp = make_mock_nlp([(tool, "PERSON")])
+            masked, token_map = mask_pii(sentence, nlp_override=mock_nlp)
+            self.assertNotIn(tool, masked, f"Failed for {sentence}")
+            self.assertIn("[PERSON_1_", masked)
+            self.assertEqual(unmask_text(masked, token_map), sentence)
+
+    def test_logic_context_word_beyond_two_words_masked(self):
+        """Context word more than 2 words away does NOT prevent masking."""
+        text = "The pipeline that ran Jenkins"
+        mock_nlp = make_mock_nlp([("Jenkins", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        self.assertNotIn("Jenkins", masked)
+        self.assertIn("[PERSON_1_", masked)
+
+    def test_logic_context_word_in_different_sentence_masked(self):
+        """Context word in a different sentence does NOT prevent masking."""
+        text = "Please ask Jenkins. The pipeline is ready."
+        mock_nlp = make_mock_nlp([("Jenkins", "PERSON")])
+        masked, token_map = mask_pii(text, nlp_override=mock_nlp)
+        self.assertNotIn("Jenkins", masked)
+        self.assertIn("Please ask [PERSON_1_", masked)
+
+    # --- Real Model Tests (Guarded with is_spacy_available) ---
+
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
+    def test_real_model_thanks_jenkins_masked(self):
+        """Real spaCy model: 'Thanks, Jenkins' is masked."""
+        text = "Thanks, Jenkins"
+        masked, token_map = mask_pii(text)
+        self.assertNotIn("Jenkins", masked)
+        self.assertIn("[PERSON_1_", masked)
+        self.assertEqual(unmask_text(masked, token_map), text)
+
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
+    def test_real_model_our_jenkins_pipeline_failed_kept(self):
+        """Real spaCy model: 'Our Jenkins pipeline failed' is kept."""
+        text = "Our Jenkins pipeline failed"
+        masked, _ = mask_pii(text)
+        self.assertIn("Jenkins", masked)
+        self.assertNotIn("[PERSON", masked)
+
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
+    def test_real_model_kafka_broker_unreachable_kept(self):
+        """Real spaCy model: 'Kafka broker unreachable' is kept."""
+        text = "Kafka broker unreachable"
+        masked, _ = mask_pii(text)
+        self.assertEqual(masked, text)
+
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
+    def test_real_model_hi_kafka_masked(self):
+        """Real spaCy model: 'Hi Kafka,' is masked."""
+        text = "Hi Kafka,"
+        masked, token_map = mask_pii(text)
+        self.assertNotIn("Kafka", masked)
+        self.assertIn("[PERSON_1_", masked)
+        self.assertEqual(unmask_text(masked, token_map), text)
+
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
+    def test_real_model_dear_mr_helm_masked(self):
+        """Real spaCy model: 'Dear Mr. Helm' is masked."""
+        text = "Dear Mr. Helm"
+        masked, token_map = mask_pii(text)
+        self.assertNotIn("Helm", masked)
+        self.assertIn("[PERSON_1_", masked)
+        self.assertEqual(unmask_text(masked, token_map), text)
+
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
+    def test_real_model_please_escalate_to_apollo_chen_masked(self):
+        """Real spaCy model: 'Please escalate to Apollo Chen' is masked."""
+        text = "Please escalate to Apollo Chen"
+        masked, token_map = mask_pii(text)
+        self.assertNotIn("Apollo Chen", masked)
+        self.assertIn("[PERSON_1_", masked)
+        self.assertEqual(unmask_text(masked, token_map), text)
+
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
+    def test_real_model_grafana_smith_masked(self):
+        """Real spaCy model: 'Grafana Smith' is masked."""
+        text = "Grafana Smith"
+        masked, token_map = mask_pii(text)
+        self.assertNotIn("Grafana Smith", masked)
+        self.assertIn("[PERSON_1_", masked)
+        self.assertEqual(unmask_text(masked, token_map), text)
+
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
+    def test_real_model_postgres_is_down_kept(self):
+        """Real spaCy model: 'Postgres is down' is kept."""
+        text = "Postgres is down"
+        masked, _ = mask_pii(text)
+        self.assertEqual(masked, text)
+
+    @unittest.skipUnless(is_spacy_available(), "spaCy model unavailable")
+    def test_real_model_two_occurrences_signoff_masked_pipeline_kept(self):
+        """Real spaCy model: 'Thanks, Jenkins. Our Jenkins pipeline failed' -> sign-off masked, pipeline kept."""
+        text = "Thanks, Jenkins. Our Jenkins pipeline failed"
+        masked, token_map = mask_pii(text)
+        self.assertTrue(masked.startswith("Thanks, [PERSON_1_"))
+        self.assertTrue(masked.endswith(". Our Jenkins pipeline failed"))
+        self.assertEqual(unmask_text(masked, token_map), text)
 
 
 if __name__ == "__main__":
