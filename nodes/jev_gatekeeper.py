@@ -202,7 +202,7 @@ def jev_gatekeeper_node(
 
         return {
             "gatekeeper_decision": "manual_review",
-            "is_spam": False,
+            "is_spam": is_spam,
             "gatekeeper_confidence": confidence,
             "is_threat": is_threat,
             "threat_details": threat_details,

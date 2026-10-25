@@ -1531,9 +1531,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1554,9 +1554,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1577,9 +1577,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1600,9 +1600,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1623,9 +1623,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1646,9 +1646,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1669,9 +1669,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1692,9 +1692,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1715,9 +1715,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1738,9 +1738,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1761,9 +1761,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1784,9 +1784,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1807,9 +1807,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1830,9 +1830,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },
@@ -1853,9 +1853,9 @@
     "expected": {
       "is_sensitive": false,
       "is_spam": true,
-      "gatekeeper_decision": "spam",
-      "dispatch_target": "Junk/Spam",
-      "routing_status": "spam_skipped",
+      "gatekeeper_decision": "manual_review",
+      "dispatch_target": "Review/Manual",
+      "routing_status": "manual_review",
       "dispatch_status": "done"
     }
   },

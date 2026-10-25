@@ -827,7 +827,8 @@ class TestA6ReDoSDefense:
         # 1. Spam regex coverage within 200 char bounds
         assert SPAM_REGEX.search("Please verify your identity before login to proceed")
         assert SPAM_REGEX.search("Please reset your password by clicking http://reset.com")
-        assert SPAM_REGEX.search("We have cheap offshore software developers ready")
+        # Fix B2: "cheap.*developers" removed; test another bounded multi-word spam pattern
+        assert SPAM_REGEX.search("Wire transfer of $50M from unclaimed inheritance")
         assert SPAM_REGEX.search("Please purchase target gift cards for the team")
         assert SPAM_REGEX.search("Reach page 1 on google and get satisfied clients")
         assert SPAM_REGEX.search("Your parcel with tracking 123 could not be delivered")

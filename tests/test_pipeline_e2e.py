@@ -12,6 +12,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
 from db.database import TriageDatabase
 from pipeline import create_triage_pipeline, run_triage_pipeline
@@ -235,7 +236,7 @@ class TestPipelineE2E(unittest.TestCase):
         self.assertIsNone(result["gatekeeper_decision"])
 
     def test_e2e_crypto_phishing_spam_quarantine(self):
-        """Verifies unsolicited sweepstakes spam is diverted to Junk/Spam."""
+        """Verifies unsolicited sweepstakes spam is diverted to Review/Manual offline (Fix B2)."""
         payload = {
             "email_id": "em_spam_01",
             "message_id": "<spam-01@scam-winner.xyz>",
@@ -252,16 +253,57 @@ class TestPipelineE2E(unittest.TestCase):
 
         self.assertFalse(result["is_sensitive"])
         self.assertTrue(result["is_spam"])
+        self.assertEqual(result["gatekeeper_decision"], "manual_review")
+        self.assertEqual(result["dispatch_target"], "Review/Manual")
+        self.assertEqual(result["routing_status"], "manual_review")
+        self.assertEqual(result["dispatch_status"], "done")
+        self.assertIn("Review/Manual", result["labels_to_apply"])
+
+        # Verified in DB
+        record = self.db.get_record("em_spam_01")
+        self.assertEqual(record["status"], "done")
+        self.assertEqual(record["routing_status"], "manual_review")
+        self.assertEqual(record["dispatch_target"], "Review/Manual")
+
+    @patch("requests.post")
+    def test_e2e_mocked_jev_spam_quarantine(self, mock_post):
+        """Verifies live/mocked Jev 'spam' decision still routes to spam_skipped and Junk/Spam (Fix B2)."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "answers": {
+                "is_spam": {"type": "noul", "noul": 0.99},
+                "is_threat": {"type": "noul", "noul": 0.01},
+            }
+        }
+        mock_post.return_value = mock_response
+
+        jev_client = JevClient(api_key="sk_live_dummy_key_12345")
+        live_pipeline = create_triage_pipeline(db=self.db, client=jev_client, offline=False)
+
+        payload = {
+            "email_id": "em_jev_spam_01",
+            "message_id": "<spam-02@scam-winner.xyz>",
+            "thread_id": "th_jev_spam_01",
+            "sender_email": "lottery@scam-winner.xyz",
+            "email_subject": "Win millions now",
+            "email_body": "Guaranteed lottery prize payout.",
+        }
+
+        result = run_triage_pipeline(payload, pipeline=live_pipeline, db=self.db, client=jev_client, offline=False)
+
+        self.assertFalse(result["is_sensitive"])
+        self.assertTrue(result["is_spam"])
         self.assertEqual(result["gatekeeper_decision"], "spam")
         self.assertEqual(result["dispatch_target"], "Junk/Spam")
         self.assertEqual(result["routing_status"], "spam_skipped")
         self.assertEqual(result["dispatch_status"], "done")
         self.assertIn("Junk/Spam", result["labels_to_apply"])
 
-        # Verified in DB
-        record = self.db.get_record("em_spam_01")
+        record = self.db.get_record("em_jev_spam_01")
         self.assertEqual(record["status"], "done")
         self.assertEqual(record["routing_status"], "spam_skipped")
+        self.assertEqual(record["dispatch_target"], "Junk/Spam")
 
     def test_e2e_adversarial_prompt_injection_flagged(self):
         """Verifies prompt injection attempts are detected and quarantined."""

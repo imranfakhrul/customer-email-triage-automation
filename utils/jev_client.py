@@ -24,24 +24,38 @@ logger = logging.getLogger(__name__)
 
 # Heuristic patterns for local fallback
 SPAM_REGEX = re.compile(
-    r"\b(?:viagra|cialis|crypto\s+investment|guaranteed\s+returns|lottery\s+winner|"
-    r"claim\s+your\s+prize|wire\s+transfer\s+millions|seo\s+backlinks|guest\s+post|do-follow\s+backlinks|"
-    r"casino|betting|adult\s+dating|earn\s+[\$]?\d{3,}\s+daily|act\s+now\s+limited\s+time|"
-    r"congratulations|geek\s*squad|norton|lifelock|renew(?:ed|al)\s+for\s+[\$]?\d+|"
-    r"abandoned\s+[\$]?[\d.,]+M|next\s+of\s+kin|beneficiary\s+to\s+claim|transfer\s+of\s+[\$]?[\d.,]+|prince\s+\w+|"
-    r"customs\s+clearance|receipt\.zip|belly\s+fat|slimming\s+drops|lose\s+weight\s+effortlessly|"
-    r"docusign|document\s+ready\s+for\s+signature|pump\s+and\s+dump|telegram\s+signals|100x\s+gem|"
-    r"account\s+has\s+been\s+restricted|verify\s+your\s+identity.{0,200}login|reset\s+your\s+password.{0,200}http|"
-    r"password\s+reset\s+for\s+your\s+account|password\s+expires|mailbox\s+deactivation|portal-verify|paypa[l1]|"
+    r"\b(?:"
+    # Prizes, Lotteries & Sweepstakes (multi-word, no generic single words)
+    r"claim\s+your\s+prize|you\s+(?:have\s+)?won|lottery\s+winner|"
+    r"wire\s+transfer\s+.{0,60}(?:inheritance|lottery|prize|millions)|"
+    # Crypto, Investments & Financial Scams
+    r"crypto\s+investment|guaranteed\s+returns|pump\s+and\s+dump|telegram\s+signals|100x\s+gem|"
+    r"earn\s+[\$]?\d{3,}\s+daily|earn\s+[\$]?\d+.{0,60}working\s+from\s+home|"
+    # Casino & Gambling Scams (multi-word, no bare "betting")
+    r"casino\s+bonus|free\s+spins|no\s+deposit|adult\s+dating|"
+    # Urgency & Phishing Scams (no bare "congratulations", "norton", "paypal", "docusign", "transfer of", "prince \w+")
+    r"act\s+now\s+limited\s+time|geek\s*squad|lifelock|renew(?:ed|al)\s+for\s+[\$]?\d+|"
+    r"abandoned\s+[\$]?[\d.,]+[Mm]|next\s+of\s+kin|beneficiary\s+to\s+claim|inheritance|"
+    r"awaiting\s+your\s+signature|document\s+ready\s+for\s+signature|"
+    r"account\s+(?:has\s+been\s+)?(?:restricted|suspended|locked)|"
+    r"verify\s+your\s+(?:account|identity).{0,60}(?:login|http|restore|portal)|"
+    r"verify\s+your\s+account|"
+    r"reset\s+your\s+password.{0,60}http|password\s+reset\s+for\s+your\s+account|"
+    r"password\s+(?:will\s+)?expires?|mailbox\s+deactivation|portal-verify|"
     r"icloud\s+storage\s+is\s+full|storage\s+limit\s+has\s+been\s+exceeded|mailbox\s+is\s+\d+%\s+full|"
+    # Phishing & Malware Delivery
+    r"customs\s+clearance|receipt\.zip|belly\s+fat|slimming\s+drops|lose\s+weight\s+effortlessly|"
+    r"parcel.{0,60}could\s+not\s+be\s+delivered|redelivery\s+fee|reschedule\s+your\s+package|"
+    r"apple\s+gift\s+cards?|purchase.{0,60}gift\s+cards?|"
+    # Cold Spam / Unsolicited Marketing (no "cheap.*developers")
+    r"seo\s+backlinks|do-follow\s+backlinks|guest\s+post|backlinks|"
     r"office\s+suites\s+available|luxury\s+class\s+a\s+office|commercial\s+spaces\s+realty|"
-    r"redesign\s+your\s+website\s+for|cheap.{0,200}developers|cheap\s+meds|without\s+prescription|"
-    r"apple\s+gift\s+cards?|purchase.{0,200}gift\s+cards?|"
-    r"get\s+#1\s+on\s+google|page\s+1.{0,200}satisfied\s+clients|"
-    r"parcel.{0,200}could\s+not\s+be\s+delivered|redelivery\s+fee|reschedule\s+your\s+package|"
-    r"earn\s+[\$]?\d+.{0,200}working\s+from\s+home|whatsapp\s+number|"
-    r"scraped\s+your\s+email|database\s+of.{0,200}contacts\s+available\s+for\s+purchase|"
-    r"verified\s+decision\s+maker\s+emails|verified\s+database\s+of.{0,200}emails)\b",
+    r"redesign\s+your\s+website\s+for|cheap\s+meds|without\s+prescription|"
+    r"get\s+#1\s+on\s+google|page\s+1.{0,60}satisfied\s+clients|"
+    r"whatsapp\s+number|"
+    r"scraped\s+your\s+email|database\s+of.{0,60}contacts\s+available\s+for\s+purchase|"
+    r"verified\s+decision\s+maker\s+emails|verified\s+database\s+of.{0,60}emails"
+    r")\b",
     flags=re.IGNORECASE | re.DOTALL,
 )
 
@@ -175,7 +189,7 @@ def normalize_result(
         except (ValueError, TypeError):
             confidence = 0.0
 
-    # 4. Threat parsing & enforcement: is_threat true -> decision becomes at least manual_review
+    # 4. Threat parsing & enforcement: any is_threat true -> decision becomes manual_review (Fix B2)
     raw_threat = raw.get("is_threat")
     if isinstance(raw_threat, str):
         is_threat = raw_threat.strip().lower() in ("true", "1", "yes")
@@ -184,10 +198,13 @@ def normalize_result(
 
     threat_details = raw.get("threat_details")
     if is_threat:
-        if decision == "legitimate":
-            decision = "manual_review"
+        decision = "manual_review"
         if not threat_details:
             threat_details = "Adversarial threat detected"
+
+    # Fix B2: Offline regex engine flagging spam must produce manual_review with is_spam=True
+    if classifier_used == "regex" and raw.get("is_spam") and decision == "spam":
+        decision = "manual_review"
 
     # 5. Threshold enforcement: legitimate with confidence < threshold -> manual_review
     threshold = 0.70
@@ -208,7 +225,13 @@ def normalize_result(
         decision = "manual_review"
 
     # 6. Spam flag consistency
-    is_spam = (decision == "spam")
+    raw_spam = raw.get("is_spam")
+    if isinstance(raw_spam, str):
+        is_spam = raw_spam.strip().lower() in ("true", "1", "yes")
+    elif raw_spam is not None:
+        is_spam = bool(raw_spam)
+    else:
+        is_spam = (decision == "spam")
 
     return {
         "decision": decision,
@@ -683,10 +706,10 @@ class JevClient:
                 "classifier_used": "regex",
             }
 
-        # 2. Known Spam & Phishing Patterns
+        # 2. Known Spam & Phishing Patterns (Fix B2: Offline regex flags manual_review with is_spam=True)
         if SPAM_REGEX.search(scan_text):
             return {
-                "decision": "spam",
+                "decision": "manual_review",
                 "confidence": 0.95,
                 "is_spam": True,
                 "is_threat": False,

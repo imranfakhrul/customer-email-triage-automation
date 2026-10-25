@@ -8,12 +8,12 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[A12] Container Security & Environment File Locations** (or **[B2] Offline Heuristics Refinement**)
+**Next up:** **[B3] Consolidate Sensitive Keywords to Intent Phrases** (or **[A12] Container Security & Environment File Locations**)
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
 2. **State & Concurrency Hardening:** `A5` -> `A6` -> `A11` -> `A9` -> `A10`
-3. **Correctness & Performance (Part B):** `B2` -> `B3` -> `B4` -> `B5` -> `B6`
+3. **Correctness & Performance (Part B):** `B1` -> `B2` -> `B3` -> `B4` -> `B5` -> `B6`
 4. **Testing, Docs & Packaging:** `C1` -> `C2` -> `C3` -> `C4` -> `A12` -> `A14`
 
 ---
@@ -49,7 +49,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **13** | **A13** | Security | Hardened secrets handling: `override=False`, enforce `api.typesafe.ai` host, redact debug keys | ✅ Resolved |
 | **14** | **A14** | Infrastructure | Pin exact dependency versions in `requirements.txt` and spaCy language model URL | ⏳ Pending |
 | **15** | **B1** | Correctness | Refine signature stripper: RFC 3676, bare `--` code safety, bottom-up scan, safety size limit | ✅ Resolved (`8c13658`) |
-| **16** | **B2** | Correctness | Remove generic business words from offline spam heuristics; route threats to manual review | ⏳ Pending |
+| **16** | **B2** | Correctness | Remove generic business words from offline spam heuristics; route threats to manual review | ✅ Resolved |
 | **17** | **B3** | Correctness | Tune sensitive keywords to intent phrases and establish single source in `config.yaml` | ⏳ Pending |
 | **18** | **B4** | Correctness | Harmonize returned state with SQLite database and persist clean text for Phase 2 | ⏳ Pending |
 | **19** | **B5** | Correctness | Resolve config relative to root, fail fast on invalid YAML, and honor environment overrides | ⏳ Pending |
@@ -215,13 +215,16 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Tests verify bug reports with opening "Thanks", SQL queries with `--`, disclaimers at top, and short 3-line emails are all preserved intact.
 
 ### [B2] Eliminate False Positives in Offline Spam Heuristics
-* **Problem:** Offline `SPAM_REGEX` matches ordinary words (`congratulations`, `paypal`, `docusign`, `norton`, `betting`) and dumps valid customer emails straight into Junk. Threats and injections are handled inconsistently.
+* **Status:** ✅ **Resolved**
+* **Problem:** Offline `SPAM_REGEX` matched ordinary words (`congratulations`, `paypal`, `docusign`, `norton`, `betting`, `"transfer of"`, `"prince \w+"`, `"cheap.*developers"`) and dumped valid customer emails straight into Junk. Threats and injections were handled inconsistently.
 * **Solution:**
-  1. Remove generic business terms from `SPAM_REGEX`; preserve only clear spam phrases.
-  2. Route offline heuristic matches to `manual_review` instead of `spam_skipped`.
-  3. Ensure all threats route consistently to `manual_review`.
-* **Note on Benchmark Expectations:** Benchmark rows 76-90 (offline spam heuristics) currently assert `routing_status = 'spam_skipped'`. When B2 is implemented, heuristic matches will transition to `manual_review`.
-* **Done When:** Unit tests verify common inquiries mentioning PayPal or DocuSign do not route to Junk.
+  1. Removed generic business single-words and weak patterns from `SPAM_REGEX` in `utils/jev_client.py`. Retained only multi-word unambiguous scam phrases (`claim your prize`, `you have won`, `verify your account`, `account (has been )?suspended`, `password (will )?expire`, `next of kin`, `inheritance`, `guaranteed returns`, `wire transfer .{0,60}(inheritance|lottery|prize)`, `no deposit`, `backlinks`, `guest post`, `pump and dump`, `act now limited time`, `awaiting your signature`, `document ready for signature`). All regex gap wildcards bounded to `.{0,60}` (never unbounded `.*`).
+  2. Offline regex engine matches (`classifier_used == "regex"`) now produce `decision: "manual_review"` (`is_spam: True`, confidence 0.95), routing to `Review/Manual` rather than `spam_skipped` / `Junk/Spam`.
+  3. External AI decisions (Jev and Groq) remain strictly preserved: live `decision: "spam"` still maps to `routing_status: "spam_skipped"`.
+  4. Unified threat handling: any `is_threat: True` produces `decision: "manual_review"` across Jev AI, Groq LLM, regex pre-filters, and offline fallback.
+  5. Default for unmatched clean emails remains `decision: "legitimate"` with confidence 0.85, approved offline.
+  6. Updated benchmark expectations for rows 76-90 in `data/benchmark_emails.json` to `gatekeeper_decision: "manual_review"`, `dispatch_target: "Review/Manual"`, `routing_status: "manual_review"`. Zero benchmark spam rows end as approved.
+* **Done When:** Unit tests verify customer emails mentioning PayPal, DocuSign, Norton, Prince George's County, cheap hosting, and betting API are approved offline (`gatekeeper_approved`), real spam samples divert to `manual_review`, mocked Jev spam routes to `spam_skipped`, and 100/100 benchmark scenarios pass.
 
 ### [B3] Consolidate Sensitive Keywords to Intent Phrases
 * **Problem:** Bare words (`gdpr`, `police`, `erasure`) divert normal sales questions to legal review. Keyword list is duplicated across `nodes/sensitive_skip.py` and `config.yaml`.
