@@ -68,7 +68,9 @@ class TestJevGatekeeper(unittest.TestCase):
         self.assertEqual(output["gatekeeper_decision"], "legitimate")
         self.assertFalse(output["is_spam"])
         self.assertFalse(output["is_threat"])
-        self.assertEqual(output["routing_status"], "active_thread_continuation")
+        self.assertEqual(output["routing_status"], "gatekeeper_approved")
+        self.assertEqual(output["dispatch_status"], "done")
+        self.assertTrue(output["is_active_thread"])
         self.assertEqual(should_route_after_gatekeeper(output), "continue")
 
         # Verify DB is marked done with gatekeeper_approved

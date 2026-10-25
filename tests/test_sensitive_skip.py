@@ -191,6 +191,7 @@ class TestSensitiveSkip(unittest.TestCase):
     def test_a7_subpoena_stripped_by_signature_still_diverts(self):
         """Verifies that a subpoena line appearing after 'Thanks,' (which signature stripper removes)
         is still caught and diverted because evaluate_sensitive inspects raw_body as well."""
+        self.db.check_and_acquire("em_subpoena_raw_01", "th_001")
         raw_body = (
             "Please find the invoice attached.\n\n"
             "Thanks,\n"

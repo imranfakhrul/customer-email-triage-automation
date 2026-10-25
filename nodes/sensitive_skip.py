@@ -231,9 +231,21 @@ def sensitive_skip_node(
                     dispatch_target="Review/Sensitive",
                 )
             except Exception as exc:
-                logger.warning(
-                    f"Failed to record sensitive diversion in DB for '{email_id}': {exc}"
+                # Log only exception class name and email_id (never message or text)
+                logger.error(
+                    f"[SensitiveSkip] Database write failed for email '{email_id}': {exc.__class__.__name__}"
                 )
+                try:
+                    db.mark_failed(email_id, error_message="database write failed")
+                except Exception:
+                    pass
+                return {
+                    "is_sensitive": True,
+                    "sensitive_reason": sensitive_reason,
+                    "dispatch_status": "failed",
+                    "routing_status": "persist_failed",
+                    "error_message": "database write failed",
+                }
 
         return {
             "is_sensitive": True,

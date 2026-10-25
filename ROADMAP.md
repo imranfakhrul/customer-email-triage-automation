@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[B4] Synchronize In-Memory State & SQLite Record** (or **[A12] Container Security & Environment File Locations**)
+**Next up:** **[B5] Fail-Fast Config Loader & Environment Variable Overrides** (or **[A12] Container Security & Environment File Locations**)
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -51,7 +51,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **15** | **B1** | Correctness | Refine signature stripper: RFC 3676, bare `--` code safety, bottom-up scan, safety size limit | ✅ Resolved (`8c13658`) |
 | **16** | **B2** | Correctness | Remove generic business words from offline spam heuristics; route threats to manual review | ✅ Resolved |
 | **17** | **B3** | Correctness | Tune sensitive keywords to intent phrases and establish single source in `config.yaml` | ✅ Resolved |
-| **18** | **B4** | Correctness | Harmonize returned state with SQLite database and persist clean text for Phase 2 | ⏳ Pending |
+| **18** | **B4** | Correctness | Harmonize returned state with SQLite database and persist clean text for Phase 2 | ✅ Resolved |
 | **19** | **B5** | Correctness | Resolve config relative to root, fail fast on invalid YAML, and honor environment overrides | ⏳ Pending |
 | **20** | **B6** | Performance | Preload models and precompile regexes once at startup to eliminate per-email overhead | ⏳ Pending |
 | **21** | **C1** | Testing | Expand synthetic benchmark validation to check all expected fields and default to offline | ⏳ Pending |
@@ -240,13 +240,15 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Tests verify `"Is your product GDPR compliant?"`, `"Do you support erasure of old records?"`, and `"Our office is next to the police station, can you ship there?"` are not diverted, while explicit erasure requests under Article 17, police fraud reports, subpoenas, and chargebacks divert. Unit test proves keyword list is loaded only from config.
 
 ### [B4] Synchronize In-Memory State & SQLite Record
-* **Problem:** For approved emails, database row is marked `done` with `gatekeeper_approved`, but returned state says `dispatch_status: 'processing'`. Active thread is conflated with routing status. Database write errors are swallowed.
+* **Status:** ✅ **Resolved**
+* **Problem:** For approved emails, database row was marked `done` with `gatekeeper_approved`, but returned state claimed `dispatch_status: 'processing'`. Active thread was conflated with routing status (`active_thread_continuation`). Database write errors were swallowed or falsely claimed success. Phase 2 had no access to clean masked text in SQLite.
 * **Solution:**
-  1. Align returned state: `dispatch_status: "done"`, `routing_status: "gatekeeper_approved"`.
-  2. Treat active thread as metadata flag (`is_active_thread: true`), not routing status.
-  3. Fail fast or mark email failed if database write fails.
-  4. Persist masked subject and body in database for downstream Phase 2 workers.
-* **Done When:** Unit test verifies returned state and database row match identically for approved emails.
+  1. **Schema Migration (`db/database.py`):** Added nullable columns `masked_subject TEXT`, `masked_body TEXT`, `is_active_thread INTEGER`, `gatekeeper_decision TEXT`, `gatekeeper_confidence REAL`, `classifier_used TEXT`. Idempotent migration in `_init_db` via `PRAGMA table_info(email_triage)` and `ALTER TABLE ... ADD COLUMN`. Defined `PersistenceError(Exception)` and raised if `cursor.rowcount == 0`.
+  2. **Atomic Single-Path Persistence (`db/database.py`):** Consolidated all triage fields in `TriageDatabase.mark_done` into one `UPDATE` statement. Masked subject and body are persisted ONLY for `gatekeeper_approved` and `manual_review` (when `system.persist_masked_text: true` in `config.yaml`). Discarded/skipped emails (`spam_skipped`, `sensitive_diverted`) and `persist_masked_text: false` store `NULL`. `token_map` and raw PII are never persisted.
+  3. **State & DB Harmonization (`nodes/jev_gatekeeper.py`):** Approved emails return `dispatch_status: "done"`, `routing_status: "gatekeeper_approved"`, and `is_active_thread: bool`. Removed `"active_thread_continuation"` routing status entirely across code, ingest node (`routing_status: "processing"`), benchmark, and tests.
+  4. **Consolidated Helper & Fail-Safe Routing (`nodes/jev_gatekeeper.py`):** Replaced duplicate outcome blocks with private helper `_record_and_build_gatekeeper_result`. If `mark_done` fails, logs exception class name and `email_id` only (zero email text), attempts best-effort `db.mark_failed`, and returns `routing_status: "persist_failed"`, `dispatch_status: "failed"`, `error_message: "database write failed"`. Updated `should_route_after_gatekeeper` to return `"end"` if `dispatch_status == "failed"` or `routing_status == "persist_failed"`. Identical safe DB error handling applied in `nodes/sensitive_skip.py`.
+  5. **Benchmark Harmonization (`data/benchmark_emails.json`):** Updated rows 51-60 to expect `routing_status: "gatekeeper_approved"`, `is_active_thread: true`, `dispatch_status: "done"`.
+* **Done When:** Unit tests verify returned state and database row match identically (`gatekeeper_approved` + `done`), DB write failures route to `persist_failed` / `failed` and stop router, schema migration preserves existing rows, and 100/100 benchmark scenarios pass.
 
 ### [B5] Fail-Fast Config Loader & Environment Variable Overrides
 * **Problem:** `config.yaml` is resolved relative to working directory, causing failures when run from subdirectories. Config errors are caught and swallowed with empty `{}`. Certain env vars are ignored.

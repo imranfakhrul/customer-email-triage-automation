@@ -141,7 +141,9 @@ class TestPipelineE2E(unittest.TestCase):
 
         result = run_triage_pipeline(payload, pipeline=self.pipeline, db=self.db)
 
-        self.assertEqual(result["routing_status"], "active_thread_continuation")
+        self.assertEqual(result["routing_status"], "gatekeeper_approved")
+        self.assertEqual(result["dispatch_status"], "done")
+        self.assertTrue(result["is_active_thread"])
         self.assertEqual(result["gatekeeper_decision"], "legitimate")
         self.assertGreaterEqual(result["gatekeeper_confidence"], 0.70)
 
@@ -364,7 +366,7 @@ class TestPipelineE2E(unittest.TestCase):
             with self.subTest(scenario=item["id"]):
                 expected = item.get("expected", {})
                 # If testing active thread scenario, seed prior approved email in DB with matching participant
-                if item.get("category") == "active_thread" or expected.get("routing_status") == "active_thread_continuation":
+                if item.get("category") == "active_thread" or expected.get("is_active_thread") is True:
                     prior_email_id = f"prior_{item['email_id']}"
                     self.db.check_and_acquire(
                         email_id=prior_email_id,
@@ -379,6 +381,9 @@ class TestPipelineE2E(unittest.TestCase):
                     self.db.mark_done(item["email_id"], routing_status="completed")
 
                 result = run_triage_pipeline(item, pipeline=self.pipeline, db=self.db)
+
+                if "is_active_thread" in expected:
+                    self.assertEqual(result["is_active_thread"], expected["is_active_thread"])
 
                 if "is_sensitive" in expected:
                     self.assertEqual(result["is_sensitive"], expected["is_sensitive"])

@@ -13,6 +13,11 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 from utils.config import load_config
 
 
+class PersistenceError(Exception):
+    """Raised when an attempt to persist a triage record fails (e.g. 0 rows updated)."""
+    pass
+
+
 class TriageDatabase:
     """Manages the SQLite database for idempotency, retry tracking, and state persistence."""
 
@@ -53,7 +58,7 @@ class TriageDatabase:
             conn.close()
 
     def _init_db(self) -> None:
-        """Initializes the email_triage table and indices."""
+        """Initializes the email_triage table and indices, and migrates schema if needed."""
         with self.get_connection() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS email_triage (
@@ -67,7 +72,13 @@ class TriageDatabase:
                     dispatch_target TEXT,
                     error_message TEXT,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    masked_subject TEXT,
+                    masked_body TEXT,
+                    is_active_thread INTEGER,
+                    gatekeeper_decision TEXT,
+                    gatekeeper_confidence REAL,
+                    classifier_used TEXT
                 );
                 """)
             conn.execute(
@@ -76,6 +87,21 @@ class TriageDatabase:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_status ON email_triage(status);"
             )
+
+            # Migration for existing databases: add missing columns safely via ALTER TABLE
+            cursor = conn.execute("PRAGMA table_info(email_triage);")
+            existing_columns = {row["name"] for row in cursor.fetchall()}
+            new_columns = [
+                ("masked_subject", "TEXT"),
+                ("masked_body", "TEXT"),
+                ("is_active_thread", "INTEGER"),
+                ("gatekeeper_decision", "TEXT"),
+                ("gatekeeper_confidence", "REAL"),
+                ("classifier_used", "TEXT"),
+            ]
+            for col_name, col_type in new_columns:
+                if col_name not in existing_columns:
+                    conn.execute(f"ALTER TABLE email_triage ADD COLUMN {col_name} {col_type};")
 
     def get_record(self, email_id: str) -> Optional[Dict[str, Any]]:
         """Retrieves a triage record by email_id.
@@ -445,18 +471,72 @@ class TriageDatabase:
         email_id: str,
         routing_status: str = "routed",
         dispatch_target: Optional[str] = None,
+        masked_subject: Optional[str] = None,
+        masked_body: Optional[str] = None,
+        is_active_thread: Optional[bool] = None,
+        gatekeeper_decision: Optional[str] = None,
+        gatekeeper_confidence: Optional[float] = None,
+        classifier_used: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Sets status to done and updates routing status/target."""
+        """Sets status to done and updates routing status, target, and triage metadata in ONE statement.
+
+        Raises:
+            PersistenceError: If 0 rows are updated (e.g. email_id does not exist).
+        """
         now_iso = datetime.now(timezone.utc).isoformat()
+
+        # Check persist_masked_text configuration
+        persist_text = True
+        if config is not None:
+            persist_text = config.get("system", {}).get("persist_masked_text", True)
+        else:
+            try:
+                cfg = load_config()
+                persist_text = cfg.get("system", {}).get("persist_masked_text", True)
+            except Exception:
+                persist_text = True
+
+        # Rule: masked_subject and masked_body persisted ONLY for gatekeeper_approved and manual_review
+        if routing_status not in ("gatekeeper_approved", "manual_review") or not persist_text:
+            masked_subject = None
+            masked_body = None
+
+        active_thread_int = None
+        if is_active_thread is not None:
+            active_thread_int = 1 if is_active_thread else 0
+
         with self.get_connection() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE email_triage
-                SET status = 'done', routing_status = ?, dispatch_target = ?, updated_at = ?
+                SET status = 'done',
+                    routing_status = ?,
+                    dispatch_target = ?,
+                    updated_at = ?,
+                    masked_subject = ?,
+                    masked_body = ?,
+                    is_active_thread = ?,
+                    gatekeeper_decision = ?,
+                    gatekeeper_confidence = ?,
+                    classifier_used = ?
                 WHERE email_id = ?
                 """,
-                (routing_status, dispatch_target, now_iso, email_id),
+                (
+                    routing_status,
+                    dispatch_target,
+                    now_iso,
+                    masked_subject,
+                    masked_body,
+                    active_thread_int,
+                    gatekeeper_decision,
+                    gatekeeper_confidence,
+                    classifier_used,
+                    email_id,
+                ),
             )
+            if cursor.rowcount == 0:
+                raise PersistenceError(f"Email '{email_id}' not found to mark done")
 
     def mark_failed(
         self,

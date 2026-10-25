@@ -142,8 +142,6 @@ def ingest_node(
         routing_status = "stale_recovery"
     elif outcome == "retry_failed":
         routing_status = "retry"
-    elif is_active_thread:
-        routing_status = "active_thread_continuation"
     else:
         routing_status = "processing"
 

@@ -249,7 +249,7 @@ class TestIdempotencyAndIngest(unittest.TestCase):
         self.assertEqual(output["routing_status"], "duplicate_skipped")
         self.assertEqual(should_continue_triage(output), "end")
 
-    def test_ingest_node_active_thread_continuation(self):
+    def test_ingest_node_active_thread_recognition(self):
         """Tests ingest_node recognizing an active conversation continuation."""
         # Initial message completed in thread with gatekeeper approval
         self.db.check_and_acquire("thread_msg_1", "thread_active_42", sender_email="client@acme.com")
@@ -291,7 +291,7 @@ class TestIdempotencyAndIngest(unittest.TestCase):
 
         output = ingest_node(followup_state, db=self.db)
         self.assertTrue(output["is_active_thread"])
-        self.assertEqual(output["routing_status"], "active_thread_continuation")
+        self.assertEqual(output["routing_status"], "processing")
         self.assertEqual(output["dispatch_status"], "processing")
         self.assertEqual(should_continue_triage(output), "continue")
 
@@ -452,7 +452,7 @@ class TestA5ActiveThreadSecurity(unittest.TestCase):
         output = ingest_node(state, db=self.db)
 
         self.assertTrue(output["is_active_thread"])
-        self.assertEqual(output["routing_status"], "active_thread_continuation")
+        self.assertEqual(output["routing_status"], "processing")
 
 
 class TestA11ConcurrencyIdempotencyLock(unittest.TestCase):

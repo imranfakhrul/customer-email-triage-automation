@@ -19,6 +19,88 @@ from utils.jev_client import JevClient, normalize_result
 logger = logging.getLogger(__name__)
 
 
+def _record_and_build_gatekeeper_result(
+    state: TriageState,
+    decision: str,
+    routing_status: str,
+    dispatch_target: Optional[str],
+    confidence: float,
+    is_spam: bool,
+    is_threat: bool,
+    threat_details: Optional[str],
+    classifier_used: str,
+    db: Optional[TriageDatabase] = None,
+    is_starred: Optional[bool] = None,
+    extra_label: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Helper to (a) build returned state, (b) perform DB write via mark_done, and (c) handle DB failures."""
+    email_id = state.get("email_id", "")
+    is_active_thread = bool(state.get("is_active_thread", False))
+    masked_subject = state.get("masked_subject")
+    masked_body = state.get("masked_body")
+
+    existing_labels = list(state.get("labels_to_apply") or [])
+    if extra_label and extra_label not in existing_labels:
+        existing_labels.append(extra_label)
+
+    if db is not None and email_id:
+        try:
+            db.mark_done(
+                email_id=email_id,
+                routing_status=routing_status,
+                dispatch_target=dispatch_target,
+                masked_subject=masked_subject,
+                masked_body=masked_body,
+                is_active_thread=is_active_thread,
+                gatekeeper_decision=decision,
+                gatekeeper_confidence=confidence,
+                classifier_used=classifier_used,
+            )
+        except Exception as exc:
+            # Log only exception class name and email_id, never exception text and never any email content
+            logger.error(
+                f"[Gatekeeper] Database write failed for email '{email_id}': {exc.__class__.__name__}"
+            )
+            try:
+                db.mark_failed(email_id, error_message="database write failed")
+            except Exception:
+                pass
+
+            res = {
+                "gatekeeper_decision": decision,
+                "is_spam": is_spam,
+                "gatekeeper_confidence": confidence,
+                "is_threat": is_threat,
+                "threat_details": threat_details,
+                "classifier_used": classifier_used,
+                "labels_to_apply": existing_labels,
+                "dispatch_status": "failed",
+                "routing_status": "persist_failed",
+                "error_message": "database write failed",
+                "is_active_thread": is_active_thread,
+            }
+            if is_starred is not None:
+                res["is_starred"] = is_starred
+            return res
+
+    res = {
+        "gatekeeper_decision": decision,
+        "is_spam": is_spam,
+        "gatekeeper_confidence": confidence,
+        "is_threat": is_threat,
+        "threat_details": threat_details,
+        "classifier_used": classifier_used,
+        "labels_to_apply": existing_labels,
+        "dispatch_target": dispatch_target,
+        "dispatch_status": "done",
+        "routing_status": routing_status,
+        "is_active_thread": is_active_thread,
+    }
+    if is_starred is not None:
+        res["is_starred"] = is_starred
+    return res
+
+
 def jev_gatekeeper_node(
     state: TriageState,
     client: Optional[JevClient] = None,
@@ -37,7 +119,6 @@ def jev_gatekeeper_node(
         State dictionary updates including gatekeeper decision, confidence, and routing.
     """
     email_id = state.get("email_id", "")
-    is_active_thread = state.get("is_active_thread", False)
 
     if client is None:
         client = JevClient()
@@ -49,33 +130,20 @@ def jev_gatekeeper_node(
             f"[Gatekeeper] Email '{email_id}' missing masked_subject; "
             "failing closed to manual_review without external AI calls."
         )
-        existing_labels = list(state.get("labels_to_apply") or [])
-        if "Review/Manual" not in existing_labels:
-            existing_labels.append("Review/Manual")
-
-        if db is not None and email_id:
-            try:
-                db.mark_done(
-                    email_id=email_id,
-                    routing_status="manual_review",
-                    dispatch_target="Review/Manual",
-                )
-            except Exception as exc:
-                logger.warning(f"Failed to record manual review diversion in DB: {exc}")
-
-        return {
-            "gatekeeper_decision": "manual_review",
-            "is_spam": False,
-            "gatekeeper_confidence": 0.0,
-            "is_threat": False,
-            "threat_details": "Missing masked_subject privacy safeguard triggered",
-            "classifier_used": "fail_closed",
-            "labels_to_apply": existing_labels,
-            "is_starred": True,
-            "dispatch_target": "Review/Manual",
-            "dispatch_status": "done",
-            "routing_status": "manual_review",
-        }
+        return _record_and_build_gatekeeper_result(
+            state=state,
+            decision="manual_review",
+            routing_status="manual_review",
+            dispatch_target="Review/Manual",
+            confidence=0.0,
+            is_spam=False,
+            is_threat=False,
+            threat_details="Missing masked_subject privacy safeguard triggered",
+            classifier_used="fail_closed",
+            db=db,
+            is_starred=True,
+            extra_label="Review/Manual",
+        )
 
     # Fail-closed privacy safeguard (A8): if spaCy is missing or failed while external AI is enabled,
     # send nothing outside (no Jev, no Groq call) and route to manual_review with dispatch_status done.
@@ -87,33 +155,20 @@ def jev_gatekeeper_node(
             f"[Gatekeeper] spaCy unavailable for email '{email_id}' while external AI enabled; "
             "failing closed to manual_review without external AI calls."
         )
-        existing_labels = list(state.get("labels_to_apply") or [])
-        if "Review/Manual" not in existing_labels:
-            existing_labels.append("Review/Manual")
-
-        if db is not None and email_id:
-            try:
-                db.mark_done(
-                    email_id=email_id,
-                    routing_status="manual_review",
-                    dispatch_target="Review/Manual",
-                )
-            except Exception as exc:
-                logger.warning(f"Failed to record manual review diversion in DB: {exc}")
-
-        return {
-            "gatekeeper_decision": "manual_review",
-            "is_spam": False,
-            "gatekeeper_confidence": 0.0,
-            "is_threat": False,
-            "threat_details": "spaCy model unavailable while external AI enabled",
-            "classifier_used": "fail_closed",
-            "labels_to_apply": existing_labels,
-            "is_starred": True,
-            "dispatch_target": "Review/Manual",
-            "dispatch_status": "done",
-            "routing_status": "manual_review",
-        }
+        return _record_and_build_gatekeeper_result(
+            state=state,
+            decision="manual_review",
+            routing_status="manual_review",
+            dispatch_target="Review/Manual",
+            confidence=0.0,
+            is_spam=False,
+            is_threat=False,
+            threat_details="spaCy model unavailable while external AI enabled",
+            classifier_used="fail_closed",
+            db=db,
+            is_starred=True,
+            extra_label="Review/Manual",
+        )
 
     # Use masked_body if available to protect PII, falling back to cleaned or raw body
     body = (
@@ -152,99 +207,58 @@ def jev_gatekeeper_node(
         f"decision='{decision}', confidence={confidence:.2f}"
     )
 
-    existing_labels = list(state.get("labels_to_apply") or [])
-
     # 2. Decision Dispatch Mapping
     if decision == "spam":
         logger.info(
             f"Email '{email_id}' flagged as SPAM by gatekeeper: {threat_details}"
         )
-        if "Junk/Spam" not in existing_labels:
-            existing_labels.append("Junk/Spam")
-
-        if db is not None and email_id:
-            try:
-                db.mark_done(
-                    email_id=email_id,
-                    routing_status="spam_skipped",
-                    dispatch_target="Junk/Spam",
-                )
-            except Exception as exc:
-                logger.warning(f"Failed to record spam diversion in DB: {exc}")
-
-        return {
-            "gatekeeper_decision": "spam",
-            "is_spam": True,
-            "gatekeeper_confidence": confidence,
-            "is_threat": is_threat,
-            "threat_details": threat_details,
-            "classifier_used": classifier_used,
-            "labels_to_apply": existing_labels,
-            "dispatch_target": "Junk/Spam",
-            "dispatch_status": "done",
-            "routing_status": "spam_skipped",
-        }
+        return _record_and_build_gatekeeper_result(
+            state=state,
+            decision="spam",
+            routing_status="spam_skipped",
+            dispatch_target="Junk/Spam",
+            confidence=confidence,
+            is_spam=True,
+            is_threat=is_threat,
+            threat_details=threat_details,
+            classifier_used=classifier_used,
+            db=db,
+            extra_label="Junk/Spam",
+        )
 
     if decision == "manual_review":
         logger.info(f"Email '{email_id}' flagged for MANUAL REVIEW by gatekeeper.")
-        if "Review/Manual" not in existing_labels:
-            existing_labels.append("Review/Manual")
-
-        if db is not None and email_id:
-            try:
-                db.mark_done(
-                    email_id=email_id,
-                    routing_status="manual_review",
-                    dispatch_target="Review/Manual",
-                )
-            except Exception as exc:
-                logger.warning(f"Failed to record manual review diversion in DB: {exc}")
-
-        return {
-            "gatekeeper_decision": "manual_review",
-            "is_spam": is_spam,
-            "gatekeeper_confidence": confidence,
-            "is_threat": is_threat,
-            "threat_details": threat_details,
-            "classifier_used": classifier_used,
-            "labels_to_apply": existing_labels,
-            "is_starred": True,
-            "dispatch_target": "Review/Manual",
-            "dispatch_status": "done",
-            "routing_status": "manual_review",
-        }
+        return _record_and_build_gatekeeper_result(
+            state=state,
+            decision="manual_review",
+            routing_status="manual_review",
+            dispatch_target="Review/Manual",
+            confidence=confidence,
+            is_spam=is_spam,
+            is_threat=is_threat,
+            threat_details=threat_details,
+            classifier_used=classifier_used,
+            db=db,
+            is_starred=True,
+            extra_label="Review/Manual",
+        )
 
     # 3. Legitimate Inbound Approval
     logger.info(
         f"Email '{email_id}' approved as LEGITIMATE (confidence: {confidence:.2f})."
     )
-
-    # Phase 1 Idempotency Hand-off: Mark as done in SQLite so retransmissions within 10m are duplicates.
-    # Phase 2 dispatchers will pick up these verified emails using routing_status='gatekeeper_approved'.
-    if db is not None and email_id:
-        try:
-            db.mark_done(
-                email_id=email_id,
-                routing_status="gatekeeper_approved",
-                dispatch_target=None,
-            )
-        except Exception as exc:
-            logger.warning(f"Failed to record gatekeeper approval in DB: {exc}")
-
-    routing_status = (
-        "active_thread_continuation" if is_active_thread else "gatekeeper_approved"
+    return _record_and_build_gatekeeper_result(
+        state=state,
+        decision="legitimate",
+        routing_status="gatekeeper_approved",
+        dispatch_target=None,
+        confidence=confidence,
+        is_spam=False,
+        is_threat=is_threat,
+        threat_details=threat_details,
+        classifier_used=classifier_used,
+        db=db,
     )
-
-    return {
-        "gatekeeper_decision": "legitimate",
-        "is_spam": False,
-        "gatekeeper_confidence": confidence,
-        "is_threat": is_threat,
-        "threat_details": threat_details,
-        "classifier_used": classifier_used,
-        "routing_status": routing_status,
-        "dispatch_status": "processing",
-    }
 
 
 def should_route_after_gatekeeper(state: TriageState) -> str:
@@ -254,10 +268,17 @@ def should_route_after_gatekeeper(state: TriageState) -> str:
         state: Pipeline state.
 
     Returns:
-        'end' if email is spam or routed to manual review; 'continue' if approved.
+        'continue' if email is approved and DB persist succeeded; 'end' otherwise.
     """
     decision = state.get("gatekeeper_decision")
-    if decision != "legitimate":
-        return "end"
+    dispatch_status = state.get("dispatch_status")
+    routing_status = state.get("routing_status")
 
-    return "continue"
+    if (
+        decision == "legitimate"
+        and dispatch_status != "failed"
+        and routing_status != "persist_failed"
+    ):
+        return "continue"
+
+    return "end"

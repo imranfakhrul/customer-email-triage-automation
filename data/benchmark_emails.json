@@ -1015,8 +1015,10 @@
     "is_active_thread": true,
     "expected": {
       "gatekeeper_decision": "legitimate",
-      "routing_status": "active_thread_continuation",
-      "gatekeeper_confidence": 1.0
+      "routing_status": "gatekeeper_approved",
+      "gatekeeper_confidence": 1.0,
+      "is_active_thread": true,
+      "dispatch_status": "done"
     }
   },
   {
@@ -1035,8 +1037,10 @@
     "is_active_thread": true,
     "expected": {
       "gatekeeper_decision": "legitimate",
-      "routing_status": "active_thread_continuation",
-      "gatekeeper_confidence": 1.0
+      "routing_status": "gatekeeper_approved",
+      "gatekeeper_confidence": 1.0,
+      "is_active_thread": true,
+      "dispatch_status": "done"
     }
   },
   {
@@ -1055,8 +1059,10 @@
     "is_active_thread": true,
     "expected": {
       "gatekeeper_decision": "legitimate",
-      "routing_status": "active_thread_continuation",
-      "gatekeeper_confidence": 1.0
+      "routing_status": "gatekeeper_approved",
+      "gatekeeper_confidence": 1.0,
+      "is_active_thread": true,
+      "dispatch_status": "done"
     }
   },
   {
@@ -1075,8 +1081,10 @@
     "is_active_thread": true,
     "expected": {
       "gatekeeper_decision": "legitimate",
-      "routing_status": "active_thread_continuation",
-      "gatekeeper_confidence": 1.0
+      "routing_status": "gatekeeper_approved",
+      "gatekeeper_confidence": 1.0,
+      "is_active_thread": true,
+      "dispatch_status": "done"
     }
   },
   {
@@ -1095,8 +1103,10 @@
     "is_active_thread": true,
     "expected": {
       "gatekeeper_decision": "legitimate",
-      "routing_status": "active_thread_continuation",
-      "gatekeeper_confidence": 1.0
+      "routing_status": "gatekeeper_approved",
+      "gatekeeper_confidence": 1.0,
+      "is_active_thread": true,
+      "dispatch_status": "done"
     }
   },
   {
@@ -1115,8 +1125,10 @@
     "is_active_thread": true,
     "expected": {
       "gatekeeper_decision": "legitimate",
-      "routing_status": "active_thread_continuation",
-      "gatekeeper_confidence": 1.0
+      "routing_status": "gatekeeper_approved",
+      "gatekeeper_confidence": 1.0,
+      "is_active_thread": true,
+      "dispatch_status": "done"
     }
   },
   {
@@ -1135,8 +1147,10 @@
     "is_active_thread": true,
     "expected": {
       "gatekeeper_decision": "legitimate",
-      "routing_status": "active_thread_continuation",
-      "gatekeeper_confidence": 1.0
+      "routing_status": "gatekeeper_approved",
+      "gatekeeper_confidence": 1.0,
+      "is_active_thread": true,
+      "dispatch_status": "done"
     }
   },
   {
@@ -1155,8 +1169,10 @@
     "is_active_thread": true,
     "expected": {
       "gatekeeper_decision": "legitimate",
-      "routing_status": "active_thread_continuation",
-      "gatekeeper_confidence": 1.0
+      "routing_status": "gatekeeper_approved",
+      "gatekeeper_confidence": 1.0,
+      "is_active_thread": true,
+      "dispatch_status": "done"
     }
   },
   {
@@ -1175,8 +1191,10 @@
     "is_active_thread": true,
     "expected": {
       "gatekeeper_decision": "legitimate",
-      "routing_status": "active_thread_continuation",
-      "gatekeeper_confidence": 1.0
+      "routing_status": "gatekeeper_approved",
+      "gatekeeper_confidence": 1.0,
+      "is_active_thread": true,
+      "dispatch_status": "done"
     }
   },
   {
@@ -1195,8 +1213,10 @@
     "is_active_thread": true,
     "expected": {
       "gatekeeper_decision": "legitimate",
-      "routing_status": "active_thread_continuation",
-      "gatekeeper_confidence": 1.0
+      "routing_status": "gatekeeper_approved",
+      "gatekeeper_confidence": 1.0,
+      "is_active_thread": true,
+      "dispatch_status": "done"
     }
   },
   {

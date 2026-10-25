@@ -101,7 +101,7 @@ def run_benchmark_suite(
         expected = item.get("expected", {})
 
         # If testing active thread scenario, seed prior approved email in DB with matching participant
-        if item.get("category") == "active_thread" or expected.get("routing_status") == "active_thread_continuation":
+        if item.get("category") == "active_thread" or expected.get("is_active_thread") is True:
             prior_email_id = f"prior_{item['email_id']}"
             db.check_and_acquire(
                 email_id=prior_email_id,
@@ -220,6 +220,7 @@ def process_single_email(json_path: str, offline: bool = False) -> None:
         output_summary = {
             "email_id": result.get("email_id"),
             "routing_status": result.get("routing_status"),
+            "is_active_thread": bool(result.get("is_active_thread", False)),
             "gatekeeper_decision": result.get("gatekeeper_decision"),
             "classifier_used": result.get("classifier_used"),
             "is_sensitive": result.get("is_sensitive"),

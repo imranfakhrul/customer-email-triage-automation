@@ -7,6 +7,7 @@ system:
   idempotency_stale_minutes: 10
   max_dispatch_retries: 3
   audit_log_enabled: true
+  persist_masked_text: true
 
 privacy:
   # Local spaCy NER model (runs 100% locally on CPU)

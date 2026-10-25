@@ -33,7 +33,7 @@ flowchart TD
 * **Crash-Resilient State Machine:** Utilizes SQLite with three atomic states (`processing`, `done`, `failed`).
 * **Stale Lock Recovery:** In-flight tasks exceeding 10 minutes without completion are automatically recovered with incremented retry counters.
 * **Active Thread Verification:** Detects ongoing threads and verifies that the inbound sender is a known participant of prior messages in the thread.
-* **Phase 2 Hand-off Contract:** Phase 2 dispatchers pick up verified emails using `routing_status = 'gatekeeper_approved'` (or `db.get_gatekeeper_approved()`). Marking them as `status = 'done'` guarantees immediate retransmissions within 10 minutes are recognized as duplicates without blocking Phase 2 downstream execution.
+* **Phase 2 Hand-off Contract:** Phase 2 picks up rows with `routing_status='gatekeeper_approved'` (or via `db.get_gatekeeper_approved()`), reads `masked_subject` and `masked_body` directly from the row, and `token_map` is deliberately not stored (Phase 2 must re-fetch originals from the mailbox by `message_id` if a destination needs unmasked text). Marking them as `status = 'done'` guarantees immediate retransmissions within 10 minutes are recognized as duplicates without blocking Phase 2 downstream execution.
 
 ### 2. Privacy & Noise Stripping (Node 02)
 * **Quote Truncation:** Strips nested email replies (`On <date> ... wrote:`, `-----Original Message-----`, Outlook header dividers).
