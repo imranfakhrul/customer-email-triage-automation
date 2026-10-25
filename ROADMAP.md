@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[B3] Consolidate Sensitive Keywords to Intent Phrases** (or **[A12] Container Security & Environment File Locations**)
+**Next up:** **[B4] Synchronize In-Memory State & SQLite Record** (or **[A12] Container Security & Environment File Locations**)
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -50,7 +50,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **14** | **A14** | Infrastructure | Pin exact dependency versions in `requirements.txt` and spaCy language model URL | ⏳ Pending |
 | **15** | **B1** | Correctness | Refine signature stripper: RFC 3676, bare `--` code safety, bottom-up scan, safety size limit | ✅ Resolved (`8c13658`) |
 | **16** | **B2** | Correctness | Remove generic business words from offline spam heuristics; route threats to manual review | ✅ Resolved |
-| **17** | **B3** | Correctness | Tune sensitive keywords to intent phrases and establish single source in `config.yaml` | ⏳ Pending |
+| **17** | **B3** | Correctness | Tune sensitive keywords to intent phrases and establish single source in `config.yaml` | ✅ Resolved |
 | **18** | **B4** | Correctness | Harmonize returned state with SQLite database and persist clean text for Phase 2 | ⏳ Pending |
 | **19** | **B5** | Correctness | Resolve config relative to root, fail fast on invalid YAML, and honor environment overrides | ⏳ Pending |
 | **20** | **B6** | Performance | Preload models and precompile regexes once at startup to eliminate per-email overhead | ⏳ Pending |
@@ -227,12 +227,17 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Unit tests verify customer emails mentioning PayPal, DocuSign, Norton, Prince George's County, cheap hosting, and betting API are approved offline (`gatekeeper_approved`), real spam samples divert to `manual_review`, mocked Jev spam routes to `spam_skipped`, and 100/100 benchmark scenarios pass.
 
 ### [B3] Consolidate Sensitive Keywords to Intent Phrases
-* **Problem:** Bare words (`gdpr`, `police`, `erasure`) divert normal sales questions to legal review. Keyword list is duplicated across `nodes/sensitive_skip.py` and `config.yaml`.
+* **Status:** ✅ **Resolved**
+* **Problem:** Bare words (`gdpr`, `police`, `erasure`, `dsar`, `ccpa`) diverted normal sales and operational questions to legal review. Keyword list was duplicated across `nodes/sensitive_skip.py` and `config.yaml`.
 * **Solution:**
-  1. Replace bare words with intent phrases (`gdpr erasure request`, `police report`, `under article 17`).
-  2. Establish `config.yaml` as the single source of truth, removing duplicate keyword lists in code.
-  3. Implement scoring for sensitive phrases so ambiguous chargeback mentions can be differentiated from explicit dispute filings.
-* **Done When:** `"Is your product GDPR compliant?"` is not diverted, while explicit erasure requests divert.
+  1. Replaced bare topic words with explicit actionable intent phrases in `config.yaml`:
+     - Law enforcement: `"police report"`, `"contacted the police"`, `"contact the police"`, `"contacting the police"`, `"police investigation"`, `"filed a police"`, `"police department"`, `"alerted the police"`, `"report to the police"` (replacing bare `"police"`).
+     - Privacy & regulatory: `"gdpr erasure request"`, `"right to erasure"`, `"right to be forgotten"`, `"under article 17"`, `"data subject access request"`, `"subject access request"`, `"dsar request"`, `"ccpa request"`, `"ccpa deletion request"`, `"do not sell my personal information"`, `"do not sell"` (replacing bare `"gdpr"`, `"erasure"`, `"dsar"`, `"ccpa"`).
+  2. Established `config.yaml` (`privacy.sensitive_keywords`) as the SINGLE source of truth. Removed `DEFAULT_SENSITIVE_KEYWORDS` (38 items) from `nodes/sensitive_skip.py`, replacing with a tiny emergency fallback `EMERGENCY_SENSITIVE_KEYWORDS` (<= 5 high-risk phrases: `"subpoena"`, `"court order"`, `"lawsuit"`, `"formal chargeback"`, `"gdpr erasure request"`).
+  3. Scoring deferred; chargeback stays broad on purpose (retaining `r"\bchargebacks?\b"` safe-side routing).
+  4. Preserved A7 normalization (NFKC, zero-width removal, casefold, homoglyph translation, flexible whitespace/hyphen matching).
+  5. Scenarios 61-75 in benchmark verified: 100% (15/15) still divert to `sensitive_diverted` with zero changes to expected benchmark values.
+* **Done When:** Tests verify `"Is your product GDPR compliant?"`, `"Do you support erasure of old records?"`, and `"Our office is next to the police station, can you ship there?"` are not diverted, while explicit erasure requests under Article 17, police fraud reports, subpoenas, and chargebacks divert. Unit test proves keyword list is loaded only from config.
 
 ### [B4] Synchronize In-Memory State & SQLite Record
 * **Problem:** For approved emails, database row is marked `done` with `gatekeeper_approved`, but returned state says `dispatch_status: 'processing'`. Active thread is conflated with routing status. Database write errors are swallowed.

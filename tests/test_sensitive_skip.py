@@ -351,5 +351,84 @@ class TestSensitiveSkip(unittest.TestCase):
         self.assertEqual(record["routing_status"], "gatekeeper_approved")
 
 
+class TestFixB3SensitiveKeywordsIntent(unittest.TestCase):
+    """Verifies Fix B3: Intent phrases replace bare words, config is single source of truth."""
+
+    def test_b3_non_diverted_normal_customer_inquiries(self):
+        """Verifies ordinary business questions mentioning GDPR, erasure, or police station are NOT diverted."""
+        test_cases = [
+            ("Is your product GDPR compliant?", "GDPR compliance question"),
+            ("Do you support erasure of old records?", "Record maintenance inquiry"),
+            ("Our office is next to the police station, can you ship there?", "Delivery location question"),
+        ]
+        for text, desc in test_cases:
+            with self.subTest(case=desc):
+                is_sensitive, reason = evaluate_sensitive(text=text)
+                self.assertFalse(
+                    is_sensitive,
+                    f"False positive: '{text}' unexpectedly diverted with reason: {reason}",
+                )
+                self.assertIsNone(reason)
+
+    def test_b3_diverted_sensitive_intent_phrases(self):
+        """Verifies actionable intent phrases for GDPR erasure, police reports, subpoenas, and chargebacks ARE diverted."""
+        test_cases = [
+            ("I am making a GDPR erasure request under Article 17, please delete all my data", "gdpr"),
+            ("I filed a police report about the fraud on my account", "police"),
+            ("We have contacted the police regarding this incident", "police"),
+            ("Please find the attached subpoena", "subpoena"),
+            ("I'm going to file a chargeback.", "chargeback"),
+        ]
+        for text, expected_match in test_cases:
+            with self.subTest(phrase=text):
+                is_sensitive, reason = evaluate_sensitive(text=text)
+                self.assertTrue(
+                    is_sensitive,
+                    f"False negative: '{text}' failed to divert",
+                )
+                self.assertIsNotNone(reason)
+                self.assertIn(expected_match.lower(), reason.lower())
+
+    def test_b3_keyword_list_loaded_only_from_config(self):
+        """Verifies config.yaml is the single source of truth and fallback list is <= 5 emergency items."""
+        from nodes.sensitive_skip import EMERGENCY_SENSITIVE_KEYWORDS
+
+        # 1. Verify emergency fallback list has 5 or fewer items
+        self.assertLessEqual(len(EMERGENCY_SENSITIVE_KEYWORDS), 5)
+        self.assertTrue(len(EMERGENCY_SENSITIVE_KEYWORDS) > 0)
+
+        # 2. Verify that custom config overrides everything: only configured keywords match
+        custom_config = {
+            "privacy": {
+                "sensitive_keywords": ["custom_secret_compliance_phrase"],
+                "max_code_density": 4,
+            }
+        }
+        # Subpoena is in EMERGENCY_SENSITIVE_KEYWORDS, but NOT in custom_config; must NOT divert
+        is_sens, reason = evaluate_sensitive(
+            text="Please find the attached subpoena.",
+            config=custom_config,
+        )
+        self.assertFalse(is_sens)
+        self.assertIsNone(reason)
+
+        # Configured custom phrase DOES divert
+        is_sens_custom, reason_custom = evaluate_sensitive(
+            text="This notice includes custom_secret_compliance_phrase today.",
+            config=custom_config,
+        )
+        self.assertTrue(is_sens_custom)
+        self.assertIn("custom_secret_compliance_phrase", reason_custom)
+
+        # 3. Verify emergency fallback is used when privacy config has no sensitive_keywords
+        empty_privacy_config = {"privacy": {}}
+        is_sens_fallback, reason_fallback = evaluate_sensitive(
+            text="Please find the attached subpoena.",
+            config=empty_privacy_config,
+        )
+        self.assertTrue(is_sens_fallback)
+        self.assertIn("subpoena", reason_fallback.lower())
+
+
 if __name__ == "__main__":
     unittest.main()

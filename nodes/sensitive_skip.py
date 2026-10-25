@@ -32,45 +32,13 @@ HOMOGLYPH_MAP = str.maketrans({
 
 ZERO_WIDTH_CHARS = re.compile(r"[\u200b\u200c\u200d\u2060\ufeff]")
 
-# Default high-liability keywords and phrases if config is unavailable
-DEFAULT_SENSITIVE_KEYWORDS = [
-    "passport",
-    "driver's license",
-    "national id",
-    "nid",
-    "police",
-    "lawsuit",
-    "court order",
-    "legal notice",
+# Emergency fallback only (max 5 high-risk phrases); config.yaml (privacy.sensitive_keywords) is the single source of truth
+EMERGENCY_SENSITIVE_KEYWORDS = [
     "subpoena",
-    "bank account details",
-    "wire transfer routing",
-    "chargeback",
-    "chargebacks",
-    "will file a chargeback",
-    "filing chargeback",
-    "filing a chargeback",
-    "chargeback filed",
+    "court order",
+    "lawsuit",
     "formal chargeback",
-    "dispute notice",
-    "disputing this charge",
-    "my lawyer",
-    "cease and desist",
-    "arbitration demand",
     "gdpr erasure request",
-    "gdpr",
-    "erasure",
-    "dsar",
-    "ccpa",
-    "do not sell",
-    "banking details",
-    "bank details",
-    "wire transfer instructions",
-    "routing number",
-    "preservation demand",
-    "litigation",
-    "wage garnishment",
-    "data breach",
 ]
 
 DEFAULT_MAX_CODE_DENSITY = 4
@@ -163,7 +131,7 @@ def evaluate_sensitive(
             config = {}
 
     privacy_cfg = config.get("privacy", {})
-    keywords = privacy_cfg.get("sensitive_keywords", DEFAULT_SENSITIVE_KEYWORDS)
+    keywords = privacy_cfg.get("sensitive_keywords", EMERGENCY_SENSITIVE_KEYWORDS)
     max_code_density = privacy_cfg.get("max_code_density", DEFAULT_MAX_CODE_DENSITY)
 
     # 1. Keyword / Phrase Inspection across subject, cleaned/masked body, and raw body
