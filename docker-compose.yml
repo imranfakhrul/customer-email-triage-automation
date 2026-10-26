@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   email-triage:
     build:
@@ -10,7 +8,6 @@ services:
     env_file:
       - .env
     volumes:
-      - ./:/app
       - ./data:/app/data
     environment:
       - DATABASE_PATH=/app/data/triage.db

@@ -211,9 +211,8 @@ docker compose run --rm email-triage bash
 
 ### 3. Data Persistence & Volume Mounts
 
-The container uses Docker bind-mounts defined in `docker-compose.yml`:
-* **Live Code Reloading:** `.:/app` maps your local directory inside the container, allowing code changes to take effect immediately without rebuilding.
-* **Persistent SQLite Database:** `./data:/app/data` stores the SQLite idempotency database file (`data/triage.db`). 
+The container uses a dedicated data volume mount defined in `docker-compose.yml`:
+* **Persistent SQLite Database:** `./data:/app/data` stores the SQLite idempotency database file (`data/triage.db`). The host repository source code is not mounted into `/app`, ensuring container immutability and preventing host filesystem modification.
 * Even if the container is stopped, deleted, or rebuilt, **all processing history and idempotency locks remain safely persisted on your host machine**.
 
 ---
@@ -235,9 +234,9 @@ The container uses Docker bind-mounts defined in `docker-compose.yml`:
 * **Error: `.env` file not found:**
   * Ensure you created the `.env` file from `.env.example` in the project root directory before running `docker compose up`.
 * **Linux Permission Denied on `data/` folder:**
-  * If the container fails to write to `triage.db`, ensure your host user has write permissions:
+  * If the container fails to write to `triage.db`, ensure the container's non-root `appuser` (UID 1000) owns the data directory:
     ```bash
-    mkdir -p data && chmod 777 data
+    mkdir -p data && chown -R 1000:1000 data
     ```
 * **Windows Line Endings (CRLF vs LF):**
   * If shell scripts inside Docker fail with `\r` errors, ensure Git didn't convert line endings to CRLF:

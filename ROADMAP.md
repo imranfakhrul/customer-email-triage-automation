@@ -45,7 +45,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **9** | **A9** | Privacy | Integrate `phonenumbers` library, Luhn credit card check, and collision-safe tokens | ✅ Resolved |
 | **10** | **A10** | Privacy | Contextualize technical terms whitelist to protect real surnames (Jenkins, Kafka, etc.) | ✅ Resolved |
 | **11** | **A11** | Concurrency | Atomic SQLite idempotency check-and-claim to prevent multi-worker race conditions | ✅ Resolved |
-| **12** | **A12** | Infrastructure | Run container as non-root `appuser`, fix data volume mounts, and honor `DATABASE_PATH` | ⏳ Pending |
+| **12** | **A12** | Infrastructure | Run container as non-root `appuser`, fix data volume mounts, and honor `DATABASE_PATH` | ✅ Resolved |
 | **13** | **A13** | Security | Hardened secrets handling: `override=False`, enforce `api.typesafe.ai` host, redact debug keys | ✅ Resolved |
 | **14** | **A14** | Infrastructure | Pin exact dependency versions in `requirements.txt` and spaCy language model URL | ⏳ Pending |
 | **15** | **B1** | Correctness | Refine signature stripper: RFC 3676, bare `--` code safety, bottom-up scan, safety size limit | ✅ Resolved (`8c13658`) |
@@ -176,13 +176,16 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Concurrency unit tests with 8 simultaneous threads across 30 trials (both new and stale locks) produce exactly 1 winner and 0 exceptions. Standalone tool `tools/check_concurrency.py` tests 4 processes and 8 threads across 30 trials and reports `RESULT: PASS`.
 
 ### [A12] Container Security & Environment File Locations
+* **Status:** ✅ **Resolved**
 * **Problem:** Docker container runs as `root`; compose mounts full repository read-write; `DATABASE_PATH` env var is ignored; `*.db` is copied into Docker image; documentation suggests `chmod 777 data`.
 * **Solution:**
-  1. Add non-root `appuser` (`RUN useradd --create-home appuser && USER appuser`).
-  2. Mount only `./data:/app/data` in `docker-compose.yml`.
-  3. Read `DATABASE_PATH` from environment with default fallback to `data/triage.db`.
-  4. Add `*.db` to `.dockerignore`. Update README to use `chown 1000:1000 data`.
-* **Done When:** `docker compose run --rm email-triage whoami` outputs `appuser`, and database file generates inside `./data`.
+  1. **Non-Root User Hardening (`Dockerfile`):** Added non-root `appuser` (`useradd --create-home --uid 1000 --shell /bin/bash appuser`), created `/app/data` with ownership `chown -R appuser:appuser /app`, and set `USER appuser` before `CMD`.
+  2. **Isolated Volume Mount (`docker-compose.yml`):** Removed insecure whole-repository mount `.:/app`; restricted mounts strictly to `./data:/app/data` to ensure container immutability and prevent host filesystem modification. Removed obsolete `version: "3.8"` tag.
+  3. **Runtime Database Path Configuration (`docker-compose.yml`):** Set `DATABASE_PATH=/app/data/triage.db` in container environment, directing persistent SQLite records into the mounted volume.
+  4. **Database Exclusion in Image Builds (`.dockerignore`):** Added `*.db`, `*.db-wal`, `*.db-shm`, and `data/*.db` to prevent baking host SQLite databases into Docker image layers.
+  5. **Secure Host Permissions (`README.md`):** Replaced world-writable `chmod 777 data` advice with secure POSIX ownership: `chown -R 1000:1000 data`.
+  6. **Dedicated Test Suite (`tests/test_a12_container_security.py`):** Added 5 unit tests validating non-root user creation, single-volume mounting, `.dockerignore` patterns, documentation advice, and `DATABASE_PATH` runtime override.
+* **Done When:** Verified `docker compose run --rm email-triage whoami` outputs `appuser`, database generates inside `./data`, and 249 unit tests + 100/100 benchmark scenarios pass.
 
 ### [A13] Secrets Hardening & API Environment Controls
 * **Status:** ✅ **Resolved**

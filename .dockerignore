@@ -18,3 +18,9 @@ build/
 .env
 .task_memory.md
 *.log
+
+# SQLite persistence databases
+*.db
+*.db-wal
+*.db-shm
+data/*.db

@@ -9,10 +9,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Set working directory inside container
 WORKDIR /app
 
-# Install minimal system dependencies
+# Install minimal system dependencies and create non-root appuser
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1000 --shell /bin/bash appuser
 
 # Copy dependency specifications first for Docker layer caching
 COPY requirements.txt .
@@ -25,8 +26,11 @@ RUN pip install --upgrade pip && \
 # Copy project source files
 COPY . .
 
-# Create volume mount directory for SQLite persistence
-RUN mkdir -p /app/data
+# Create volume mount directory for SQLite persistence and set permissions
+RUN mkdir -p /app/data && chown -R appuser:appuser /app
+
+# Switch to non-root appuser
+USER appuser
 
 # Default command
 CMD ["python", "main.py"]
