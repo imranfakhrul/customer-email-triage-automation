@@ -8,13 +8,14 @@ class EmailClassification(BaseModel):
         "Bug Report",
         "Demo Request",
         "Pricing Inquiry",
+        "Billing Issue",
         "Refund Request",
         "General Query",
     ] = Field(description="The primary category of the customer email.")
-    priority: Literal["High", "Medium", "Low"] = Field(
+    priority: Literal["Critical", "High", "Medium", "Low"] = Field(
         description="The priority level based on customer tone and urgency."
     )
-    sentiment: Literal["Positive", "Neutral", "Negative"] = Field(
+    sentiment: Literal["Positive", "Neutral", "Negative", "Frustrated"] = Field(
         description="The emotional tone of the customer email."
     )
     summary: str = Field(
