@@ -18,11 +18,13 @@ Each issue is implemented individually with corresponding unit tests, verified a
 4. **Testing, Docs & Packaging:** `C1` ✅ -> `C2` ✅ -> `C3` ✅ -> `C4` ✅ -> `A12` ✅ -> `A14` ✅
 
 ### Phase 2 Implementation Sequence:
-1. **Track 1: Intelligence Classification Engine:** `P2-01` (Deep Classifier) ➔ `P2-02` (HITL Review Queue)
-2. **Track 2: Downstream Destination Adapters:** `P2-03` (Router & Base Adapter) ➔ `P2-04` (GitHub) ➔ `P2-05` (FreeScout) ➔ `P2-06` (CRM) ➔ `P2-07` (Webhook)
-3. **Track 3: Integration, Worker, Benchmark & Docs:** `P2-08` (LangGraph Integration) ➔ `P2-09` (Queue Worker) ➔ `P2-10` (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
+1. **Track 0: Architectural Decisions & Client Alignment:** `P2-00` ✅ (Delivered in `docs/phase2_decisions.md`)
+2. **Track 1: Intelligence Classification Engine:** `P2-01` (Deep Classifier) ➔ `P2-02` (HITL Review Queue)
+3. **Track 2: Downstream Destination Adapters:** `P2-03` (Router & Outbox Ledger) ➔ `P2-04` (GitHub) ➔ `P2-05` (FreeScout) ➔ `P2-06` (CRM) ➔ `P2-07` (Webhook)
+4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` (LangGraph Integration) ➔ `P2-09` (Queue Worker) ➔ `P2-10` (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
+5. **Track 4: Mailbox Ingestion Connector:** `P2-12` (Gmail Pub/Sub Connector)
 
-**Next Immediate Task:** `P2-01` (`feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node`).
+**Next Immediate Task:** `P2-01` (`feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node with phase 1 guardrails`).
 
 ---
 
@@ -516,8 +518,8 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 
 | # | Code | Track | Commit Description | Target Files | Status |
 |:---:|:---:|:---|:---|:---|:---:|
-| **0** | **P2-00** | Track 0 | `docs(decisions): [P2-00] phase 2 architectural decisions, client alignment questionnaire, and destination data policies` | `docs/phase2_decisions.md`, `ROADMAP.md` | ⏳ Ready |
-| **1** | **P2-01** | Track 1 | `feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node with phase 1 guardrails` | `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py`, `tests/test_p2_egress.py` | ⏳ Pending |
+| **0** | **P2-00** | Track 0 | `docs(decisions): [P2-00] phase 2 architectural decisions, client alignment questionnaire, and destination data policies` | `docs/phase2_decisions.md`, `ROADMAP.md` | ✅ Complete |
+| **1** | **P2-01** | Track 1 | `feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node with phase 1 guardrails` | `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py`, `tests/test_p2_egress.py` | ⏳ Ready |
 | **2** | **P2-02** | Track 1 | `feat(hitl): [P2-02] human-in-the-loop review queue, state gating, and reviewer cli interface` | `nodes/hitl_queue.py`, `scripts/hitl_cli.py`, `db/database.py`, `config.yaml`, `tests/test_p2_hitl.py` | ⏳ Pending |
 | **3** | **P2-03** | Track 2 | `feat(dispatch): [P2-03] multi-destination dispatcher router, outbox ledger, and safety rails` | `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `tests/test_p2_dispatcher_router.py` | ⏳ Pending |
 | **4** | **P2-04** | Track 2 | `feat(adapters): [P2-04] github issues adapter with output hardening and idempotency verification` | `utils/adapters/github_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_github_adapter.py` | ⏳ Pending |
@@ -535,6 +537,7 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 ### 4. Detailed Specifications for Commits P2-00 through P2-12
 
 #### [P2-00] Phase 2 Architectural Decisions, Client Alignment Questionnaire, and Destination Data Policies
+* **Status:** ✅ Complete (Delivered in `docs/phase2_decisions.md`)
 * **Scope:** `docs/phase2_decisions.md`, `ROADMAP.md`
 * **Problem:** Key architectural, operational, and data privacy policies must be decided in writing before writing downstream adapter code. In particular, `config.yaml` currently sets `use_masked_text_only: false` for Support, Sales, and Billing, creating an ambiguity between the Phase 1 masked invariant and downstream requirements.
 * **Solution:**
@@ -567,13 +570,17 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
      - `summary`: One-sentence concise executive summary.
      - `suggested_team`: `Engineering`, `Sales`, `Billing`, `Support`, `Security`.
      - `confidence`: `0.0` to `1.0`.
-  3. Track Phase 2 classifier engine via dedicated field `state["p2_classifier_used"]` (`"groq"` or `"offline_heuristic"`), strictly preserving Phase 1's `state["classifier_used"]` (`"jev"`, `"groq"`, or `"regex"`) without overwriting it.
-  4. Reuse Phase 1 Security Protections:
+  3. Multi-Tiered Classification Architecture:
+     - **Primary Engine:** TypeSafe Jev AI (`jev`) choice-based classifier (`id: "gmail_router"`, options: `["github_issue_create", "freescout", "crm", "webhook_node"]`) calculating exact mathematical probabilities in 70–500ms without text hallucination.
+     - **Secondary Fallback:** Groq LLM (`groq`, model `openai/gpt-oss-120b`) for generative schema extraction if Jev times out or is unreachable.
+     - **Tertiary Fallback:** Local offline heuristic ensemble (`offline_heuristic`), fail-closed to HITL review.
+  4. Track Phase 2 classifier engine via dedicated field `state["p2_classifier_used"]` (`"jev"`, `"groq"`, or `"offline_heuristic"`), strictly preserving Phase 1's `state["classifier_used"]` (`"jev"`, `"groq"`, or `"regex"`) without overwriting it.
+  5. Reuse Phase 1 Security Protections:
      - **A3 Prompt Injection Defense:** Dynamic boundary delimiters (`<<<P2_CLASSIFICATION_INPUT_{uuid}>>>`) and pre-filter injection detection (`is_potential_injection`). If injection detected, divert to `hitl_pending` with priority `High`.
      - **A4 Fail-Closed Normalization (`normalize_classification`):** Malformed, invalid, or hallucinated JSON defaults to `category="Other"`, `priority="Medium"`, `suggested_team="Support"`, `confidence=0.0` (forcing HITL gating).
      - **A6 Bounded Input Scans:** Clamps `masked_subject` to 2,000 chars and `masked_body` to 10,000 chars before calling classifier.
-     - **A13 Host Allowlist:** Enforces HTTPS-only egress to approved classifier endpoint (`api.groq.com`).
-  5. Phase 2 Egress Test: Automated test in `tests/test_p2_egress.py` verifying that during classification only allowed hosts receive network traffic, and outbound payloads contain only masked tokens (zero unmasked text, zero `token_map`).
+     - **A13 Host Allowlist:** Enforces HTTPS-only egress to approved endpoints (`https://api.typesafe.ai` and `https://api.groq.com`).
+  6. Phase 2 Egress Test: Automated test in `tests/test_p2_egress.py` verifying that during classification only allowed hosts receive network traffic, and outbound payloads contain only masked tokens (zero unmasked text, zero `token_map`).
 * **Done When:** Unit tests verify 10-category taxonomy, sentiment/emotion separation, injection pre-filter, fail-closed normalization, bounded input enforcement, and egress isolation.
 
 #### [P2-02] Human-in-the-Loop Review Queue, State Gating, and Reviewer CLI Interface
