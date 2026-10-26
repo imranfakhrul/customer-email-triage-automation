@@ -68,14 +68,21 @@ To enable live Jev AI evaluation:
 ```
 Customer-Email-Triage-Automation/
 ├── check.sh                  # All-in-one testing and egress verification script
+├── config/
+│   └── tech_terms.txt        # Two-tier technical terms whitelist (unambiguous / ambiguous)
 ├── config.yaml               # Central system and threshold configuration
 ├── Dockerfile                # Production container specification
 ├── docker-compose.yml        # Multi-container orchestration
 ├── main.py                   # Production entry point and CLI benchmark runner
 ├── pipeline.py               # LangGraph compiled pipeline orchestrator
+├── prompts.py                # Classifier LLM system and user prompt templates
+├── requirements.txt          # Pinned runtime dependencies
+├── ROADMAP.md                # 24-point senior review remediation roadmap
 ├── state.py                  # LangGraph TriageState & Pydantic models
 ├── data/
-│   └── benchmark_emails.json # 100-scenario synthetic benchmark dataset
+│   ├── benchmark_emails.json # 100-scenario synthetic benchmark dataset
+│   ├── sample_email.json     # Sample legitimate email payload
+│   └── sample_email_spam.json# Sample spam email payload
 ├── db/
 │   └── database.py           # SQLite idempotency engine
 ├── nodes/
@@ -86,8 +93,10 @@ Customer-Email-Triage-Automation/
 │   └── jev_gatekeeper.py     # Node 05: Jev AI decision engine
 ├── scripts/
 │   └── jev_smoke_test.py     # Standalone TypeSafe System One connectivity smoke test
-├── tests/                    # Comprehensive unit and integration test suite (244 tests)
+├── tests/                    # Comprehensive unit and integration test suite (254 tests)
 │   ├── conftest.py           # Test isolation fixtures & network egress guards
+│   ├── test_a12_container_security.py
+│   ├── test_a14_dependency_pinning.py
 │   ├── test_benchmark_runner.py
 │   ├── test_c2_isolation.py
 │   ├── test_c3_smoke_test.py
@@ -267,7 +276,7 @@ python -m spacy download en_core_web_sm
 # 3. Configure environment
 cp .env.example .env
 
-# 4. Run automated test suite (244 tests, 100% passing)
+# 4. Run automated test suite (254 tests, 100% passing)
 pytest tests/ -v
 
 # 5. Run the synthetic benchmark suite across all 100 pipeline scenarios (default: offline)
