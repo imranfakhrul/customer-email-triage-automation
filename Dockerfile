@@ -18,10 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy dependency specifications first for Docker layer caching
 COPY requirements.txt .
 
-# Install Python packages and download the spaCy lightweight local NER model
+# Install Python packages and download the pinned spaCy lightweight local NER model
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt && \
-    python -m spacy download en_core_web_sm
+    pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 
 # Copy project source files
 COPY . .

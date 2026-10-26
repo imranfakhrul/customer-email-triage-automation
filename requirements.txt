@@ -1,9 +1,9 @@
-pydantic
-langgraph
-langchain
-langchain-groq
-python-dotenv
-pyyaml
-spacy
-requests
+pydantic==2.14.1
+langgraph==1.2.16
+langchain==1.4.6
+langchain-groq==1.1.3
+python-dotenv==1.2.4
+pyyaml==6.0.3
+spacy==3.8.16
+requests==2.34.2
 phonenumbers==9.0.41

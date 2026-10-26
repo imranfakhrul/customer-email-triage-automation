@@ -8,13 +8,13 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[C2] Deterministic Test Environment Isolation** (or **[A12] Container Security & Environment File Locations**)
+**Status:** 🎉 **All 24/24 Remediation Items Fully Resolved & Verified!**
 
-### Recommended Execution Roadmap:
-1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
-2. **State & Concurrency Hardening:** `A5` -> `A6` -> `A11` -> `A9` -> `A10`
-3. **Correctness & Performance (Part B):** `B1` -> `B2` -> `B3` -> `B4` -> `B5` -> `B6`
-4. **Testing, Docs & Packaging:** `C1` -> `C2` -> `C3` -> `C4` -> `A12` -> `A14`
+### Execution Summary:
+1. **Critical PII & Fail-Closed Guardrails:** `A1` ✅ -> `A2` ✅ -> `A4` ✅ -> `A3` ✅ -> `A8` ✅ -> `A13` ✅
+2. **State & Concurrency Hardening:** `A5` ✅ -> `A6` ✅ -> `A11` ✅ -> `A9` ✅ -> `A10` ✅
+3. **Correctness & Performance (Part B):** `B1` ✅ -> `B2` ✅ -> `B3` ✅ -> `B4` ✅ -> `B5` ✅ -> `B6` ✅
+4. **Testing, Docs & Packaging:** `C1` ✅ -> `C2` ✅ -> `C3` ✅ -> `C4` ✅ -> `A12` ✅ -> `A14` ✅
 
 ---
 
@@ -47,7 +47,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **11** | **A11** | Concurrency | Atomic SQLite idempotency check-and-claim to prevent multi-worker race conditions | ✅ Resolved |
 | **12** | **A12** | Infrastructure | Run container as non-root `appuser`, fix data volume mounts, and honor `DATABASE_PATH` | ✅ Resolved |
 | **13** | **A13** | Security | Hardened secrets handling: `override=False`, enforce `api.typesafe.ai` host, redact debug keys | ✅ Resolved |
-| **14** | **A14** | Infrastructure | Pin exact dependency versions in `requirements.txt` and spaCy language model URL | ⏳ Pending |
+| **14** | **A14** | Infrastructure | Pin exact dependency versions in `requirements.txt` and spaCy language model URL | ✅ Resolved |
 | **15** | **B1** | Correctness | Refine signature stripper: RFC 3676, bare `--` code safety, bottom-up scan, safety size limit | ✅ Resolved (`8c13658`) |
 | **16** | **B2** | Correctness | Remove generic business words from offline spam heuristics; route threats to manual review | ✅ Resolved |
 | **17** | **B3** | Correctness | Tune sensitive keywords to intent phrases and establish single source in `config.yaml` | ✅ Resolved |
@@ -198,9 +198,13 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Config loads without overriding existing environment; URLs not pointing to `api.typesafe.ai` (or local test hosts) are rejected; key secrets never appear in logs.
 
 ### [A14] Pin All Dependency Versions
-* **Problem:** `requirements.txt` has unpinned package versions; Dockerfile downloads unpinned spaCy model releases.
-* **Solution:** Pin exact versions (`==`) across all libraries in `requirements.txt` and pin direct release URL for the spaCy model.
-* **Done When:** Every entry in `requirements.txt` has exact `==` version pinning.
+* **Status:** ✅ **Resolved**
+* **Problem:** `requirements.txt` had unpinned package versions allowing breaking upstream changes; `Dockerfile` downloaded unpinned spaCy model releases via dynamic `python -m spacy download en_core_web_sm`.
+* **Solution:**
+  1. Pinned exact versions (`==`) across all libraries in `requirements.txt` matching verified runtime environment (`pydantic==2.14.1`, `langgraph==1.2.16`, `langchain==1.4.6`, `langchain-groq==1.1.3`, `python-dotenv==1.2.4`, `pyyaml==6.0.3`, `spacy==3.8.16`, `requests==2.34.2`, `phonenumbers==9.0.41`).
+  2. Pinned immutable direct release wheel URL for `en_core_web_sm-3.8.0` in `Dockerfile`.
+  3. Added regression test suite `tests/test_a14_dependency_pinning.py` validating exact `==` pinning, prohibiting loose range specifiers (`>=`, `<=`, `~=`, bare names), and asserting Dockerfile model wheel URL pinning.
+* **Done When:** Every entry in `requirements.txt` has exact `==` version pinning, `Dockerfile` pins the spaCy wheel, and all tests pass.
 
 ---
 
