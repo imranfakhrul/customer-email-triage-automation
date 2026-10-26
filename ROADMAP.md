@@ -56,7 +56,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **20** | **B6** | Performance | Preload models and precompile regexes once at startup to eliminate per-email overhead | ✅ Resolved (`9646e04`) |
 | **21** | **C1** | Testing | Expand synthetic benchmark validation to check all expected fields and default to offline | ✅ Resolved |
 | **22** | **C2** | Testing | Isolate test suite from host environment variables (`.env`) for reproducible test runs | ✅ Resolved |
-| **23** | **C3** | Testing | Ensure `scripts/jev_smoke_test.py` strictly verifies Jev response and exits non-zero on failure | ⏳ Pending |
+| **23** | **C3** | Testing | Ensure `scripts/jev_smoke_test.py` strictly verifies Jev response and exits non-zero on failure | ✅ Resolved |
 | **24** | **C4** | Documentation | Reconcile README/ROADMAP test counts, directory trees, class names, and claim metrics | ⏳ Pending |
 
 ---
@@ -297,9 +297,13 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Verified full test suite (239 tests) passes deterministically with real keys injected into environment (`JEV_API_KEY="sk_live_super_secret" GROQ_API_KEY="gsk_live_super_secret"`), `tools/egress_check.py` verifies zero network egress, and 100/100 benchmark scenarios pass in ~21.5ms/email.
 
 ### [C3] Strict Jev Smoke Test Verification
+* **Status:** ✅ **Resolved**
 * **Problem:** `scripts/jev_smoke_test.py` reports success even if Jev returns 401 or 500 and falls back to offline heuristics.
-* **Solution:** Explicitly check `result["classifier_used"] == "jev"`; exit with code 1 (`sys.exit(1)`) on fallback.
-* **Done When:** Running smoke test with an invalid key outputs failure and exits with non-zero exit code.
+* **Solution:**
+  1. **Strict Classifier Engine Assertion (`scripts/jev_smoke_test.py`):** Explicitly check `result.get("classifier_used") == "jev"`. If Jev returns HTTP 401, 500, times out, or fails closed to Groq/regex fallback (`classifier_used != "jev"`), print a clear error detailing the fallback engine used and exit with code 1 (`sys.exit(1)`).
+  2. **Preserve Missing Key Guidance (`scripts/jev_smoke_test.py`):** When no key or placeholder is detected, continue printing guidance and exit with code 0 (`sys.exit(0)`).
+  3. **Dedicated Test Suite (`tests/test_c3_smoke_test.py`):** Added 5 unit tests validating that HTTP 401, HTTP 500, and network timeouts each raise `SystemExit(1)` and report failures, valid Jev HTTP 200 responses succeed, and missing keys exit with code 0.
+* **Done When:** Running smoke test with an invalid key outputs failure message (`[-] Smoke test FAILED: TypeSafe System One (Jev) API did not produce decision`) and exits with returncode 1; 244 unit tests and 100/100 benchmark scenarios pass.
 
 ### [C4] Documentation Synchronization & Metric Accuracy
 * **Problem:** Test counts in README/ROADMAP are outdated; file tree omits test modules; unbacked marketing claims exist (`enterprise-grade`, `sub-second`); dual naming (`JevClient` vs `JevAIClient`).

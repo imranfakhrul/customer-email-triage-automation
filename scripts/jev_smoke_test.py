@@ -52,6 +52,16 @@ def main() -> None:
 
     print("--- [Mapped Triage Output] ---")
     print(json.dumps(result, indent=2))
+
+    if result.get("classifier_used") != "jev":
+        fallback_engine = result.get("classifier_used", "unknown")
+        print(
+            f"\n[-] Smoke test FAILED: TypeSafe System One (Jev) API did not produce decision "
+            f"(fallback used: '{fallback_engine}')."
+        )
+        print("    Verify that JEV_API_KEY is valid, active, and has sufficient quota.\n")
+        sys.exit(1)
+
     print("\n[+] Smoke test completed successfully!")
 
 
