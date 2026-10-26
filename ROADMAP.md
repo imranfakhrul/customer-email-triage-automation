@@ -334,67 +334,180 @@ The following foundational improvements were implemented and merged in earlier P
 
 ## Part D: Phase 2 — Deep Classification & Downstream Dispatch Automation
 
-Phase 2 builds upon the hardened, local-first foundation delivered in Phase 1. It consumes sanitized, privacy-vetted, gatekeeper-approved emails and intelligently routes them to external business destinations (GitHub, FreeScout, CRM, Webhook Alerts) with fail-safe Human-in-the-Loop review gating.
+Phase 2 builds upon the hardened, local-first foundation delivered in Phase 1. It consumes sanitized, privacy-vetted, gatekeeper-approved emails and intelligently routes them to external business destinations (GitHub, FreeScout, CRM, Webhook Alerts) with fail-safe Human-in-the-Loop review gating, an Outbox dispatch ledger, and strict idempotency protection.
 
 ### 1. Phase 1 Termination & State Handoff Trace
 
-To guarantee strict isolation and zero regressions, Phase 1 has a concrete, verified boundary:
+To guarantee strict architectural isolation and zero regressions, Phase 1 has a concrete, verified boundary:
 
-* **Git Commit Anchor:** Terminated and delivered at Commit `020db77` (`chore: make check.sh executable`), preceded by `a609589` (`chore: final pre-delivery fixes, dev dependencies, batch execution, and metric accuracy`). All 24 remediation issues (A1–A14, B1–B6, C1–C4) and 7 final pre-delivery items are closed and verified.
+* **Git Commit Anchor:** Terminated and delivered at Commit `020db77` (`chore: make check.sh executable`), preceded by `a609589` (`chore: final pre-delivery fixes, dev dependencies, batch execution, and metric accuracy`). All 24 remediation issues (A1–A14, B1–B6, C1–C4) are closed and verified with 265 passing tests.
 * **Execution Boundary:** Pipeline execution concludes after Node 05 (`jev_gatekeeper_node`). Nodes 01 through 05 (`ingest` -> `signature_stripper` -> `pii_masker` -> `sensitive_skip` -> `jev_gatekeeper`) handle intake, normalization, sanitization, and safety approval.
-* **Data Handoff Contract:** Approved records reside in `data/triage.db` inside the `email_triage` table with:
+* **Data Handoff Contract:** Approved records reside in the SQLite database specified by `config["system"]["database_path"]` (default `triage.db` in project root; `/app/data/triage.db` only in Docker via `DATABASE_PATH` environment variable override applied in `utils/config.py`) inside the `email_triage` table with:
   - `status = 'done'`
   - `routing_status = 'gatekeeper_approved'`
   - `gatekeeper_decision = 'legitimate'`
-* **Persisted Handoff Schema:**
-  - `email_id` (TEXT, Primary Key)
-  - `message_id` (TEXT, Correlation / Mailbox ID)
-  - `thread_id` (TEXT, Thread continuity identifier)
-  - `sender_email` (TEXT, Full sender address for authorized dispatch)
-  - `sender_domain` (TEXT, Extracted sender domain)
-  - `masked_subject` (TEXT, Precision-masked subject line)
-  - `masked_body` (TEXT, Cleaned, signature-stripped, PII-masked body)
-  - `is_active_thread` (INTEGER, Boolean flag indicating ongoing thread)
-  - `gatekeeper_confidence` (REAL, Gatekeeper confidence score)
-  - `classifier_used` (TEXT, Engine identifier e.g. `jev`, `groq`, `offline_heuristic`)
-* **Handoff Reader API:**
-  - `TriageDatabase.get_gatekeeper_approved(limit=100) -> list[dict]`
-  - Tested and operational in `db/database.py`.
+
+* **Real Persisted Handoff Schema from `db/database.py`:**
+  The `email_triage` table consists of exactly the following 17 columns defined in `TriageDatabase._init_db`:
+  ```sql
+  CREATE TABLE email_triage (
+      email_id TEXT PRIMARY KEY,
+      message_id TEXT,
+      thread_id TEXT,
+      sender_email TEXT,
+      status TEXT NOT NULL CHECK(status IN ('processing', 'done', 'failed')),
+      retry_count INTEGER DEFAULT 0,
+      routing_status TEXT,
+      dispatch_target TEXT,
+      error_message TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      masked_subject TEXT,
+      masked_body TEXT,
+      is_active_thread INTEGER,
+      gatekeeper_decision TEXT,
+      gatekeeper_confidence REAL,
+      classifier_used TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_thread_id ON email_triage(thread_id);
+  CREATE INDEX IF NOT EXISTS idx_status ON email_triage(status);
+  ```
+
+* **Crucial Schema Invariants & Constraints:**
+  1. **No `sender_domain` Column:** The `email_triage` table has **NO** `sender_domain` column. Sender domain is derived dynamically at runtime from `sender_email` via `sender_email.split("@")[-1]` or `email.utils.parseaddr(sender_email)[1].split("@")[-1]`.
+  2. **Allowed `classifier_used` Values:** In Phase 1, `classifier_used` records the gatekeeper engine decision. Permitted values are strictly restricted to `"jev"`, `"groq"`, and `"regex"` (Phase 1 heuristic regex fallback, not `"offline_heuristic"`).
+  3. **Strict Status Constraint:** `status` has a SQLite CHECK constraint: `CHECK(status IN ('processing', 'done', 'failed'))`. Writing values like `'processing_p2'`, `'p2_done'`, `'dispatched'`, or `'hitl_pending'` directly to `email_triage` will cause SQLite constraint violations (`IntegrityError`) and crash the application.
+  4. **Active Thread Continuity Invariant (A5 Security):** `db/database.py` evaluates ongoing thread context via `get_active_thread_records(thread_id)` using the exact query:
+     ```sql
+     SELECT * FROM email_triage
+     WHERE thread_id = ? AND routing_status = 'gatekeeper_approved'
+     ORDER BY updated_at DESC
+     ```
+     If Phase 2 were to overwrite `routing_status` with `'dispatched'` or `'hitl_pending'`, subsequent emails in the same conversation thread would fail the A5 thread history check and participant validation.
+  5. **Phase 1 Idempotency Preservation:** Intake queries (`claim_processing`) verify whether an email is already completed via `status == 'done'`.
+  6. **Zero-Touch Policy on `email_triage`:** Because of constraints 3, 4, and 5, **Phase 2 must NOT modify or overwrite any columns or values in `email_triage`.** The `email_triage` table is strictly READ-ONLY during Phase 2.
+
+* **Dedicated Phase 2 State Architecture (`p2_jobs` & `p2_dispatch_log`):**
+  To maintain 100% backward compatibility and preserve all Phase 1 invariants, Phase 2 introduces two dedicated tables via an idempotent migration in `TriageDatabase._init_db`:
+
+  ```sql
+  -- Phase 2 Processing State and HITL Lifecycle
+  CREATE TABLE IF NOT EXISTS p2_jobs (
+      email_id TEXT PRIMARY KEY REFERENCES email_triage(email_id),
+      state TEXT NOT NULL CHECK(state IN (
+          'unclaimed', 'claimed', 'hitl_pending', 'hitl_resolved',
+          'dispatching', 'done', 'failed', 'dead_letter'
+      )),
+      worker_id TEXT,
+      claimed_at TEXT,
+      attempts INTEGER DEFAULT 0,
+      category TEXT,
+      priority TEXT,
+      sentiment TEXT,
+      customer_emotion TEXT,
+      summary TEXT,
+      suggested_team TEXT,
+      confidence REAL,
+      p2_classifier_used TEXT,
+      hitl_status TEXT DEFAULT 'none' CHECK(hitl_status IN (
+          'none', 'pending', 'approved', 'rejected', 'overridden'
+      )),
+      hitl_notes TEXT,
+      reviewed_by TEXT,
+      reviewed_at TEXT,
+      dispatch_target TEXT,
+      error_message TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_p2_jobs_state ON p2_jobs(state);
+  CREATE INDEX IF NOT EXISTS idx_p2_jobs_claimed ON p2_jobs(claimed_at);
+
+  -- Phase 2 Outbox Pattern Dispatch Ledger
+  CREATE TABLE IF NOT EXISTS p2_dispatch_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email_id TEXT NOT NULL REFERENCES email_triage(email_id),
+      destination TEXT NOT NULL,
+      action_type TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      state TEXT NOT NULL CHECK(state IN (
+          'pending', 'sent', 'confirmed', 'unknown', 'failed'
+      )),
+      remote_id TEXT,
+      error_message TEXT,
+      attempt_number INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_p2_dispatch_idempotency ON p2_dispatch_log(idempotency_key);
+  CREATE INDEX IF NOT EXISTS idx_p2_dispatch_email ON p2_dispatch_log(email_id);
+  ```
+
+* **Preservation Verification Test Requirement:**
+  Automated tests in `tests/test_p2_worker.py` and `tests/test_p2_pipeline_e2e.py` must explicitly verify:
+  1. Throughout the full Phase 2 lifecycle (claiming, classifying, HITL review, dispatching, and completion), `email_triage.status` remains `'done'` and `routing_status` remains `'gatekeeper_approved'`.
+  2. A5 thread history queries (`get_active_thread_records`) and thread participant validation continue to return expected records before, during, and after Phase 2 completion.
+  3. Intake duplicate checks (`claim_processing`) continue to recognize previously processed emails as `'already_completed'`.
+
 * **Strict Privacy Invariant:**
   - **`token_map` is NEVER persisted to SQLite or passed across process boundaries.**
   - All Phase 2 intelligence classification and external adapter formatting operate strictly on `masked_subject` and `masked_body`.
-  - Downstream systems requiring raw customer PII (e.g. creating a real FreeScout ticket) re-fetch original text from the authorized mailbox API using `message_id`.
+  - Downstream systems requiring raw customer PII (e.g. creating a real FreeScout ticket) re-fetch original text from the authorized mailbox API using `message_id` (via P2-12).
 
 ---
 
 ### 2. Phase 2 Pipeline Topology & Node Architecture
 
 ```
-[Phase 1 Handoff: gatekeeper_approved]
-                  │
-                  ▼
-   ┌─────────────────────────────┐
-   │    Node 06: Classifier      │ ──► Deep LLM / Heuristic Ensemble
-   │ (Intent, Urgency, Category) │     (bug_report, support, billing, sales)
-   └──────────────┬──────────────┘
-                  │
-                  ▼
-   ┌─────────────────────────────┐
-   │   Node 07: HITL Gating      │ ──► Confidence < 0.85 or Frustrated High-Urgency?
-   └──────┬───────────────┬──────┘
-          │ (Borderline)  │ (Approved >= 0.85)
-          ▼               ▼
-   ┌─────────────┐ ┌─────────────────────────────┐
-   │ HITL Review │ │    Node 08: Dispatcher      │ ──► Multi-Destination Router
-   │    Queue    │ └──────────────┬──────────────┘
-   └─────────────┘                │
-         ┌────────────────────────┼────────────────────────┬────────────────────────┐
-         ▼                        ▼                        ▼                        ▼
-  ┌──────────────┐         ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-  │ GitHub Issue │         │  FreeScout   │         │   CRM Lead   │         │   Webhook    │
-  │   Adapter    │         │ Ticket Node  │         │ Ingestion    │         │ Alert Node   │
-  │ (Bug Reports)│         │ (CS Support) │         │ (Sales/Demo) │         │(Dispute/Crit)│
-  └──────────────┘         └──────────────┘         └──────────────┘         └──────────────┘
+[Phase 1 Handoff: email_triage (gatekeeper_approved)]
+                         │
+                         ▼
+           ┌───────────────────────────┐
+           │   p2_jobs Intake/Claim    │ ◄── Atomic row claiming & crash recovery
+           └─────────────┬─────────────┘
+                         │
+                         ▼
+           ┌───────────────────────────┐
+           │    Node 06: Classifier    │ ──► Deep LLM / Heuristic Ensemble
+           │(10 Categories, Sentiment, │     - Reuses A3 delimiters & injection pre-filter
+           │ Emotion, Priority)        │     - Reuses A4 fail-closed normalize_classification
+           └─────────────┬─────────────┘     - Reuses A6 length bounds & A13 host allowlist
+                         │
+                         ▼
+           ┌───────────────────────────┐
+           │   Node 07: HITL Gating    │ ──► Triggers: confidence < 0.85, angry/frustrated
+           └──────┬─────────────┬──────┘     high priority, Security/Account, or unmapped.
+                  │             │
+    (Review Req.) │             │ (Auto-Approved >= 0.85)
+                  ▼             │
+     ┌───────────────────────┐  │
+     │  p2_jobs hitl_pending │  │
+     │  CLI: hitl_cli.py     │  │
+     │  (approve / override) │  │
+     └────────────┬──────────┘  │
+                  │             │
+      (Resolved)  └──────┐      │
+                         ▼      ▼
+           ┌───────────────────────────┐
+           │   Node 08: Dispatcher     │ ──► Multi-Destination Router & Safety Rails
+           │ (Outbox Ledger & Checks)  │     - dispatch.dry_run (default: true)
+           └─────────────┬─────────────┘     - Global kill switch & daily caps
+                         │                   - Persists 'pending' to p2_dispatch_log
+                         │                   - Resolves 'unknown' via remote query
+          ┌──────────────┼──────────────┬──────────────┐
+          ▼              ▼              ▼              ▼
+   ┌──────────────┐┌──────────────┐┌──────────────┐┌──────────────┐
+   │ GitHub Issue ││  FreeScout   ││   CRM Lead   ││ Webhook Node │
+   │   Adapter    ││ Ticket Node  ││  Ingestion   ││ (Disputes &  │
+   │ (Bugs/Feat)  ││ (CS Support) ││ (Sales/Demo) ││ Crit Outage) │
+   └──────────────┘└──────────────┘└──────────────┘└──────────────┘
+          │              │              │              │
+          └──────────────┴──────┬───────┴──────────────┘
+                                ▼
+                   ┌──────────────────────────┐
+                   │    p2_dispatch_log       │ ──► State: confirmed / failed
+                   │    p2_jobs (done)        │     (email_triage untouched)
+                   └──────────────────────────┘
 ```
 
 ---
@@ -403,142 +516,283 @@ To guarantee strict isolation and zero regressions, Phase 1 has a concrete, veri
 
 | # | Code | Track | Commit Description | Target Files | Status |
 |:---:|:---:|:---|:---|:---|:---:|
-| **1** | **P2-01** | Track 1 | `feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node` | `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py` | ⏳ Ready |
-| **2** | **P2-02** | Track 1 | `feat(hitl): [P2-02] human-in-the-loop review queue router and state gating` | `nodes/hitl_queue.py`, `db/database.py`, `tests/test_p2_hitl.py` | ⏳ Pending |
-| **3** | **P2-03** | Track 2 | `feat(dispatch): [P2-03] multi-destination dispatcher router and abstract adapter base` | `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `tests/test_p2_dispatcher_router.py` | ⏳ Pending |
-| **4** | **P2-04** | Track 2 | `feat(adapters): [P2-04] github issues adapter for engineering bug reports` | `utils/adapters/github_adapter.py`, `tests/test_p2_github_adapter.py` | ⏳ Pending |
-| **5** | **P2-05** | Track 2 | `feat(adapters): [P2-05] freescout helpdesk adapter for general customer support` | `utils/adapters/freescout_adapter.py`, `tests/test_p2_freescout_adapter.py` | ⏳ Pending |
-| **6** | **P2-06** | Track 2 | `feat(adapters): [P2-06] crm lead ingestion adapter for sales demo and pricing inquiries` | `utils/adapters/crm_adapter.py`, `tests/test_p2_crm_adapter.py` | ⏳ Pending |
-| **7** | **P2-07** | Track 2 | `feat(adapters): [P2-07] webhook alert adapter for urgent billing and refund disputes` | `utils/adapters/webhook_adapter.py`, `tests/test_p2_webhook_adapter.py` | ⏳ Pending |
+| **0** | **P2-00** | Track 0 | `docs(decisions): [P2-00] phase 2 architectural decisions, client alignment questionnaire, and destination data policies` | `docs/phase2_decisions.md`, `ROADMAP.md` | ⏳ Ready |
+| **1** | **P2-01** | Track 1 | `feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node with phase 1 guardrails` | `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py`, `tests/test_p2_egress.py` | ⏳ Pending |
+| **2** | **P2-02** | Track 1 | `feat(hitl): [P2-02] human-in-the-loop review queue, state gating, and reviewer cli interface` | `nodes/hitl_queue.py`, `scripts/hitl_cli.py`, `db/database.py`, `config.yaml`, `tests/test_p2_hitl.py` | ⏳ Pending |
+| **3** | **P2-03** | Track 2 | `feat(dispatch): [P2-03] multi-destination dispatcher router, outbox ledger, and safety rails` | `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `tests/test_p2_dispatcher_router.py` | ⏳ Pending |
+| **4** | **P2-04** | Track 2 | `feat(adapters): [P2-04] github issues adapter with output hardening and idempotency verification` | `utils/adapters/github_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_github_adapter.py` | ⏳ Pending |
+| **5** | **P2-05** | Track 2 | `feat(adapters): [P2-05] freescout helpdesk adapter with output hardening and thread continuity` | `utils/adapters/freescout_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_freescout_adapter.py` | ⏳ Pending |
+| **6** | **P2-06** | Track 2 | `feat(adapters): [P2-06] crm lead ingestion adapter with output hardening and lead scoring` | `utils/adapters/crm_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_crm_adapter.py` | ⏳ Pending |
+| **7** | **P2-07** | Track 2 | `feat(adapters): [P2-07] webhook alert adapter with hmac signing for urgent billing and outage alerts` | `utils/adapters/webhook_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_webhook_adapter.py` | ⏳ Pending |
 | **8** | **P2-08** | Track 3 | `feat(pipeline): [P2-08] end-to-end langgraph phase 2 graph compilation and dispatch handoff` | `pipeline.py`, `tests/test_p2_pipeline_e2e.py` | ⏳ Pending |
-| **9** | **P2-09** | Track 3 | `feat(worker): [P2-09] persistent phase 2 queue worker and background poller` | `scripts/phase2_worker.py`, `db/database.py`, `tools/run_worker.sh`, `tests/test_p2_worker.py` | ⏳ Pending |
-| **10** | **P2-10** | Track 3 | `feat(testing): [P2-10] phase 2 synthetic benchmark dataset and validation suite` | `data/benchmark_phase2.json`, `main.py`, `tests/test_p2_benchmark.py` | ⏳ Pending |
-| **11** | **P2-11** | Track 3 | `docs(phase2): [P2-11] complete phase 2 documentation, architecture diagrams, and runbooks` | `README.md`, `ROADMAP.md`, `docs/` | ⏳ Pending |
+| **9** | **P2-09** | Track 3 | `feat(worker): [P2-09] persistent phase 2 queue worker, atomic claiming, and crash recovery` | `scripts/phase2_worker.py`, `db/database.py`, `tools/run_worker.sh`, `tests/test_p2_worker.py` | ⏳ Pending |
+| **10** | **P2-10** | Track 3 | `feat(testing): [P2-10] phase 2 synthetic benchmark dataset, failure-injection suite, and adapter contracts` | `data/benchmark_phase2.json`, `main.py`, `tests/test_p2_benchmark.py`, `tests/test_p2_failure_injection.py`, `tests/test_p2_adapter_contracts.py`, `scripts/*_smoke_test.py` | ⏳ Pending |
+| **11** | **P2-11** | Track 3 | `docs(phase2): [P2-11] complete phase 2 documentation, architecture diagrams, and operator runbooks` | `README.md`, `ROADMAP.md`, `docs/architecture_phase2.md`, `docs/hitl_runbook.md` | ⏳ Pending |
+| **12** | **P2-12** | Track 4 | `feat(mailbox): [P2-12] gmail pub/sub mailbox connector, auth lifecycle, and original text re-fetch` | `utils/mailbox/gmail_connector.py`, `scripts/renew_mailbox_watch.py`, `config.yaml`, `.env.example`, `tests/test_p2_mailbox_connector.py` | ⏳ Pending |
 
 ---
 
-### 4. Detailed Specifications for Commits P2-01 through P2-11
+### 4. Detailed Specifications for Commits P2-00 through P2-12
 
-#### [P2-01] Deep LLM Intent, Category, and Sentiment Classifier Node
-* **Scope:** `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py`
-* **Problem:** Approved emails lack deep semantic classification. Downstream systems cannot distinguish between engineering bug reports, sales inquiries, general support tickets, and urgent billing issues.
+#### [P2-00] Phase 2 Architectural Decisions, Client Alignment Questionnaire, and Destination Data Policies
+* **Scope:** `docs/phase2_decisions.md`, `ROADMAP.md`
+* **Problem:** Key architectural, operational, and data privacy policies must be decided in writing before writing downstream adapter code. In particular, `config.yaml` currently sets `use_masked_text_only: false` for Support, Sales, and Billing, creating an ambiguity between the Phase 1 masked invariant and downstream requirements.
+* **Solution:**
+  1. Record definitive destination data policy:
+     - **Engineering (GitHub):** Strictly `use_masked_text_only: true`. Public or shared engineering repositories receive sanitized, masked text only.
+     - **Support (FreeScout), Sales (CRM), Billing (Webhook):** Record whether these systems operate on masked text or authorized original text re-fetched from the mailbox via `message_id` (P2-12).
+  2. Masked Text Retention Policy: Define SQLite retention schedule for `masked_subject` and `masked_body` in `email_triage` (e.g. rolling 30/90-day retention with scheduled purge script, vs permanent audit retention).
+  3. Dry-Run Policy: Set default `dispatch.dry_run: true`. Document operational protocol for promoting dry-run staging to live delivery.
+  4. Daily Rate Limits & Cap Policies: Define per-destination daily dispatch limits (e.g., GitHub: 200 issues/day, FreeScout: 1,000 tickets/day, CRM: 500 leads/day, Webhook: 200 alerts/day) to prevent API quota exhaustion and alert storms.
+  5. Classifier Model Selection: Record model configuration (`llm.classifier_model: "openai/gpt-oss-120b"` on Groq), temperature (0.1 for high determinism), and token budgets.
+  6. Document Mandatory Client Questionnaire (must be confirmed before starting P2-04):
+     - Question 1: Should FreeScout and CRM receive re-fetched unmasked customer names/emails or remain masked?
+     - Question 2: What are the exact GitHub repository owner/repo and required project labels?
+     - Question 3: What CRM system (HubSpot, Salesforce, Pipedrive, custom webhook) is the primary target?
+     - Question 4: What is the primary incident webhook target (Slack incoming webhook, PagerDuty, Discord)?
+     - Question 5: What is the desired alert escalation policy for critical infrastructure outages?
+     - Question 6: What are the daily volume quotas and budget constraints for Groq API classification calls?
+* **Done When:** `docs/phase2_decisions.md` is fully drafted and reviewed, capturing all policies and questionnaire items.
+
+#### [P2-01] Deep LLM Intent, Category, and Sentiment Classifier Node with Phase 1 Guardrails
+* **Scope:** `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py`, `tests/test_p2_egress.py`
+* **Problem:** Approved emails lack deep semantic classification. Downstream systems cannot distinguish between bug reports, sales inquiries, billing disputes, complaints, and critical infrastructure outages. Furthermore, the classifier must not introduce prompt injection vulnerabilities or bypass Phase 1 security guardrails.
 * **Solution:**
   1. Implement `classifier_node(state: TriageState) -> dict` consuming `masked_subject` and `masked_body`, populating `state["classification"]` with an `EmailClassification` object.
-  2. `EmailClassification` (in `state.py`) defines explicit schema enums:
-     - `category`: `Bug Report`, `Demo Request`, `Pricing Inquiry`, `Billing Issue`, `Refund Request`, `General Query`.
+  2. Implement `EmailClassification` schema in `state.py`:
+     - `category`: `Bug Report`, `Feature Request`, `Demo Request`, `Pricing Inquiry`, `Billing Issue`, `Refund Request`, `Security/Account`, `Complaint`, `General Query`, `Other`.
      - `priority`: `Critical`, `High`, `Medium`, `Low`.
-     - `sentiment`: `Positive`, `Neutral`, `Negative`, `Frustrated` (supports emotional escalation detection).
-     - `summary`: One-sentence clean summary.
-     - `suggested_team`: `Engineering`, `Sales`, `Billing`, `Support`.
+     - `sentiment`: `Positive`, `Neutral`, `Negative`.
+     - `customer_emotion`: `Calm`, `Frustrated`, `Angry` (explicitly separated from sentiment).
+     - `summary`: One-sentence concise executive summary.
+     - `suggested_team`: `Engineering`, `Sales`, `Billing`, `Support`, `Security`.
      - `confidence`: `0.0` to `1.0`.
-  3. Track Phase 2 classifier engine via dedicated field `state["p2_classifier_used"]` (e.g. `"groq"` or `"offline_heuristic"`), preserving Phase 1's `state["classifier_used"]` (which records `"jev"`, `"groq"`, or `"regex"` gatekeeper decisions) without overwriting it.
-  4. Enforce fail-closed normalization — unknown or malformed output defaults to `manual_review` routing.
-* **Done When:** Table-driven unit tests verify schema conformance, mock LLM responses, offline fallback, and confidence clamping.
+  3. Track Phase 2 classifier engine via dedicated field `state["p2_classifier_used"]` (`"groq"` or `"offline_heuristic"`), strictly preserving Phase 1's `state["classifier_used"]` (`"jev"`, `"groq"`, or `"regex"`) without overwriting it.
+  4. Reuse Phase 1 Security Protections:
+     - **A3 Prompt Injection Defense:** Dynamic boundary delimiters (`<<<P2_CLASSIFICATION_INPUT_{uuid}>>>`) and pre-filter injection detection (`is_potential_injection`). If injection detected, divert to `hitl_pending` with priority `High`.
+     - **A4 Fail-Closed Normalization (`normalize_classification`):** Malformed, invalid, or hallucinated JSON defaults to `category="Other"`, `priority="Medium"`, `suggested_team="Support"`, `confidence=0.0` (forcing HITL gating).
+     - **A6 Bounded Input Scans:** Clamps `masked_subject` to 2,000 chars and `masked_body` to 10,000 chars before calling classifier.
+     - **A13 Host Allowlist:** Enforces HTTPS-only egress to approved classifier endpoint (`api.groq.com`).
+  5. Phase 2 Egress Test: Automated test in `tests/test_p2_egress.py` verifying that during classification only allowed hosts receive network traffic, and outbound payloads contain only masked tokens (zero unmasked text, zero `token_map`).
+* **Done When:** Unit tests verify 10-category taxonomy, sentiment/emotion separation, injection pre-filter, fail-closed normalization, bounded input enforcement, and egress isolation.
 
-#### [P2-02] Human-in-the-Loop Review Queue Router and State Gating
-* **Scope:** `nodes/hitl_queue.py`, `db/database.py`, `config.yaml`, `tests/test_p2_hitl.py`
-* **Problem:** High-risk or low-confidence automated classifications should not be dispatched automatically to live destinations without human validation.
+#### [P2-02] Human-in-the-Loop Review Queue, State Gating, and Reviewer CLI Interface
+* **Scope:** `nodes/hitl_queue.py`, `scripts/hitl_cli.py`, `db/database.py`, `config.yaml`, `tests/test_p2_hitl.py`
+* **Problem:** Automated classification is inherently probabilistic. High-urgency angry customers, low-confidence predictions, security issues, and unmapped inquiries must not be dispatched automatically without human oversight. Operators need an audit-trailed interface to review and re-route items.
 * **Solution:**
-  1. Implement `hitl_queue_node` evaluating classifier confidence against configurable threshold (`classification.hitl_threshold: 0.85`).
-  2. Divert to `hitl_pending` if:
-     - `confidence < 0.85`, OR
-     - `sentiment == "Frustrated"` AND `priority in ["Critical", "High"]`, OR
-     - Category classification is unrecognized or malformed.
-  3. Extend SQLite schema with `hitl_status`, `hitl_notes`, `reviewed_by`, and `reviewed_at`.
-  4. Expose `get_pending_hitl_reviews()` and `resolve_hitl_review()` in `TriageDatabase`.
-* **Done When:** Boundary tests verify confidence < 0.85 and frustrated+high-priority route to HITL; schema migration and review resolution APIs verified.
+  1. Implement `hitl_queue_node` evaluating classification against configurable gating rules:
+     - Divert to `state = 'hitl_pending'` if:
+       - `confidence < classification.hitl_threshold` (default `0.85`), OR
+       - `customer_emotion in ["Frustrated", "Angry"]` AND `priority in ["Critical", "High"]`, OR
+       - `category in ["Security/Account", "Other"]`, OR
+       - Any unknown or unmapped category.
+  2. Offline Classifier Fail-Closed Behavior: When offline heuristic fallback is active (`p2_classifier_used == "offline_heuristic"`), confidence is capped at 0.50–0.65. Consequently, virtually ALL offline-classified emails automatically divert to HITL. Explicitly document that this is deliberate, secure fail-closed behavior.
+  3. Reviewer CLI Tool (`scripts/hitl_cli.py`):
+     - `hitl_cli.py list [--status pending|all]`: Displays pending reviews with `email_id`, sender, urgency, emotion, confidence, age.
+     - `hitl_cli.py show <email_id>`: Displays masked subject, masked body, suggested category, suggested team, classifier reasoning.
+     - `hitl_cli.py approve <email_id> [--notes "..."]`: Approves classification, sets `hitl_status = 'approved'`, transitions `state = 'hitl_resolved'`.
+     - `hitl_cli.py override <email_id> --category <cat> [--priority <prio>] [--destination <dest>] [--notes "..."]`: Overrides category/destination, sets `hitl_status = 'overridden'`, transitions `state = 'hitl_resolved'`.
+     - `hitl_cli.py reject <email_id> [--notes "..."]`: Rejects item, sets `hitl_status = 'rejected'`, transitions `state = 'done'`, terminating without dispatch.
+  4. Audit Trail: All resolutions update `p2_jobs` with `reviewed_by` (operator username/system user), `reviewed_at` (ISO timestamp), and `hitl_notes`.
+  5. Re-entry Path: Jobs marked `state = 'hitl_resolved'` are immediately claimable by the dispatcher/worker, proceeding directly to Node 08 without re-running classification.
+* **Done When:** Gating tests verify confidence threshold, emotion triggers, and offline fallback fail-closed behavior; CLI tests verify list, show, approve, override, and reject workflows with complete audit trail updates in `p2_jobs`.
 
-#### [P2-03] Multi-Destination Dispatcher Router and Abstract Adapter Base
-* **Scope:** `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `tests/test_p2_dispatcher_router.py`
-* **Problem:** Downstream integrations are varied. Hard-coding API calls in pipeline nodes violates separation of concerns and creates duplicate external actions on unhandled retries.
+#### [P2-03] Multi-Destination Dispatcher Router, Outbox Ledger, and Safety Rails
+* **Scope:** `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `tests/test_p2_dispatcher_router.py`
+* **Problem:** Downstream integrations are varied. Hardcoding dispatch logic without an outbox ledger leads to duplicate dispatches on network timeouts. Missing safety rails risk runaway API billing or alert storms.
 * **Solution:**
-  1. Define abstract base class `BaseDestinationAdapter(ABC)` with `dispatch()`, `validate_config()`, and `health_check()`.
-  2. Define `DispatchResult` dataclass (`success`, `destination`, `remote_id`, `idempotency_key`, `retryable`, `error`).
-  3. Implement deterministic routing matrix across all 6 categories:
+  1. Base Adapter Abstract Contract (`BaseDestinationAdapter` in `utils/adapters/base.py`):
+     - `dispatch(state: TriageState) -> DispatchResult`
+     - `check_duplicate(idempotency_key: str, state: TriageState) -> Optional[str]`
+     - `validate_config() -> bool`
+     - `health_check() -> bool`
+  2. Outbox Pattern Dispatch Ledger (`p2_dispatch_log`):
+     - Before invoking remote API, write row: `state = 'pending'`, `idempotency_key = f"{email_id}:{destination}:{action_type}"`, `attempt_number = 1`.
+     - After successful send, update to `state = 'confirmed'` with `remote_id`.
+     - On failure before send, update to `state = 'failed'` with `error_message`.
+     - **Handling Uncertain Outcomes (`unknown`):** If network timeout or socket disconnect occurs AFTER send request is initiated, update to `state = 'unknown'`. **Blind retries are strictly prohibited.**
+     - The system resolves `'unknown'` by calling `adapter.check_duplicate()`. If confirmed on remote system, marks `'confirmed'`. If unconfirmed or unsupported, diverts to `hitl_pending` for operator verification.
+  3. Comprehensive 10-Category Deterministic Routing Matrix:
      - `Bug Report` ➔ GitHub Issues (`github`)
+     - `Feature Request` ➔ GitHub Issues (`github`) with `type:feature` label
      - `Demo Request`, `Pricing Inquiry` ➔ CRM Leads (`crm`)
-     - `General Query` ➔ FreeScout Helpdesk (`freescout`)
+     - `General Query`, `Complaint` ➔ FreeScout Helpdesk (`freescout`)
+     - `Security/Account` ➔ Diverted to HITL Review Queue (`hitl_pending`) + Webhook Alert
      - `Billing Issue`, `Refund Request`:
-       - If `priority in ["Critical", "High"]` (e.g. urgent billing disputes, double-charging, and payment failures that pass Phase 1; explicit "chargeback" keywords are already diverted in Phase 1's `sensitive_skip` node) ➔ Webhook Alert (`webhook`)
-       - If `priority in ["Medium", "Low"]` (routine invoice/receipt query) ➔ FreeScout Helpdesk (`freescout`)
-     - Any unmapped category ➔ Fails closed to `manual_review` / `hitl_pending`.
-  4. Idempotency Key Specification: Every dispatch operation generates a deterministic `idempotency_key = f"{email_id}:{destination}:{action_type}"` to protect against duplicate dispatch.
-* **Done When:** Registry unit tests verify adapter discovery, routing logic across all categories, and fail-closed error handling.
+       - If `priority in ["Critical", "High"]` (urgent billing disputes, double-charging, payment failures that pass Phase 1) ➔ Webhook Alert (`webhook`)
+       - If `priority in ["Medium", "Low"]` (routine receipts, invoices) ➔ FreeScout Helpdesk (`freescout`)
+     - `Critical Outage` / Incident (production downtime reports) ➔ Webhook Alert (`webhook`)
+     - `Other` or unmapped category ➔ Fails closed directly to HITL (`hitl_pending`).
+  4. Operational Safety Rails:
+     - `dispatch.dry_run: true` default: logs structured payload, sets ledger to `'sent'` (simulated), sends zero network requests.
+     - Per-destination enable flags (`destinations.<name>.enabled: true/false`).
+     - Global kill switch (`dispatch.kill_switch: false`).
+     - Daily caps & circuit breaker (`destinations.<name>.daily_cap: int`).
+     - Dead-letter state: after 3 failed attempts, transitions to `dead_letter` in `p2_jobs` and triggers operational alert.
+     - Host allowlists & HTTPS-only per adapter (A13 security pattern).
+     - Privacy Invariant: Remote response bodies and customer text are NEVER logged.
+* **Done When:** Table-driven tests verify complete 10-category routing, outbox state transitions, 'unknown' timeout resolution without blind retries, dry-run simulation, daily caps, and kill-switch behavior.
 
-#### [P2-04] GitHub Issues Adapter for Engineering Bug Reports
+#### [P2-04] GitHub Issues Adapter with Output Hardening and Idempotency Verification
 * **Scope:** `utils/adapters/github_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_github_adapter.py`
-* **Problem:** Software bug reports need structured creation in GitHub with appropriate labels, urgency, and traceability without exposing customer PII or creating duplicate issues on network retries.
+* **Problem:** Automated GitHub issue creation without output hardening allows customer emails to inject arbitrary markdown, mention unintended GitHub users/teams, trigger cross-issue linking, or spoof deduplication markers.
 * **Solution:**
   1. Implement `GitHubAdapter` interfacing with GitHub REST API v3 (`POST /repos/{owner}/{repo}/issues`).
-  2. Format issue title `[Triage Bug] {masked_subject}` and markdown body containing triage summary, sender domain, and correlation marker `<!-- triage-id: {email_id} -->`.
-  3. Duplicate-Dispatch Protection: Check existing issues by correlation marker before retrying on timeout to ensure duplicate issues are never created.
-  4. Apply labels: `bug`, `triage:automated`, `urgency:{level}`.
-  5. Implement exponential backoff retry on HTTP 429/503.
-* **Done When:** Unit tests assert payload format, label mapping, offline stub behavior, idempotency check, and rate limit retries.
+  2. Output Hardening Pipeline:
+     - Customer text rendered inside markdown fenced code block (` ``` `).
+     - Neutralize `@mentions` (replace `@` with `@​` zero-width space or backtick) to prevent user/team notification spam.
+     - Neutralize `#issue` references (escape as `\#123`) to prevent accidental issue linking.
+     - Strip or escape HTML comments (`<!--`, `-->`) and raw HTML tags.
+  3. System-Owned Correlation Marker Isolation:
+     - Correlation marker `email_id` is stored in GitHub Labels (`triage-id:{email_id}`) or a distinct bot-signed metadata block.
+     - **The correlation marker MUST NOT live in customer-controlled text.**
+  4. Duplicate Detection & Remote Check:
+     - Before creating issue, searches GitHub API: `repo:{owner}/{repo} label:"triage-id:{email_id}"`. If match found, returns existing issue ID and sets outbox state to `'confirmed'` without re-creating.
+  5. Security Test for Forged Markers:
+     - Dedicated test injecting an adversarial customer email containing forged markers (e.g., `<!-- triage-id: stolen-uuid -->`, `label: triage-id: fake`). Asserts system ignores body content, uses genuine system marker, and avoids hijacking.
+  6. Apply standard labels: `bug` / `feature`, `triage:automated`, `urgency:{level}`.
+* **Done When:** Unit tests verify output hardening (mentions, issue links, code fences), label correlation marker isolation, duplicate search check, forged marker rejection, and 429/503 exponential backoff.
 
-#### [P2-05] FreeScout Helpdesk Adapter for General Customer Support
+#### [P2-05] FreeScout Helpdesk Adapter with Output Hardening and Thread Continuity
 * **Scope:** `utils/adapters/freescout_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_freescout_adapter.py`
-* **Problem:** General support tickets need ticket creation in helpdesk software while preserving conversation continuity across multiple replies.
+* **Problem:** Support tickets created in FreeScout must preserve conversation thread continuity across multiple replies while preventing HTML/script injection from customer emails.
 * **Solution:**
-  1. Implement `FreeScoutAdapter` interfacing with FreeScout API (`POST /api/conversations`).
-  2. Bind `thread_id` and `message_id` to conversation headers to append replies to existing tickets.
-  3. Map mailboxes based on product or department tags.
-* **Done When:** Unit tests verify conversation payload structure, thread continuity headers, and mock API interactions.
+  1. Implement `FreeScoutAdapter` interfacing with FreeScout REST API (`POST /api/conversations`).
+  2. Output Hardening:
+     - Customer body wrapped in sanitized HTML/fenced structure with HTML entities escaped (`&`, `<`, `>`, `"`, `'`).
+     - Strip `<script>`, `<iframe>`, `onload` attributes, and external stylesheets.
+  3. System-Owned Correlation Marker:
+     - Store `email_id` in FreeScout custom field or internal note, never in the customer message body.
+  4. Duplicate Detection:
+     - Query FreeScout conversations by `message_id` or custom field before creating a new ticket.
+  5. Thread Continuity:
+     - When `thread_id` matches an existing ticket, append the incoming email as a thread reply rather than creating a duplicate conversation.
+  6. Mailbox Mapping: Route based on configured department mailboxes (`support`, `billing_inquiries`).
+* **Done When:** Unit tests verify HTML sanitization, correlation marker placement in custom fields, thread reply appending, duplicate prevention, and mock API delivery.
 
-#### [P2-06] CRM Lead Ingestion Adapter for Sales Demo and Pricing Inquiries
+#### [P2-06] CRM Lead Ingestion Adapter with Output Hardening and Lead Scoring
 * **Scope:** `utils/adapters/crm_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_crm_adapter.py`
-* **Problem:** High-value enterprise pricing requests and demo inquiries must be captured as qualified leads in CRM systems without delay.
+* **Problem:** Inbound sales demo and pricing requests must be captured as structured leads without allowing formula injection (`=`, `+`, `-`, `@`) or duplicate lead creation.
 * **Solution:**
-  1. Implement `CRMAdapter` formatting leads for HubSpot / generic CRM webhooks.
-  2. Extract company domain from sender domain; calculate lead score (0-100) based on urgency and inquiry intent.
-  3. Deduplicate leads by sender domain within a configurable time window.
-* **Done When:** Unit tests verify lead scoring algorithm, domain parsing, payload schema, and mock delivery.
+  1. Implement `CRMAdapter` interfacing with CRM webhook / REST API (HubSpot or generic CRM).
+  2. Output Hardening & Formula Injection Protection:
+     - Sanitize all customer text fields; prefix formula triggers (`=`, `+`, `-`, `@`, `\t`, `\r`) with single quote (`'`) to protect CSV exports and spreadsheets against formula injection.
+     - Neutralize HTML and script tags.
+  3. Dynamic Domain & Lead Scoring:
+     - Derive company domain from `sender_email` (filtering out public domains like `gmail.com`, `yahoo.com`).
+     - Calculate lead score (0-100) based on inquiry category (`Demo Request` = 80, `Pricing Inquiry` = 70), urgency (`High` = +20), and company domain presence.
+  4. Deduplication:
+     - Check CRM for existing lead by `email_id` custom property or sender domain within a 24-hour sliding window before creating contact or deal.
+* **Done When:** Unit tests verify formula injection neutralization, domain extraction, lead score calculation, deal deduplication, and mock CRM ingestion.
 
-#### [P2-07] Webhook Alert Adapter for Urgent Billing and Refund Disputes
+#### [P2-07] Webhook Alert Adapter with HMAC Signing for Urgent Billing and Outage Alerts
 * **Scope:** `utils/adapters/webhook_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_webhook_adapter.py`
-* **Problem:** Urgent billing disputes, double-charging, or payment failures that pass Phase 1 (since explicit "chargeback" keywords are already diverted in Phase 1's `sensitive_skip` node) require immediate notification to on-call or finance teams without duplicate alert spamming on retries.
+* **Problem:** Urgent billing disputes (double-charging, payment failures) and critical production outages require instantaneous notification to finance or on-call channels with cryptographic authenticity and replay protection.
 * **Solution:**
   1. Implement `WebhookAdapter` delivering cryptographically signed HTTP POST webhooks.
-  2. Compute HMAC-SHA256 signature in `X-Signature-SHA256` header using shared secret.
-  3. Include `Idempotency-Key: {email_id}:{destination}:alert` and `X-Correlation-ID: {email_id}` headers to protect receiving webhook services from processing duplicates.
-  4. Implement retry policy with exponential backoff and jitter.
-* **Done When:** Unit tests verify HMAC signature computation, idempotency header inclusion, payload structure, network timeout handling, and retry policy.
+  2. Trigger Routing:
+     - Urgent billing disputes, double-charging, and payment failures passing Phase 1 (explicit "chargeback" keywords already diverted in Phase 1's `sensitive_skip`).
+     - Critical production outages and severe infrastructure failure reports (`category == "Other" | "General Query"` with `priority == "Critical"`).
+  3. Cryptographic Authenticity & Security Headers:
+     - Compute HMAC-SHA256 signature in `X-Signature-SHA256` computed over raw request body using shared secret (`WEBHOOK_SECRET_KEY_ENV`).
+     - Include `Idempotency-Key: {email_id}:{destination}:alert` and `X-Correlation-ID: {email_id}` headers.
+     - Include timestamp header `X-Timestamp-ISO` to prevent replay attacks beyond 5-minute tolerance.
+  4. Output Hardening: Escape JSON fields to prevent JSON payload injection.
+  5. Retry Policy: Exponential backoff with jitter on 5xx; fail-closed on 4xx.
+* **Done When:** Unit tests verify HMAC signature computation, idempotency header inclusion, replay timestamp validation, JSON payload escaping, and retry backoff.
 
 #### [P2-08] End-to-End LangGraph Phase 2 Graph Compilation and Dispatch Handoff
 * **Scope:** `pipeline.py`, `tests/test_p2_pipeline_e2e.py`
-* **Problem:** Phase 1 and Phase 2 nodes must be linked within LangGraph with clean conditional edges, supporting both unified execution and standalone worker execution without re-running Phase 1.
+* **Problem:** Phase 1 and Phase 2 nodes must integrate into a unified LangGraph workflow while supporting standalone background worker execution that consumes pre-approved database records without re-running Phase 1.
 * **Solution:**
-  1. Extend `create_triage_pipeline()` to accept `phase2: bool = False`. When `True`, chains Node 05 (`gatekeeper`) → Node 06 (`classifier`) → Node 07 (`hitl_queue`) → Node 08 (`dispatcher`).
-  2. Implement standalone Phase 2 sub-graph `create_phase2_worker_pipeline()` starting directly at Node 06 (Classifier), consuming database-claimed approved records without re-running Gatekeeper.
-  3. Add conditional routing edges on `classification.confidence`, `hitl_status`, and `dispatch_target`.
-  4. Harmonize returned `TriageState` fields with atomic SQLite updates in `db/database.py`.
-* **Done When:** Integration tests execute approved emails through the full LangGraph Phase 2 pipeline to adapter mock stubs with all state fields correctly populated.
+  1. Unified Pipeline Mode (`create_triage_pipeline(phase2=True)`):
+     - Chains Node 05 (`gatekeeper`) ➔ Node 06 (`classifier`) ➔ Node 07 (`hitl_queue`) ➔ Node 08 (`dispatcher`).
+  2. Standalone Worker Pipeline Mode (`create_phase2_worker_pipeline()`):
+     - Standalone graph starting directly at Node 06 (`classifier`), consuming database-claimed records from `p2_jobs` without re-running Nodes 01–05.
+  3. Conditional Edges:
+     - `classifier` ➔ conditional routing to `hitl_queue` (if confidence < threshold or frustrated/high) or `dispatcher`.
+     - `dispatcher` ➔ conditional routing to destination adapters based on category, priority, and dry-run flag.
+  4. SQLite State Synchronization:
+     - Persists Phase 2 metadata to `p2_jobs` and `p2_dispatch_log`.
+     - Strictly enforces Zero-Touch Policy on `email_triage`.
+* **Done When:** E2E integration tests verify both unified and standalone execution flows, conditional edge traversal, and proper state persistence across SQLite tables.
 
-#### [P2-09] Persistent Phase 2 Queue Worker and Background Poller
+#### [P2-09] Persistent Phase 2 Queue Worker, Atomic Claiming, and Crash Recovery
 * **Scope:** `scripts/phase2_worker.py`, `db/database.py`, `tools/run_worker.sh`, `tests/test_p2_worker.py`
-* **Problem:** In production, triage classification and downstream dispatching operate asynchronously from mailbox ingestion, requiring atomic batch claiming, worker crash recovery, and double-dispatch prevention.
+* **Problem:** In production, Phase 2 runs as an asynchronous background service. Multiple workers polling the database must never claim the same email concurrently, and crashed workers must not leave jobs permanently stuck.
 * **Solution:**
-  1. Implement continuous polling worker querying atomic `db.claim_gatekeeper_approved(batch_size=10, worker_id=...)`.
-  2. Atomic Batch Claiming: Uses single SQL transaction setting `status = 'processing_p2'`, `worker_id = ?`, `updated_at = CURRENT_TIMESTAMP`, completely preventing multi-worker race conditions.
-  3. Stale Job Recovery: Periodically resets abandoned jobs (`status = 'processing_p2'` older than 15 minutes) back to `status = 'done'` for safe re-claiming.
-  4. Terminal State Transition: Upon successful dispatch or HITL diversion, marks `status = 'p2_done'` and `routing_status = 'dispatched'` (or `'hitl_pending'`), removing it from the polling pool permanently.
-  5. Add graceful shutdown handling on SIGINT/SIGTERM.
-* **Done When:** Concurrency tests verify multi-worker execution processes records without duplicate claims, crashed worker jobs recover safely, and terminal status updates cleanly.
+  1. Intake Ingestion from Phase 1:
+     - Worker identifies records in `email_triage` with `status = 'done'` and `routing_status = 'gatekeeper_approved'` that lack corresponding rows in `p2_jobs`, and inserts them into `p2_jobs` with `state = 'unclaimed'`.
+  2. Atomic Batch Claiming Query:
+     - Implements `db.claim_p2_jobs(batch_size=10, worker_id=...)` executing a single atomic SQLite transaction:
+       ```sql
+       UPDATE p2_jobs
+       SET state = 'claimed',
+           worker_id = ?,
+           claimed_at = CURRENT_TIMESTAMP,
+           attempts = attempts + 1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE email_id IN (
+           SELECT email_id FROM p2_jobs
+           WHERE state IN ('unclaimed', 'hitl_resolved')
+           ORDER BY created_at ASC
+           LIMIT ?
+       );
+       ```
+     - Guarantees zero race conditions across multiple worker processes.
+  3. Crash Recovery & Stale Claim Sweeper:
+     - Stale claims older than 15 minutes (`state IN ('claimed', 'dispatching')` with `claimed_at < 15 minutes ago`) are automatically reset back to `state = 'unclaimed'` for re-processing.
+  4. Dead-Letter Queue:
+     - If `attempts > max_dispatch_retries` (default 3), transitions to `state = 'dead_letter'` with `error_message`, alerts operators, and halts automated retries.
+  5. Graceful Shutdown: Handles SIGINT and SIGTERM cleanly, finishing in-flight dispatches before exiting.
+  6. Phase 1 Preservation Verification: Confirms `email_triage` row remains untouched.
+* **Done When:** Concurrency tests verify multi-worker race conditions result in 0 duplicate claims, crashed workers recover within 15 minutes, and dead-letter transitions succeed without touching `email_triage`.
 
-#### [P2-10] Phase 2 Synthetic Benchmark Dataset and Validation Suite
-* **Scope:** `data/benchmark_phase2.json`, `main.py`, `tests/test_p2_benchmark.py`
-* **Problem:** Phase 2 requires comprehensive, deterministic benchmark validation covering all categories, urgency levels, and adapter routes.
+#### [P2-10] Phase 2 Synthetic Benchmark Dataset, Failure-Injection Suite, and Adapter Contracts
+* **Scope:** `data/benchmark_phase2.json`, `main.py`, `tests/test_p2_benchmark.py`, `tests/test_p2_failure_injection.py`, `tests/test_p2_adapter_contracts.py`, `scripts/*_smoke_test.py`
+* **Problem:** Phase 2 requires thorough benchmark validation covering all categories, edge cases, failure scenarios, and contract compliance without making live network calls in CI.
 * **Solution:**
-  1. Create 50 synthetic test emails (10 GitHub bugs, 10 FreeScout tickets, 10 CRM leads, 10 Billing webhooks, 10 HITL reviews).
-  2. Add `--phase2` CLI flag to `main.py`.
-  3. Assert 100% of expected fields across all 50 scenarios in offline mock mode.
-* **Done When:** Benchmark runner executes `main.py --phase2` with 50/50 scenarios passing in offline mock mode.
+  1. Synthetic Benchmark Dataset (`data/benchmark_phase2.json`):
+     - 50 diverse email scenarios evenly covering all 10 categories, emotional states (`Frustrated`, `Angry`, `Calm`), priority levels, and edge cases.
+  2. Failure-Injection Test Suite (`tests/test_p2_failure_injection.py`):
+     - **Timeout after successful send:** Remote API receives payload, but client times out. Asserts ledger state is marked `'unknown'`, blind retry is avoided, and remote check confirms creation.
+     - **Concurrent worker claims:** Multiple threads/processes claiming the same queue simultaneously. Asserts zero dual claims.
+     - **Worker process killed mid-dispatch:** Simulates SIGKILL during dispatch. Asserts stale sweeper recovers job cleanly.
+     - **Forged marker email:** Inbound email containing spoofed correlation markers. Asserts system rejects forged marker.
+  3. Adapter Contract Tests (`tests/test_p2_adapter_contracts.py`):
+     - Recorded fixtures verifying JSON schemas, headers, and error responses for GitHub, FreeScout, CRM, and Webhook adapters.
+  4. Sandbox Smoke Test Scripts:
+     - Standalone scripts (`scripts/github_smoke_test.py`, `scripts/freescout_smoke_test.py`, `scripts/crm_smoke_test.py`, `scripts/webhook_smoke_test.py`) for manual end-to-end verification against developer sandbox accounts using explicit `--live` flag.
+  5. Network Isolation: `tests/conftest.py` pytest network egress guard remains active across all automated test suites.
+* **Done When:** Benchmark test passes 50/50 scenarios; failure-injection tests pass; contract tests verify all payloads; network egress guard confirms zero unmocked network calls.
 
-#### [P2-11] Phase 2 Documentation, Architecture Diagrams, and Runbooks
-* **Scope:** `README.md`, `ROADMAP.md`, `docs/architecture_phase2.md`
-* **Problem:** Operators and developers need clear runbooks, API documentation, and architecture diagrams for Phase 2.
+#### [P2-11] Complete Phase 2 Documentation, Architecture Diagrams, and Operator Runbooks
+* **Scope:** `README.md`, `ROADMAP.md`, `docs/architecture_phase2.md`, `docs/hitl_runbook.md`
+* **Problem:** Operators, developers, and reviewers require comprehensive documentation, state diagrams, and runbooks to manage Phase 2 in production.
 * **Solution:**
-  1. Update `README.md` with Phase 2 capabilities, environment variables, adapter documentation, and benchmark metrics.
-  2. Add mermaid sequence and state diagrams for Phase 2.
-  3. Document operational runbooks for HITL review operators.
-* **Done When:** Documentation accuracy pass verifies all documented CLI commands, environment variables, and test counts.
+  1. Update `README.md` with Phase 2 features, architecture overview, configuration options, and benchmark results.
+  2. Create `docs/architecture_phase2.md` with complete Mermaid state transitions, data flows, and outbox ledger diagrams.
+  3. Create `docs/hitl_runbook.md` providing step-by-step instructions for support operators using `scripts/hitl_cli.py` to review, approve, override, and reconcile triage queues.
+  4. Verify all documented environment variables, CLI options, and test metrics against the codebase.
+* **Done When:** Documentation accuracy pass verifies that every diagram, command, and configuration option in the documentation matches the code.
+
+#### [P2-12] Gmail Pub/Sub Mailbox Connector, Auth Lifecycle, and Original Text Re-fetch
+* **Scope:** `utils/mailbox/gmail_connector.py`, `scripts/renew_mailbox_watch.py`, `config.yaml`, `.env.example`, `tests/test_p2_mailbox_connector.py`
+* **Problem:** Automated triage requires an ingestion bridge to import live emails from enterprise mailboxes without polling delays, pass email authentication metadata, and re-fetch original unmasked text for authorized downstream destinations when configured.
+* **Solution:**
+  1. Mailbox Intake Module (`utils/mailbox/gmail_connector.py`):
+     - Implements `GmailConnector` using official Google API client with least-privilege OAuth 2.0 read-only scopes (`https://www.googleapis.com/auth/gmail.readonly`).
+  2. Cloud Pub/Sub Watch Setup & Automated Renewal:
+     - Sets up mailbox push notifications via `users.watch()`.
+     - Implements `scripts/renew_mailbox_watch.py` for automated renewal cron (Gmail watches expire after 7 days).
+  3. Incremental History Sync:
+     - Fetches new messages using `users.history.list` and `historyId`, preventing duplicate intakes.
+     - Parses MIME structures into pipeline intake format.
+  4. SPF / DKIM / DMARC Header Verification:
+     - Extracts `Authentication-Results` and `Received-SPF` headers from raw email.
+     - Passes authentication status (`auth_status: pass/fail/none`) into pipeline state, closing the known sender-spoofing limitation of A5.
+  5. Authorized Original-Text Re-fetch:
+     - Implements `refetch_original_email(message_id: str) -> dict` callable ONLY by downstream adapters where `use_masked_text_only: false`, ensuring raw PII is never stored in SQLite.
+  6. Modularity & Out-of-Scope Statement:
+     - Defines abstract `BaseMailboxConnector`. If client environment utilizes Microsoft 365, IMAP, or external webhook push, the connector can be substituted without altering pipeline logic.
+* **Done When:** Unit tests verify OAuth credential handling, Pub/Sub message parsing, history sync, SPF/DKIM header extraction, and original text re-fetch with mock Gmail API.
