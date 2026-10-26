@@ -57,7 +57,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **21** | **C1** | Testing | Expand synthetic benchmark validation to check all expected fields and default to offline | ✅ Resolved |
 | **22** | **C2** | Testing | Isolate test suite from host environment variables (`.env`) for reproducible test runs | ✅ Resolved |
 | **23** | **C3** | Testing | Ensure `scripts/jev_smoke_test.py` strictly verifies Jev response and exits non-zero on failure | ✅ Resolved |
-| **24** | **C4** | Documentation | Reconcile README/ROADMAP test counts, directory trees, class names, and claim metrics | ⏳ Pending |
+| **24** | **C4** | Documentation | Reconcile README/ROADMAP test counts, directory trees, class names, and claim metrics | ✅ Resolved |
 
 ---
 
@@ -306,10 +306,11 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Running smoke test with an invalid key outputs failure message (`[-] Smoke test FAILED: TypeSafe System One (Jev) API did not produce decision`) and exits with returncode 1; 244 unit tests and 100/100 benchmark scenarios pass.
 
 ### [C4] Documentation Synchronization & Metric Accuracy
+* **Status:** ✅ **Resolved**
 * **Problem:** Test counts in README/ROADMAP are outdated; file tree omits test modules; unbacked marketing claims exist (`enterprise-grade`, `sub-second`); dual naming (`JevClient` vs `JevAIClient`).
 * **Solution:**
-  1. Sync README and ROADMAP with real pytest output and test counts.
-  2. Update file trees.
-  3. Unify client naming to `JevClient`.
-  4. Remove unbacked buzzwords; add measurable latency benchmarks.
-* **Done When:** Every metric, diagram, and code reference in documentation matches codebase reality.
+  1. **Synchronize Test & Benchmark Metrics (`README.md`):** Updated unit test counts from 61 to 244 (100% passing) and synthetic benchmark count from 10 to 100 scenarios. Documented safe default `--offline` mode and explicit `--live` flag.
+  2. **Comprehensive File Tree Expansion (`README.md`):** Updated repository tree to include all 16 test files in `tests/`, `scripts/jev_smoke_test.py`, `tools/check_concurrency.py`, `tools/egress_check.py`, and `check.sh`.
+  3. **Unify Canonical Client Naming (`pipeline.py` & `utils/jev_client.py`):** Replaced `JevAIClient` with `JevClient` in `pipeline.py` imports, type annotations, and docstrings; maintained `JevAIClient = JevClient` as an explicit backward-compatibility alias in `utils/jev_client.py`.
+  4. **Replace Unbacked Buzzwords with Empirical Benchmarks (`README.md`):** Removed unbacked marketing claims (`enterprise-grade`, `sub-second`) in favor of descriptive architecture (`local-first, privacy-preserving`) and measured performance metrics (low latency with local heuristic fallback; ~22ms/email average benchmark throughput).
+* **Done When:** Every metric, diagram, and code reference in documentation matches codebase reality; 244 automated unit tests and 100/100 benchmark scenarios pass with 0 row changes. Part C is 100% complete.

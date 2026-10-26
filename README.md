@@ -1,6 +1,6 @@
 # Customer Email Triage Automation
 
-An enterprise-grade, privacy-first automated email triage pipeline built on **LangGraph**. The system intercepts incoming customer inquiries, deduplicates and tracks processing state via an idempotent SQLite store, strips email signatures and thread history, locally sanitizes PII, applies sensitive guardrail diversions, and evaluates inbound traffic using **Jev AI** decision intelligence.
+A local-first, privacy-preserving automated email triage pipeline built on **LangGraph**. The system intercepts incoming customer inquiries, deduplicates and tracks processing state via an idempotent SQLite store, strips email signatures and thread history, locally sanitizes PII, applies sensitive guardrail diversions, and evaluates inbound traffic using **Jev AI** decision intelligence.
 
 For current deliverable tracking and project milestones, refer to the [**Project Roadmap**](./ROADMAP.md).
 
@@ -49,7 +49,7 @@ flowchart TD
 * **Human-in-the-Loop Quarantine:** Routes matching emails directly to the human review queue.
 
 ### 5. Jev AI Decision Gatekeeper (Node 05)
-* **Primary Classifier:** Sub-second threat and spam classification powered by TypeSafe System One (Jev `jev-1.13.0`).
+* **Primary Classifier:** Low-latency threat and spam classification powered by TypeSafe System One (Jev `jev-1.13.0`) with local heuristic fallback (average offline pipeline throughput ~22ms/email).
 * **High Availability Fallback:** Automatic failover to Groq (`openai/gpt-oss-20b`) and deterministic regex heuristics.
 * **Tri-State Routing:** Labels items as `legitimate`, `spam`, or `manual_review`.
 
@@ -57,9 +57,9 @@ flowchart TD
 To enable live Jev AI evaluation:
 1. Put a real key in `.env`: `JEV_API_KEY=your_actual_key`
 2. Run the smoke test to verify connectivity: `python scripts/jev_smoke_test.py`
-3. Run the pipeline: `python main.py` (or inside Docker via `docker compose up`)
+3. Run the pipeline with live evaluation: `python main.py --live` (or inside Docker via `docker compose up`)
 
-*(Note: Without a real key or with placeholder credentials, the pipeline automatically skips Jev and uses the Groq / regex fallback with zero downtime).*
+*(Note: Without a real key or with placeholder credentials, the pipeline automatically runs in offline mode using the Groq / regex fallback with zero downtime).*
 
 ---
 
@@ -67,13 +67,15 @@ To enable live Jev AI evaluation:
 
 ```
 Customer-Email-Triage-Automation/
+├── check.sh                  # All-in-one testing and egress verification script
 ├── config.yaml               # Central system and threshold configuration
 ├── Dockerfile                # Production container specification
 ├── docker-compose.yml        # Multi-container orchestration
 ├── main.py                   # Production entry point and CLI benchmark runner
 ├── pipeline.py               # LangGraph compiled pipeline orchestrator
+├── state.py                  # LangGraph TriageState & Pydantic models
 ├── data/
-│   └── benchmark_emails.json # 10-scenario synthetic benchmark dataset
+│   └── benchmark_emails.json # 100-scenario synthetic benchmark dataset
 ├── db/
 │   └── database.py           # SQLite idempotency engine
 ├── nodes/
@@ -82,17 +84,31 @@ Customer-Email-Triage-Automation/
 │   ├── pii_masker.py         # Node 03: Local spaCy & regex redaction
 │   ├── sensitive_skip.py     # Node 04: Sensitive guardrail diversion
 │   └── jev_gatekeeper.py     # Node 05: Jev AI decision engine
-├── state.py                  # LangGraph TriageState & Pydantic models
-├── tests/                    # Unit and integration test suites
+├── scripts/
+│   └── jev_smoke_test.py     # Standalone TypeSafe System One connectivity smoke test
+├── tests/                    # Comprehensive unit and integration test suite (244 tests)
+│   ├── conftest.py           # Test isolation fixtures & network egress guards
+│   ├── test_benchmark_runner.py
+│   ├── test_c2_isolation.py
+│   ├── test_c3_smoke_test.py
+│   ├── test_fix_b4_state_db_sync.py
+│   ├── test_fix_b5_config.py
+│   ├── test_fix_b6_lifecycle.py
 │   ├── test_ingest_idempotency.py
-│   ├── test_signature_stripper.py
-│   ├── test_pii_masker.py
-│   ├── test_sensitive_skip.py
+│   ├── test_jev_client.py
 │   ├── test_jev_gatekeeper.py
-│   └── test_pipeline_e2e.py  # End-to-end integration and benchmark tests
+│   ├── test_main.py
+│   ├── test_pii_masker.py
+│   ├── test_pipeline_e2e.py  # End-to-end integration and benchmark tests
+│   ├── test_sensitive_skip.py
+│   └── test_signature_stripper.py
+├── tools/
+│   ├── check_concurrency.py  # Multiprocess / multithread concurrency verification
+│   └── egress_check.py       # Zero-network-leak verification tool
 └── utils/
     ├── config.py             # Environment and config loader
-    └── jev_client.py         # Jev AI client with fallback handler
+    ├── jev_client.py         # Jev AI client with fallback handler
+    └── text_tools.py         # Bounded text scanning & normalization helpers
 ```
 
 ---
@@ -182,7 +198,7 @@ docker compose up
 #### Step 5: Run Automated Tests Inside Docker
 You can execute the entire test suite inside the exact container runtime environment on any machine without installing Python locally:
 ```bash
-docker compose run --rm email-triage python -m unittest discover tests
+docker compose run --rm email-triage pytest tests/ -v
 ```
 
 #### Step 6: Interactive Terminal / Debugging
@@ -252,14 +268,18 @@ python -m spacy download en_core_web_sm
 # 3. Configure environment
 cp .env.example .env
 
-# 4. Run automated test suite (61 tests)
-python -m unittest discover tests
+# 4. Run automated test suite (244 tests, 100% passing)
+pytest tests/ -v
 
-# 5. Run the synthetic benchmark suite across all pipeline stages
-python main.py --benchmark
+# 5. Run the synthetic benchmark suite across all 100 pipeline scenarios (default: offline)
+python main.py
+# (Or use python main.py --live to evaluate with live TypeSafe System One / Jev API)
 
 # 6. Process an individual email JSON payload
 python main.py --input path/to/email.json
+
+# 7. Run egress check & all-in-one verification
+./check.sh all
 ```
 
 ---

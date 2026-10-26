@@ -726,7 +726,7 @@ class JevClient:
         }
 
 
-# Convenient alias for architectural consistency
+# Backward-compatibility alias (JevClient is the canonical class name)
 JevAIClient = JevClient
 
 _DEFAULT_CLIENT: Optional[JevClient] = None

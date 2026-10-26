@@ -28,7 +28,7 @@ from nodes import (
 )
 from state import TriageState
 from utils.config import get_config
-from utils.jev_client import JevAIClient
+from utils.jev_client import JevClient
 
 logger = logging.getLogger("triage.pipeline")
 
@@ -96,7 +96,7 @@ def prepare_initial_state(payload: Dict[str, Any]) -> TriageState:
 def create_triage_pipeline(
     db: Optional[TriageDatabase] = None,
     config: Optional[Dict[str, Any]] = None,
-    client: Optional[JevAIClient] = None,
+    client: Optional[JevClient] = None,
     offline: bool = False,
 ) -> CompiledStateGraph:
     """Builds and compiles the LangGraph StateGraph for email triage up to Gatekeeper.
@@ -104,7 +104,7 @@ def create_triage_pipeline(
     Args:
         db: Optional TriageDatabase instance.
         config: Optional system configuration dict.
-        client: Optional JevAIClient instance.
+        client: Optional JevClient instance.
         offline: Whether pipeline is running in offline mode.
 
     Returns:
@@ -117,7 +117,7 @@ def create_triage_pipeline(
     builder = StateGraph(TriageState)
 
     if client is None and config is not None:
-        client = JevAIClient(config=config)
+        client = JevClient(config=config)
 
     # 1. Register Nodes with bound dependencies
     builder.add_node("ingest", lambda state: ingest_node(state, db=db))
@@ -180,7 +180,7 @@ def run_triage_pipeline(
     pipeline: Optional[CompiledStateGraph] = None,
     db: Optional[TriageDatabase] = None,
     config: Optional[Dict[str, Any]] = None,
-    client: Optional[JevAIClient] = None,
+    client: Optional[JevClient] = None,
     offline: bool = False,
 ) -> TriageState:
     """Executes an email payload through the triage pipeline and returns final state.
@@ -190,7 +190,7 @@ def run_triage_pipeline(
         pipeline: Optional pre-compiled CompiledStateGraph. If None, created dynamically.
         db: Optional TriageDatabase instance.
         config: Optional configuration dictionary.
-        client: Optional JevAIClient instance.
+        client: Optional JevClient instance.
         offline: Whether pipeline is running in offline mode.
 
     Returns:
