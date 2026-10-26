@@ -31,13 +31,9 @@ def ingest_node(
         db = TriageDatabase()
 
     # Load system settings
-    try:
-        config = load_config()
-        stale_minutes = config.get("system", {}).get("idempotency_stale_minutes", 10)
-        max_retries = config.get("system", {}).get("max_dispatch_retries", 3)
-    except Exception:
-        stale_minutes = 10
-        max_retries = 3
+    config = load_config()
+    stale_minutes = config.get("system", {}).get("idempotency_stale_minutes", 10)
+    max_retries = config.get("system", {}).get("max_dispatch_retries", 3)
 
     # Normalize identifiers
     raw_email_id = state.get("email_id") or state.get("message_id")

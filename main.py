@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from db.database import TriageDatabase
 from pipeline import create_triage_pipeline, run_triage_pipeline
-from utils.config import load_config
+from utils.config import load_config, ConfigError
 
 # Configure structured logging
 logging.basicConfig(
@@ -242,6 +242,20 @@ def process_single_email(json_path: str, offline: bool = False) -> None:
 
 def main() -> None:
     """CLI entrypoint."""
+    # ── B5: Fail-fast config load (first thing, before any pipeline work) ────
+    try:
+        config = load_config()
+    except FileNotFoundError as exc:
+        print(f"[-] Configuration error: {exc}", file=sys.stderr)
+        sys.exit(2)
+    except ConfigError as exc:
+        print(f"[-] Configuration error: {exc}", file=sys.stderr)
+        sys.exit(2)
+    except Exception as exc:
+        print(f"[-] Configuration error: {exc}", file=sys.stderr)
+        sys.exit(2)
+    # ── End B5 ───────────────────────────────────────────────────────────────
+
     parser = argparse.ArgumentParser(
         description="Customer Email Triage Automation — Ingestion to Gatekeeper Pipeline",
     )

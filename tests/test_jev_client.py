@@ -16,6 +16,50 @@ from utils.config import validate_config
 from utils.jev_client import JevClient, normalize_result
 
 
+def _get_valid_full_config():
+    return {
+        "system": {
+            "database_path": "triage.db",
+            "idempotency_stale_minutes": 10,
+            "max_dispatch_retries": 3,
+            "audit_log_enabled": True,
+            "persist_masked_text": True,
+        },
+        "privacy": {
+            "spacy_model": "en_core_web_sm",
+            "tech_terms_file": "config/tech_terms.txt",
+            "default_phone_region": "US",
+            "tech_context_words": ["pipeline", "job"],
+            "sensitive_keywords": ["subpoena"],
+            "max_code_density": 4,
+        },
+        "security": {
+            "regex_scan_head": 10000,
+            "regex_scan_tail": 2000,
+        },
+        "gatekeeper": {
+            "timeout_seconds": 5.0,
+            "max_retries": 2,
+            "api_key_env": "JEV_API_KEY",
+            "fallback_model": "openai/gpt-oss-20b",
+            "groq_api_key_env": "GROQ_API_KEY",
+            "jev": {
+                "model": "jev-1.13.0",
+                "api_url": "https://api.typesafe.ai/v1/systemone",
+                "hi_threshold": 0.85,
+                "lo_threshold": 0.15,
+                "max_body_chars": 20000,
+            },
+        },
+        "llm": {
+            "model": "openai/gpt-oss-120b",
+            "temperature": 0.1,
+            "confidence_threshold": 0.70,
+            "groq_api_key_env": "GROQ_API_KEY",
+        },
+    }
+
+
 class TestJevClient(unittest.TestCase):
     def setUp(self):
         self.mock_config = {
@@ -179,29 +223,24 @@ class TestJevClient(unittest.TestCase):
 
     def test_config_threshold_validation(self):
         """Verifies 0.0 < LO < HI < 1.0 constraint validation on configuration."""
+        import copy
         # Valid config
-        valid_cfg = {
-            "gatekeeper": {
-                "jev": {"lo_threshold": 0.15, "hi_threshold": 0.85}
-            }
-        }
+        valid_cfg = _get_valid_full_config()
+        valid_cfg["gatekeeper"]["jev"]["lo_threshold"] = 0.15
+        valid_cfg["gatekeeper"]["jev"]["hi_threshold"] = 0.85
         validate_config(valid_cfg)
 
         # Invalid: LO >= HI
-        inverted_cfg = {
-            "gatekeeper": {
-                "jev": {"lo_threshold": 0.85, "hi_threshold": 0.15}
-            }
-        }
+        inverted_cfg = copy.deepcopy(valid_cfg)
+        inverted_cfg["gatekeeper"]["jev"]["lo_threshold"] = 0.85
+        inverted_cfg["gatekeeper"]["jev"]["hi_threshold"] = 0.15
         with self.assertRaises(ValueError):
             validate_config(inverted_cfg)
 
         # Invalid: HI >= 1.0
-        out_of_bounds_cfg = {
-            "gatekeeper": {
-                "jev": {"lo_threshold": 0.10, "hi_threshold": 1.50}
-            }
-        }
+        out_of_bounds_cfg = copy.deepcopy(valid_cfg)
+        out_of_bounds_cfg["gatekeeper"]["jev"]["lo_threshold"] = 0.10
+        out_of_bounds_cfg["gatekeeper"]["jev"]["hi_threshold"] = 1.50
         with self.assertRaises(ValueError):
             validate_config(out_of_bounds_cfg)
 

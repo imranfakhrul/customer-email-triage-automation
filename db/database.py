@@ -28,11 +28,8 @@ class TriageDatabase:
             db_path: Path to the SQLite database file. If None, loaded from config.yaml.
         """
         if db_path is None:
-            try:
-                config = load_config()
-                db_path = config.get("system", {}).get("database_path", "triage.db")
-            except Exception:
-                db_path = "triage.db"
+            config = load_config()
+            db_path = config["system"]["database_path"]
 
         self.db_path = db_path
         parent = Path(self.db_path).parent
@@ -491,11 +488,8 @@ class TriageDatabase:
         if config is not None:
             persist_text = config.get("system", {}).get("persist_masked_text", True)
         else:
-            try:
-                cfg = load_config()
-                persist_text = cfg.get("system", {}).get("persist_masked_text", True)
-            except Exception:
-                persist_text = True
+            cfg = load_config()
+            persist_text = cfg.get("system", {}).get("persist_masked_text", True)
 
         # Rule: masked_subject and masked_body persisted ONLY for gatekeeper_approved and manual_review
         if routing_status not in ("gatekeeper_approved", "manual_review") or not persist_text:

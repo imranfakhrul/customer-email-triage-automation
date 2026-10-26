@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[B5] Fail-Fast Config Loader & Environment Variable Overrides** (or **[A12] Container Security & Environment File Locations**)
+**Next up:** **[B6] Optimize Process Lifecycle & Eliminate Repeated Work** (or **[A12] Container Security & Environment File Locations**)
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -52,7 +52,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **16** | **B2** | Correctness | Remove generic business words from offline spam heuristics; route threats to manual review | ✅ Resolved |
 | **17** | **B3** | Correctness | Tune sensitive keywords to intent phrases and establish single source in `config.yaml` | ✅ Resolved |
 | **18** | **B4** | Correctness | Harmonize returned state with SQLite database and persist clean text for Phase 2 | ✅ Resolved |
-| **19** | **B5** | Correctness | Resolve config relative to root, fail fast on invalid YAML, and honor environment overrides | ⏳ Pending |
+| **19** | **B5** | Correctness | Resolve config relative to root, fail fast on invalid YAML, and honor environment overrides | ✅ Resolved |
 | **20** | **B6** | Performance | Preload models and precompile regexes once at startup to eliminate per-email overhead | ⏳ Pending |
 | **21** | **C1** | Testing | Expand synthetic benchmark validation to check all expected fields and default to offline | ⏳ Pending |
 | **22** | **C2** | Testing | Isolate test suite from host environment variables (`.env`) for reproducible test runs | ⏳ Pending |
@@ -251,12 +251,15 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** Unit tests verify returned state and database row match identically (`gatekeeper_approved` + `done`), DB write failures route to `persist_failed` / `failed` and stop router, schema migration preserves existing rows, and 100/100 benchmark scenarios pass.
 
 ### [B5] Fail-Fast Config Loader & Environment Variable Overrides
-* **Problem:** `config.yaml` is resolved relative to working directory, causing failures when run from subdirectories. Config errors are caught and swallowed with empty `{}`. Certain env vars are ignored.
+* **Status:** ✅ **Resolved**
+* **Problem:** `config.yaml` was resolved relative to working directory, causing failures when run from subdirectories. Config errors and missing files were caught and silently swallowed with empty `{}` across database, ingest, PII masking, sensitive-skip, and Jev client modules. Certain environment variable overrides were ignored.
 * **Solution:**
-  1. Resolve `config.yaml` relative to project root (`BASE_DIR`).
-  2. Load and validate config once at startup; fail fast with informative errors.
-  3. Apply environment variable overrides for `DATABASE_PATH`, `IDEMPOTENCY_STALE_MINUTES`, and `MAX_DISPATCH_RETRIES`.
-* **Done When:** Invalid configuration causes immediate process exit with clear error; config loads reliably from any execution directory.
+  1. **Root-Anchored Paths (`utils/config.py`):** Defined `BASE_DIR = Path(__file__).resolve().parent.parent` and `DEFAULT_CONFIG_PATH = BASE_DIR / "config.yaml"`. Any relative config path argument or relative path within config (`system.database_path`, `privacy.tech_terms_file`) is resolved against `BASE_DIR`.
+  2. **Comprehensive Validation & ConfigError (`utils/config.py`):** Defined `ConfigError(ValueError)`. Added strict section and field validation rejecting unknown keys (typo protection), disallowing booleans for integers, enforcing boundary rules (e.g. `0 < lo < hi < 1.0`, `0 < confidence <= 1.0`, `0 <= temp <= 2.0`), and formatting YAML errors without leaking file content or secrets.
+  3. **Runtime Environment Overrides (`utils/config.py`):** Applied `DATABASE_PATH`, `IDEMPOTENCY_STALE_MINUTES` (`int > 0`), and `MAX_DISPATCH_RETRIES` (`int >= 0`) with strict precedence (`env > config.yaml`). Empty or unset values preserve config defaults; invalid values raise `ConfigError` naming the variable. Documented precedence in `.env.example` and `README.md`.
+  4. **Eliminated All Silent Swallows:** Removed all 13 `try ... load_config() ... except Exception: config = {}` and fallback swallows across `db/database.py`, `nodes/ingest.py`, `nodes/pii_masker.py`, `nodes/sensitive_skip.py`, and `utils/jev_client.py`. Config errors now propagate cleanly as `ConfigError`.
+  5. **Startup Fail-Fast (`main.py`):** Evaluated and validated config as the very first operation in `main()`. On `FileNotFoundError` or `ConfigError`, prints `[-] Configuration error: <message>` to `stderr` and exits immediately with code `2` with zero traceback and zero DB creation.
+* **Done When:** Table-driven unit tests verify invalid YAML/types/typos raise `ConfigError`, CWD-independent resolution passes, env overrides take effect and flow into nodes, 13 swallows confirmed removed, and 221 unit tests + 100/100 benchmark scenarios pass.
 
 ### [B6] Optimize Process Lifecycle & Eliminate Repeated Work
 * **Problem:** spaCy model is repeatedly re-attempted on failure; `load_config()` reads YAML from disk on every email; regex patterns are recompiled on every invocation.

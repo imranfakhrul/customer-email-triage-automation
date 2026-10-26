@@ -71,16 +71,10 @@ def is_external_ai_enabled(
             return False
 
     if config is None:
-        try:
-            config = load_config()
-        except Exception:
-            config = None
+        config = load_config()
 
-    jev_env = "JEV_API_KEY"
-    groq_env = "GROQ_API_KEY"
-    if config is not None:
-        jev_env = config.get("jev", {}).get("api_key_env", "JEV_API_KEY")
-        groq_env = config.get("groq", {}).get("api_key_env", "GROQ_API_KEY")
+    jev_env = config.get("jev", {}).get("api_key_env", "JEV_API_KEY")
+    groq_env = config.get("groq", {}).get("api_key_env", "GROQ_API_KEY")
 
     jev_key = os.environ.get(jev_env) or os.environ.get("JEV_API_KEY")
     groq_key = os.environ.get(groq_env) or os.environ.get("GROQ_API_KEY")
@@ -105,11 +99,8 @@ def get_spacy_nlp(model_name: Optional[str] = None):
 
     _SPACY_INITIALIZED = True
     if model_name is None:
-        try:
-            cfg = load_config()
-            model_name = cfg.get("privacy", {}).get("spacy_model", "en_core_web_sm")
-        except Exception:
-            model_name = "en_core_web_sm"
+        cfg = load_config()
+        model_name = cfg.get("privacy", {}).get("spacy_model", "en_core_web_sm")
 
     try:
         import spacy
@@ -376,13 +367,10 @@ def load_tech_terms_tiers(
 
     target_path = filepath
     if target_path is None:
-        try:
-            cfg = load_config()
-            target_path = cfg.get("privacy", {}).get(
-                "tech_terms_file", "config/tech_terms.txt"
-            )
-        except Exception:
-            target_path = "config/tech_terms.txt"
+        cfg = load_config()
+        target_path = cfg.get("privacy", {}).get(
+            "tech_terms_file", "config/tech_terms.txt"
+        )
 
     if target_path:
         from pathlib import Path
@@ -455,10 +443,7 @@ def load_tech_context_words(config: Optional[Dict[str, Any]] = None) -> Set[str]
     words = set(DEFAULT_TECH_CONTEXT_WORDS)
     cfg = config
     if cfg is None:
-        try:
-            cfg = load_config()
-        except Exception:
-            cfg = None
+        cfg = load_config()
 
     if cfg:
         custom_words = cfg.get("privacy", {}).get("tech_context_words")
@@ -645,13 +630,10 @@ def mask_pii(
 
     # 6. Library Pass: Phone Numbers (phonenumbers library)
     if default_phone_region is None:
-        try:
-            cfg = load_config()
-            default_phone_region = cfg.get("privacy", {}).get(
-                "default_phone_region", "US"
-            )
-        except Exception:
-            default_phone_region = "US"
+        cfg = load_config()
+        default_phone_region = cfg.get("privacy", {}).get(
+            "default_phone_region", "US"
+        )
 
     phone_spans: List[Tuple[int, int, str]] = []
     for m in phonenumbers.PhoneNumberMatcher(working, default_phone_region):
@@ -703,13 +685,10 @@ def mask_pii(
         nlp = nlp_override
     else:
         if spacy_model_name is None:
-            try:
-                cfg = load_config()
-                spacy_model_name = cfg.get("privacy", {}).get(
-                    "spacy_model", "en_core_web_sm"
-                )
-            except Exception:
-                spacy_model_name = "en_core_web_sm"
+            cfg = load_config()
+            spacy_model_name = cfg.get("privacy", {}).get(
+                "spacy_model", "en_core_web_sm"
+            )
         nlp = get_spacy_nlp(spacy_model_name)
 
     if nlp is not None:
@@ -843,10 +822,7 @@ def pii_masker_node(
     email_id = state.get("email_id") or "unknown"
 
     if config is None:
-        try:
-            config = load_config()
-        except Exception:
-            config = {}
+        config = load_config()
     default_region = config.get("privacy", {}).get("default_phone_region", "US")
 
     token_map = dict(state.get("token_map") or {})

@@ -6,56 +6,384 @@ plaintext config files.
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import yaml
 from dotenv import load_dotenv
 
 # Automatically load environment variables from .env if present (preserve existing environment variables)
 load_dotenv(override=False)
 
+# Project-root anchor — always relative to THIS FILE's location, never the CWD.
+BASE_DIR: Path = Path(__file__).resolve().parent.parent
+DEFAULT_CONFIG_PATH: Path = BASE_DIR / "config.yaml"
 
-def validate_config(config: Dict[str, Any]) -> None:
-    """Validates configuration parameters to fail fast on invalid setups.
 
-    Raises:
-        ValueError: If configuration thresholds or parameters violate constraints.
-    """
-    gatekeeper_cfg = config.get("gatekeeper", {})
-    jev_cfg = gatekeeper_cfg.get("jev", {})
-    if jev_cfg:
-        hi = jev_cfg.get("hi_threshold", 0.85)
-        lo = jev_cfg.get("lo_threshold", 0.15)
-        if not (0.0 < float(lo) < float(hi) < 1.0):
-            raise ValueError(
-                f"Invalid Jev gatekeeper thresholds: expected 0.0 < lo_threshold < hi_threshold < 1.0, "
-                f"got lo_threshold={lo}, hi_threshold={hi}"
+class ConfigError(ValueError):
+    """Raised when configuration is invalid, missing a required section, or fails validation."""
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Known keys per section — any other key is a typo and raises ConfigError.
+# ---------------------------------------------------------------------------
+_KNOWN_KEYS: Dict[str, List[str]] = {
+    "system": [
+        "database_path", "idempotency_stale_minutes", "max_dispatch_retries",
+        "audit_log_enabled", "persist_masked_text",
+    ],
+    "privacy": [
+        "spacy_model", "tech_terms_file", "default_phone_region",
+        "tech_context_words", "sensitive_keywords", "max_code_density",
+    ],
+    "security": [
+        "regex_scan_head", "regex_scan_tail",
+    ],
+    "gatekeeper": [
+        "timeout_seconds", "max_retries", "api_key_env", "fallback_model",
+        "groq_api_key_env", "jev",
+    ],
+    "gatekeeper.jev": [
+        "model", "api_url", "hi_threshold", "lo_threshold", "max_body_chars",
+    ],
+    "llm": [
+        "model", "temperature", "confidence_threshold", "groq_api_key_env",
+    ],
+}
+
+
+def _require_mapping(cfg: Dict[str, Any], section: str) -> Dict[str, Any]:
+    """Returns sub-dict for section, raises ConfigError if missing or not a mapping."""
+    val = cfg.get(section)
+    if val is None:
+        raise ConfigError(f"Missing required configuration section: '{section}'")
+    if not isinstance(val, dict):
+        raise ConfigError(
+            f"Configuration section '{section}' must be a mapping, got {type(val).__name__}"
+        )
+    return val
+
+
+def _check_unknown_keys(section_dict: Dict[str, Any], section_name: str) -> None:
+    """Raises ConfigError for any key not in the known-keys list for that section."""
+    allowed = _KNOWN_KEYS.get(section_name, [])
+    for key in section_dict:
+        if key not in allowed:
+            raise ConfigError(
+                f"Unknown key '{key}' in section '{section_name}' "
+                f"(known keys: {', '.join(sorted(allowed))})"
             )
 
 
-def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
-    """Loads and returns the YAML configuration file.
+def _require_nonempty_str(val: Any, key: str) -> None:
+    if isinstance(val, bool) or not isinstance(val, str) or not val.strip():
+        raise ConfigError(f"'{key}' must be a non-empty string, got {type(val).__name__!r}")
+
+
+def _require_int_gt(val: Any, key: str, minimum: int, strictly_greater: bool = True) -> None:
+    """Require an int (not bool) that is > or >= minimum."""
+    if isinstance(val, bool) or not isinstance(val, int):
+        raise ConfigError(f"'{key}' must be an integer (not bool), got {type(val).__name__!r}")
+    if strictly_greater and val <= minimum:
+        raise ConfigError(f"'{key}' must be > {minimum}, got {val}")
+    if not strictly_greater and val < minimum:
+        raise ConfigError(f"'{key}' must be >= {minimum}, got {val}")
+
+
+def _require_bool(val: Any, key: str) -> None:
+    if not isinstance(val, bool):
+        raise ConfigError(f"'{key}' must be a bool, got {type(val).__name__!r}")
+
+
+def _require_number_gt(val: Any, key: str, minimum: float) -> None:
+    if isinstance(val, bool) or not isinstance(val, (int, float)):
+        raise ConfigError(f"'{key}' must be a number, got {type(val).__name__!r}")
+    if val <= minimum:
+        raise ConfigError(f"'{key}' must be > {minimum}, got {val}")
+
+
+def validate_config(config: Dict[str, Any]) -> None:
+    """Validates configuration parameters.  Raises ConfigError on any violation.
+
+    Every error message names the full dotted key path and the rule violated,
+    and never echoes secrets or file content.
+    """
+    if not isinstance(config, dict):
+        raise ConfigError(
+            f"Configuration must be a mapping, got {type(config).__name__!r}"
+        )
+
+    # ── Required top-level sections ─────────────────────────────────────────
+    system = _require_mapping(config, "system")
+    privacy = _require_mapping(config, "privacy")
+    security = _require_mapping(config, "security")
+    gatekeeper = _require_mapping(config, "gatekeeper")
+    llm = _require_mapping(config, "llm")
+
+    # ── Unknown-key checks ───────────────────────────────────────────────────
+    _check_unknown_keys(system, "system")
+    _check_unknown_keys(privacy, "privacy")
+    _check_unknown_keys(security, "security")
+    _check_unknown_keys(gatekeeper, "gatekeeper")
+    _check_unknown_keys(llm, "llm")
+
+    jev_cfg = gatekeeper.get("jev", {})
+    if isinstance(jev_cfg, dict):
+        _check_unknown_keys(jev_cfg, "gatekeeper.jev")
+
+    # ── system ───────────────────────────────────────────────────────────────
+    db_path = system.get("database_path")
+    if db_path is None:
+        raise ConfigError("'system.database_path' is required")
+    _require_nonempty_str(db_path, "system.database_path")
+
+    stale = system.get("idempotency_stale_minutes")
+    if stale is None:
+        raise ConfigError("'system.idempotency_stale_minutes' is required")
+    _require_int_gt(stale, "system.idempotency_stale_minutes", 0, strictly_greater=True)
+
+    retries = system.get("max_dispatch_retries")
+    if retries is None:
+        raise ConfigError("'system.max_dispatch_retries' is required")
+    _require_int_gt(retries, "system.max_dispatch_retries", 0, strictly_greater=False)
+
+    audit = system.get("audit_log_enabled")
+    if audit is None:
+        raise ConfigError("'system.audit_log_enabled' is required")
+    _require_bool(audit, "system.audit_log_enabled")
+
+    persist = system.get("persist_masked_text")
+    if persist is None:
+        raise ConfigError("'system.persist_masked_text' is required")
+    _require_bool(persist, "system.persist_masked_text")
+
+    # ── privacy ──────────────────────────────────────────────────────────────
+    spacy = privacy.get("spacy_model")
+    if spacy is None:
+        raise ConfigError("'privacy.spacy_model' is required")
+    _require_nonempty_str(spacy, "privacy.spacy_model")
+
+    tech_file = privacy.get("tech_terms_file")
+    if tech_file is None:
+        raise ConfigError("'privacy.tech_terms_file' is required")
+    _require_nonempty_str(tech_file, "privacy.tech_terms_file")
+
+    region = privacy.get("default_phone_region")
+    if region is None:
+        raise ConfigError("'privacy.default_phone_region' is required")
+    if not isinstance(region, str) or len(region) != 2 or not region.isalpha():
+        raise ConfigError(
+            f"'privacy.default_phone_region' must be a 2-letter ISO country code, got {region!r}"
+        )
+
+    ctx_words = privacy.get("tech_context_words")
+    if ctx_words is None:
+        raise ConfigError("'privacy.tech_context_words' is required")
+    if not isinstance(ctx_words, list) or len(ctx_words) == 0:
+        raise ConfigError("'privacy.tech_context_words' must be a non-empty list of strings")
+    if not all(isinstance(w, str) for w in ctx_words):
+        raise ConfigError("'privacy.tech_context_words' must contain only strings")
+
+    keywords = privacy.get("sensitive_keywords")
+    if keywords is None:
+        raise ConfigError("'privacy.sensitive_keywords' is required")
+    if not isinstance(keywords, list) or len(keywords) == 0:
+        raise ConfigError("'privacy.sensitive_keywords' must be a non-empty list of strings")
+    if not all(isinstance(k, str) and k.strip() for k in keywords):
+        raise ConfigError("'privacy.sensitive_keywords' must contain only non-empty strings")
+
+    code_density = privacy.get("max_code_density")
+    if code_density is None:
+        raise ConfigError("'privacy.max_code_density' is required")
+    _require_int_gt(code_density, "privacy.max_code_density", 0, strictly_greater=False)
+
+    # ── security ─────────────────────────────────────────────────────────────
+    scan_head = security.get("regex_scan_head")
+    if scan_head is None:
+        raise ConfigError("'security.regex_scan_head' is required")
+    _require_int_gt(scan_head, "security.regex_scan_head", 0, strictly_greater=True)
+
+    scan_tail = security.get("regex_scan_tail")
+    if scan_tail is None:
+        raise ConfigError("'security.regex_scan_tail' is required")
+    _require_int_gt(scan_tail, "security.regex_scan_tail", 0, strictly_greater=False)
+
+    # ── gatekeeper ───────────────────────────────────────────────────────────
+    gk_timeout = gatekeeper.get("timeout_seconds")
+    if gk_timeout is None:
+        raise ConfigError("'gatekeeper.timeout_seconds' is required")
+    _require_number_gt(gk_timeout, "gatekeeper.timeout_seconds", 0)
+
+    gk_retries = gatekeeper.get("max_retries")
+    if gk_retries is None:
+        raise ConfigError("'gatekeeper.max_retries' is required")
+    _require_int_gt(gk_retries, "gatekeeper.max_retries", 0, strictly_greater=False)
+
+    gk_fallback = gatekeeper.get("fallback_model")
+    if gk_fallback is None:
+        raise ConfigError("'gatekeeper.fallback_model' is required")
+    _require_nonempty_str(gk_fallback, "gatekeeper.fallback_model")
+
+    # gatekeeper.jev — validate thresholds whether or not the block is present
+    if not isinstance(jev_cfg, dict):
+        raise ConfigError("'gatekeeper.jev' must be a mapping")
+
+    jev_model = jev_cfg.get("model")
+    if jev_model is None:
+        raise ConfigError("'gatekeeper.jev.model' is required")
+    _require_nonempty_str(jev_model, "gatekeeper.jev.model")
+
+    jev_url = jev_cfg.get("api_url")
+    if jev_url is None:
+        raise ConfigError("'gatekeeper.jev.api_url' is required")
+    _require_nonempty_str(jev_url, "gatekeeper.jev.api_url")
+
+    jev_maxchars = jev_cfg.get("max_body_chars")
+    if jev_maxchars is None:
+        raise ConfigError("'gatekeeper.jev.max_body_chars' is required")
+    _require_int_gt(jev_maxchars, "gatekeeper.jev.max_body_chars", 0, strictly_greater=True)
+
+    lo = jev_cfg.get("lo_threshold", 0.15)
+    hi = jev_cfg.get("hi_threshold", 0.85)
+    try:
+        lo_f = float(lo)
+        hi_f = float(hi)
+    except (TypeError, ValueError):
+        raise ConfigError(
+            f"'gatekeeper.jev.lo_threshold' and 'gatekeeper.jev.hi_threshold' must be numbers"
+        )
+    if not (0.0 < lo_f < hi_f < 1.0):
+        raise ConfigError(
+            f"Invalid Jev thresholds: expected 0 < lo_threshold < hi_threshold < 1.0, "
+            f"got lo_threshold={lo_f}, hi_threshold={hi_f}"
+        )
+
+    # ── llm ──────────────────────────────────────────────────────────────────
+    llm_model = llm.get("model")
+    if llm_model is None:
+        raise ConfigError("'llm.model' is required")
+    _require_nonempty_str(llm_model, "llm.model")
+
+    temp = llm.get("temperature")
+    if temp is None:
+        raise ConfigError("'llm.temperature' is required")
+    if isinstance(temp, bool) or not isinstance(temp, (int, float)):
+        raise ConfigError(f"'llm.temperature' must be a number, got {type(temp).__name__!r}")
+    if not (0.0 <= float(temp) <= 2.0):
+        raise ConfigError(f"'llm.temperature' must be between 0 and 2, got {temp}")
+
+    conf = llm.get("confidence_threshold")
+    if conf is None:
+        raise ConfigError("'llm.confidence_threshold' is required")
+    if isinstance(conf, bool) or not isinstance(conf, (int, float)):
+        raise ConfigError(
+            f"'llm.confidence_threshold' must be a number, got {type(conf).__name__!r}"
+        )
+    if not (0.0 < float(conf) <= 1.0):
+        raise ConfigError(
+            f"'llm.confidence_threshold' must satisfy 0 < value <= 1, got {conf}"
+        )
+
+
+def _apply_env_overrides(cfg: Dict[str, Any]) -> None:
+    """Applies DATABASE_PATH, IDEMPOTENCY_STALE_MINUTES, MAX_DISPATCH_RETRIES from env.
+
+    Env > config.yaml precedence.  Empty-string env var means 'no override'.
+    Raises ConfigError (naming the variable) for invalid values; never echoes values.
+    """
+    system = cfg.setdefault("system", {})
+
+    db_path_env = os.environ.get("DATABASE_PATH", "")
+    if db_path_env:
+        system["database_path"] = db_path_env
+
+    stale_env = os.environ.get("IDEMPOTENCY_STALE_MINUTES", "")
+    if stale_env:
+        try:
+            stale_val = int(stale_env)
+        except ValueError:
+            raise ConfigError("IDEMPOTENCY_STALE_MINUTES: must be int > 0")
+        if stale_val <= 0:
+            raise ConfigError("IDEMPOTENCY_STALE_MINUTES: must be int > 0")
+        system["idempotency_stale_minutes"] = stale_val
+
+    retries_env = os.environ.get("MAX_DISPATCH_RETRIES", "")
+    if retries_env:
+        try:
+            retries_val = int(retries_env)
+        except ValueError:
+            raise ConfigError("MAX_DISPATCH_RETRIES: must be int >= 0")
+        if retries_val < 0:
+            raise ConfigError("MAX_DISPATCH_RETRIES: must be int >= 0")
+        system["max_dispatch_retries"] = retries_val
+
+
+def _resolve_relative_paths(cfg: Dict[str, Any]) -> None:
+    """Resolves relative file-paths in config against BASE_DIR (not CWD)."""
+    system = cfg.get("system", {})
+    db_path = system.get("database_path", "")
+    if db_path and not Path(db_path).is_absolute():
+        system["database_path"] = str(BASE_DIR / db_path)
+
+    privacy = cfg.get("privacy", {})
+    tech_file = privacy.get("tech_terms_file", "")
+    if tech_file and not Path(tech_file).is_absolute():
+        privacy["tech_terms_file"] = str(BASE_DIR / tech_file)
+
+
+def load_config(config_path=None) -> Dict[str, Any]:
+    """Loads, validates, and returns the YAML configuration.
 
     Args:
-        config_path: Path to the YAML configuration file.
+        config_path: Path to the YAML config file.  None → DEFAULT_CONFIG_PATH.
+                     A relative path is resolved against BASE_DIR (not CWD).
+                     An absolute path is used as given.
 
     Returns:
-        Dict containing parsed configuration.
+        Validated dict containing parsed configuration.
 
     Raises:
-        FileNotFoundError: If the configuration file is not found.
-        yaml.YAMLError: If the YAML file contains invalid syntax.
-        ValueError: If configuration parameters violate constraints.
+        FileNotFoundError: Config file does not exist.
+        ConfigError: YAML syntax error, empty/non-mapping file, or invalid values.
     """
-    path = Path(config_path)
+    if config_path is None:
+        path = DEFAULT_CONFIG_PATH
+    else:
+        p = Path(config_path)
+        path = p if p.is_absolute() else BASE_DIR / p
+
     if not path.is_file():
-        raise FileNotFoundError(f"Configuration file not found at: {config_path}")
+        raise FileNotFoundError(f"Configuration file not found at: {path}")
 
     with open(path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+        try:
+            raw = yaml.safe_load(f)
+        except yaml.YAMLError as exc:
+            # Surface file name and position only — never file content.
+            mark = getattr(exc, "problem_mark", None)
+            location = ""
+            if mark is not None:
+                location = f": line {mark.line + 1}, column {mark.column + 1}"
+            raise ConfigError(f"{path.name}{location}") from exc
 
-    cfg = config or {}
-    validate_config(cfg)
-    return cfg
+    if raw is None or not isinstance(raw, dict):
+        raise ConfigError(
+            f"Configuration file must be a YAML mapping, got "
+            f"{type(raw).__name__ if raw is not None else 'empty file'}"
+        )
+
+    # 1. Validate the file exactly as written (before applying environment overrides)
+    validate_config(raw)
+
+    # 2. Apply environment variable overrides (precedence env > config.yaml)
+    _apply_env_overrides(raw)
+
+    # 3. Resolve relative paths inside config against BASE_DIR
+    _resolve_relative_paths(raw)
+
+    # 4. Validate final values again after overrides and path resolution
+    validate_config(raw)
+
+    return raw
 
 
 def get_env_var(
@@ -78,7 +406,7 @@ def get_env_var(
 def resolve_destination_config(
     team_name: str,
     config: Optional[Dict[str, Any]] = None,
-    config_path: str = "config.yaml",
+    config_path=None,
 ) -> Optional[Dict[str, Any]]:
     """Retrieves and resolves credentials for a specific destination team.
 
@@ -89,7 +417,7 @@ def resolve_destination_config(
     Args:
         team_name: Name of the team (e.g., 'Engineering', 'Support', 'Sales', 'Billing').
         config: Optional pre-loaded config dict. If None, loaded from config_path.
-        config_path: Path to config.yaml if config is None.
+        config_path: Path to config.yaml if config is None (None → DEFAULT_CONFIG_PATH).
 
     Returns:
         Resolved destination dict or None if team is not configured.

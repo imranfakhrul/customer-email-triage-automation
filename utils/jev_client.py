@@ -269,10 +269,7 @@ class JevClient:
             api_url: Optional URL override for Jev AI endpoint.
         """
         if config is None:
-            try:
-                config = load_config()
-            except Exception:
-                config = {}
+            config = load_config()
 
         self.config = config
         gatekeeper_cfg = config.get("gatekeeper", {})

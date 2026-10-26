@@ -146,6 +146,17 @@ Copy the template configuration file to `.env`:
 
 Open `.env` in any text editor and fill in your API credentials (e.g., `JEV_API_KEY`, `GROQ_API_KEY`).
 
+##### Environment Variable Overrides & Precedence
+The application enforces a fail-fast configuration model. Runtime system parameters can be overridden via environment variables with strict precedence (`env > config.yaml`):
+
+| Variable | Target Config Key | Type | Description |
+|---|---|---|---|
+| `DATABASE_PATH` | `system.database_path` | String | Path to persistent SQLite idempotency database |
+| `IDEMPOTENCY_STALE_MINUTES` | `system.idempotency_stale_minutes` | Integer (`> 0`) | Stale lock recovery window before in-progress emails are recovered |
+| `MAX_DISPATCH_RETRIES` | `system.max_dispatch_retries` | Integer (`>= 0`) | Maximum retry attempts permitted for stale or failed emails |
+
+If an override variable is unset or empty, the value defined in `config.yaml` is used. If an invalid value is supplied, the application fails fast at startup with exit code `2` naming the invalid variable without leaking environment secrets.
+
 #### Step 3: Build the Docker Image
 Build the container. This automatically sets up Python 3.11, installs all requirements, and downloads the local spaCy NER model (`en_core_web_sm`):
 ```bash

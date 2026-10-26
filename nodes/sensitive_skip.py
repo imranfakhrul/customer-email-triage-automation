@@ -125,10 +125,7 @@ def evaluate_sensitive(
         Tuple of (is_sensitive: bool, sensitive_reason: Optional[str]).
     """
     if config is None:
-        try:
-            config = load_config()
-        except Exception:
-            config = {}
+        config = load_config()
 
     privacy_cfg = config.get("privacy", {})
     keywords = privacy_cfg.get("sensitive_keywords", EMERGENCY_SENSITIVE_KEYWORDS)
