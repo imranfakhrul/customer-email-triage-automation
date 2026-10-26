@@ -55,7 +55,7 @@ The following foundational improvements were implemented and merged in earlier P
 | **19** | **B5** | Correctness | Resolve config relative to root, fail fast on invalid YAML, and honor environment overrides | ✅ Resolved |
 | **20** | **B6** | Performance | Preload models and precompile regexes once at startup to eliminate per-email overhead | ✅ Resolved (`9646e04`) |
 | **21** | **C1** | Testing | Expand synthetic benchmark validation to check all expected fields and default to offline | ✅ Resolved |
-| **22** | **C2** | Testing | Isolate test suite from host environment variables (`.env`) for reproducible test runs | ⏳ Pending |
+| **22** | **C2** | Testing | Isolate test suite from host environment variables (`.env`) for reproducible test runs | ✅ Resolved |
 | **23** | **C3** | Testing | Ensure `scripts/jev_smoke_test.py` strictly verifies Jev response and exits non-zero on failure | ⏳ Pending |
 | **24** | **C4** | Documentation | Reconcile README/ROADMAP test counts, directory trees, class names, and claim metrics | ⏳ Pending |
 
@@ -287,9 +287,14 @@ The following foundational improvements were implemented and merged in earlier P
 * **Done When:** All 100 benchmark scenarios pass with 100% of expected fields asserted; `--live` flag verified; natural duplicate retransmission verified; 232 pytest unit tests pass.
 
 ### [C2] Deterministic Test Environment Isolation
+* **Status:** ✅ **Resolved**
 * **Problem:** Tests make live calls to external APIs if host `.env` file contains keys, causing flaky tests, rate-limiting, and test data leaks.
-* **Solution:** Use `@patch.dict(os.environ, {}, clear=True)` or pass mock clients directly into nodes to ensure tests run completely isolated from host keys.
-* **Done When:** Full test suite passes deterministically with real keys in `.env` and zero network access.
+* **Solution:**
+  1. **Network Egress Guard (`tests/conftest.py`):** Patched `requests.adapters.HTTPAdapter.send`, `httpx.HTTPTransport.handle_request`, `httpx.AsyncHTTPTransport.handle_async_request`, and `socket.socket.connect` to block all unmocked outbound WAN calls with `NetworkEgressBlockedError` while allowing loopback interfaces (`127.0.0.1`, `localhost`, `::1`).
+  2. **Hermetic Environment Shield (`tests/conftest.py`):** Added an `autouse=True` fixture `isolate_test_environment` that strips ambient external AI credentials (`JEV_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LANGCHAIN_API_KEY`, `LANGSMITH_API_KEY`) from `os.environ` by default and resets singleton caches (`reset_config_cache()`, `reset_default_client()`) before and after each test.
+  3. **Unit Test Hardening (`tests/test_jev_client.py`):** Decorated `test_placeholder_key_skips_jev` with `@patch.dict(os.environ, {"JEV_API_KEY": "", "GROQ_API_KEY": ""})` to isolate `key=None` tests under standalone/unittest runners.
+  4. **Dedicated Isolation Suite (`tests/test_c2_isolation.py`):** Added 7 comprehensive unit tests verifying unmocked `requests`, `httpx`, and raw socket WAN attempts are caught and blocked, loopback connections remain permitted, ambient credentials are stripped, and offline pipelines with dummy keys run without network egress.
+* **Done When:** Verified full test suite (239 tests) passes deterministically with real keys injected into environment (`JEV_API_KEY="sk_live_super_secret" GROQ_API_KEY="gsk_live_super_secret"`), `tools/egress_check.py` verifies zero network egress, and 100/100 benchmark scenarios pass in ~21.5ms/email.
 
 ### [C3] Strict Jev Smoke Test Verification
 * **Problem:** `scripts/jev_smoke_test.py` reports success even if Jev returns 401 or 500 and falls back to offline heuristics.

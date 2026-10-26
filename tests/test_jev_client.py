@@ -186,6 +186,7 @@ class TestJevClient(unittest.TestCase):
         result2 = client.classify(subject="Hello", body="Need assistance.", sender="user@corp.com")
         self.assertEqual(result2["classifier_used"], "regex")
 
+    @patch.dict(os.environ, {"JEV_API_KEY": "", "GROQ_API_KEY": ""}, clear=False)
     @patch("requests.post")
     def test_placeholder_key_skips_jev(self, mock_post):
         """Verifies placeholder or missing key never calls Jev API and falls back cleanly."""
