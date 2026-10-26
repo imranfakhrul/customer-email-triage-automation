@@ -1,10 +1,10 @@
-"""Node 01: Ingestion, Idempotency Check, and Active Thread Bypass.
+"""Node 01: Ingestion, Idempotency Check, and Active Thread Verification.
 
 This node is the entry point for the LangGraph triage pipeline. It ensures:
 1. Standardized extraction of sender domain, message IDs, and thread context.
 2. Idempotent processing using SQLite store to avoid duplicate work.
 3. Automated recovery of stale processing locks (> 10 minutes by default).
-4. Detection of active existing threads for downstream gatekeeper bypass.
+4. Detection of active existing threads for contextual thread continuity verification.
 """
 
 from typing import Any, Dict, Optional

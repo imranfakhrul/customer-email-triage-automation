@@ -88,3 +88,15 @@ class TestA12ContainerSecurity(unittest.TestCase):
             expected_abs = str((BASE_DIR / test_custom_db).resolve())
             self.assertEqual(cfg["system"]["database_path"], expected_abs)
         reset_config_cache()
+
+    def test_docker_compose_restart_policy_is_no(self):
+        """docker-compose.yml must specify restart: 'no' since Phase 1 executes as a batch job."""
+        compose_path = BASE_DIR / "docker-compose.yml"
+        self.assertTrue(compose_path.exists(), "docker-compose.yml must exist")
+        with open(compose_path, "r", encoding="utf-8") as f:
+            compose_cfg = yaml.safe_load(f)
+
+        service = compose_cfg.get("services", {}).get("email-triage", {})
+        restart_policy = str(service.get("restart", "")).lower()
+        self.assertIn(restart_policy, ("no", "false"), "docker-compose restart policy must be 'no'")
+

@@ -1,7 +1,9 @@
 """Node 05: Jev AI Spam Gatekeeper and Decision Routing.
 
-This node performs sub-second spam, threat, and legitimacy gatekeeping:
-1. Thread Continuity Bypass: Automatically approves emails in active ongoing threads.
+This node performs spam, threat, and legitimacy gatekeeping:
+1. Universal Inbound Inspection: Evaluates every inbound email, including thread replies.
+   Active thread status (`is_active_thread`) is tracked purely as a contextual flag and does
+   not skip gatekeeper inspection.
 2. Inbound Classification: Evaluates inbound inquiries via Jev AI with Groq and heuristic fallbacks.
 3. Decision Actions:
    - 'spam': Diverts to 'Junk/Spam', commits 'done' in SQLite, terminates triage.

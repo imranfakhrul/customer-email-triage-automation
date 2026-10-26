@@ -5,7 +5,7 @@ Chains together the full ingestion-to-decision pipeline:
 2. Node 02: Signature & Quoted Reply Stripper (RFC header, Outlook, mobile cleanup)
 3. Node 03: Local spaCy NER & Regex PII Masker (100% on-premise PII redaction)
 4. Node 04: Sensitive-Skip Rules (immediate quarantine for legal/confidential notices)
-5. Node 05: Jev AI Decision Gatekeeper (sub-second spam, threat, & legitimacy scoring)
+5. Node 05: Jev AI Decision Gatekeeper (spam, threat, & legitimacy scoring)
 """
 
 import logging

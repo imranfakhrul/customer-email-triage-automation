@@ -13,6 +13,7 @@ import pytest
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 REQUIREMENTS_PATH = BASE_DIR / "requirements.txt"
+REQUIREMENTS_DEV_PATH = BASE_DIR / "requirements-dev.txt"
 DOCKERFILE_PATH = BASE_DIR / "Dockerfile"
 
 REQUIRED_PACKAGES = {
@@ -89,3 +90,37 @@ def test_dockerfile_pins_spacy_model_wheel():
     assert expected_wheel in content, (
         f"Dockerfile must install pinned spaCy model release wheel: {expected_wheel}"
     )
+
+
+def test_requirements_dev_file_and_pinning():
+    """Verify requirements-dev.txt includes -r requirements.txt and pins pytest exactly."""
+    assert REQUIREMENTS_DEV_PATH.exists(), f"requirements-dev.txt missing at {REQUIREMENTS_DEV_PATH}"
+    dev_content = REQUIREMENTS_DEV_PATH.read_text(encoding="utf-8")
+    lines = [line.strip() for line in dev_content.splitlines() if line.strip() and not line.strip().startswith("#")]
+
+    assert any(line == "-r requirements.txt" for line in lines), (
+        "requirements-dev.txt must include '-r requirements.txt'"
+    )
+
+    exact_pin_pattern = re.compile(r"^[a-zA-Z0-9_\-]+==[0-9]+(\.[0-9]+)*.*$")
+    pytest_pinned = False
+    for line in lines:
+        if line.startswith("-r"):
+            continue
+        assert exact_pin_pattern.match(line), (
+            f"Package line '{line}' in requirements-dev.txt is not pinned with exact '==<version>'"
+        )
+        if line.startswith("pytest=="):
+            pytest_pinned = True
+    assert pytest_pinned, "requirements-dev.txt must pin pytest with exact '==<version>'"
+
+
+def test_dockerfile_supports_with_tests_arg():
+    """Verify Dockerfile defines ARG WITH_TESTS=true and conditionally installs requirements-dev.txt."""
+    content = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "ARG WITH_TESTS=true" in content, "Dockerfile must define ARG WITH_TESTS=true"
+    assert "requirements-dev.txt" in content, "Dockerfile must reference requirements-dev.txt"
+    assert 'if [ "$WITH_TESTS" = "true" ]' in content or "if [ \"$WITH_TESTS\" = 'true' ]" in content, (
+        "Dockerfile must conditionally install dev dependencies based on WITH_TESTS"
+    )
+

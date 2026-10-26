@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # One place for all manual checks. Usage: ./check.sh test | bench | egress | all
-PY=./venv/bin/python
+PY="${PYTHON:-./venv/bin/python}"
+if [ ! -f "$PY" ] && [ ! -x "$PY" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PY="python3"
+  elif command -v python >/dev/null 2>&1; then
+    PY="python"
+  fi
+fi
+echo "[check.sh] Using Python interpreter: $PY"
 case "$1" in
   test)  $PY -m pytest -q 2>&1 | tail -3 ;;
   bench) $PY main.py --benchmark --offline 2>&1 | tail -3 ;;

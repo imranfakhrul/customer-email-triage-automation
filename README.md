@@ -49,17 +49,29 @@ flowchart TD
 * **Human-in-the-Loop Quarantine:** Routes matching emails directly to the human review queue.
 
 ### 5. Jev AI Decision Gatekeeper (Node 05)
-* **Primary Classifier:** Low-latency threat and spam classification powered by TypeSafe System One (Jev `jev-1.13.0`) with local heuristic fallback (average offline pipeline throughput ~22ms/email).
+* **Primary Classifier:** Low-latency threat and spam classification powered by TypeSafe System One (Jev `jev-1.13.0`) with local heuristic fallback (average offline pipeline throughput ~27ms/email).
 * **High Availability Fallback:** Automatic failover to Groq (`openai/gpt-oss-20b`) and deterministic regex heuristics.
 * **Tri-State Routing:** Labels items as `legitimate`, `spam`, or `manual_review`.
 
 #### 🚀 Enabling TypeSafe System One (Jev)
-To enable live Jev AI evaluation:
-1. Put a real key in `.env`: `JEV_API_KEY=your_actual_key`
-2. Run the smoke test to verify connectivity: `python scripts/jev_smoke_test.py`
-3. Run the pipeline with live evaluation: `python main.py --live` (or inside Docker via `docker compose up`)
+To evaluate incoming inquiries with live AI:
+1. **Recommended First Step — One-Call Connectivity Smoke Test:**
+   Always verify connectivity and API key validity with a single isolated test call before running full batches:
+   ```bash
+   python scripts/jev_smoke_test.py
+   ```
+   *(Or inside Docker: `docker compose run --rm email-triage python scripts/jev_smoke_test.py`)*
 
-*(Note: Without a real key or with placeholder credentials, the pipeline automatically runs in offline mode using the Groq / regex fallback with zero downtime).*
+2. **Full Benchmark Evaluation (`--live`):**
+   ```bash
+   python main.py --live
+   ```
+   *(Or inside Docker: `docker compose run --rm email-triage python main.py --live`)*
+
+   > [!WARNING]
+   > Running `python main.py --live` transmits all 100 benchmark emails to the live external APIs (generating roughly 100 to 200 external network calls, incurring real API usage costs, and potentially triggering Groq free-tier 429 rate limits). Furthermore, several benchmark scenario expectations in `data/benchmark_emails.json` are calibrated against offline heuristic baselines and live AI decisions may legitimately vary.
+
+*(Note: Without a real key or with placeholder credentials, the pipeline runs in offline mode using the local heuristic fallback).*
 
 ---
 
@@ -67,6 +79,9 @@ To enable live Jev AI evaluation:
 
 ```
 Customer-Email-Triage-Automation/
+├── .dockerignore              # Docker build exclusions
+├── .env.example              # Environment variables template
+├── .gitignore                # Git repository ignore rules
 ├── check.sh                  # All-in-one testing and egress verification script
 ├── config/
 │   └── tech_terms.txt        # Two-tier technical terms whitelist (unambiguous / ambiguous)
@@ -76,7 +91,8 @@ Customer-Email-Triage-Automation/
 ├── main.py                   # Production entry point and CLI benchmark runner
 ├── pipeline.py               # LangGraph compiled pipeline orchestrator
 ├── prompts.py                # Classifier LLM system and user prompt templates
-├── requirements.txt          # Pinned runtime dependencies
+├── requirements.txt          # Pinned runtime production dependencies
+├── requirements-dev.txt      # Pinned development and testing dependencies
 ├── ROADMAP.md                # 24-point senior review remediation roadmap
 ├── state.py                  # LangGraph TriageState & Pydantic models
 ├── data/
@@ -93,7 +109,7 @@ Customer-Email-Triage-Automation/
 │   └── jev_gatekeeper.py     # Node 05: Jev AI decision engine
 ├── scripts/
 │   └── jev_smoke_test.py     # Standalone TypeSafe System One connectivity smoke test
-├── tests/                    # Comprehensive unit and integration test suite (254 tests)
+├── tests/                    # Comprehensive unit and integration test suite (265 tests)
 │   ├── conftest.py           # Test isolation fixtures & network egress guards
 │   ├── test_a12_container_security.py
 │   ├── test_a14_dependency_pinning.py
@@ -107,8 +123,10 @@ Customer-Email-Triage-Automation/
 │   ├── test_jev_client.py
 │   ├── test_jev_gatekeeper.py
 │   ├── test_main.py
+│   ├── test_no_stale_claims.py
 │   ├── test_pii_masker.py
 │   ├── test_pipeline_e2e.py  # End-to-end integration and benchmark tests
+│   ├── test_readme_metrics.py
 │   ├── test_sensitive_skip.py
 │   └── test_signature_stripper.py
 ├── tools/
@@ -183,25 +201,28 @@ The application enforces a fail-fast configuration model. Runtime system paramet
 If an override variable is unset or empty, the value defined in `config.yaml` is used. If an invalid value is supplied, the application fails fast at startup with exit code `2` naming the invalid variable without leaking environment secrets.
 
 #### Step 3: Build the Docker Image
-Build the container. This automatically sets up Python 3.11, installs all requirements, and downloads the local spaCy NER model (`en_core_web_sm`):
+Build the container. By default, this installs all production and development dependencies (including `pytest`) and downloads the local spaCy NER model (`en_core_web_sm`):
 ```bash
 docker compose build
 ```
 
-> **Tip:** If dependencies change in the future, rebuild with:
+> **Slim Image Build:** To create a slim image without testing dependencies, specify `WITH_TESTS=false`:
 > ```bash
-> docker compose build --no-cache
+> docker compose build --build-arg WITH_TESTS=false
 > ```
+> *(Tip: If dependencies change in the future, rebuild with `docker compose build --no-cache`).*
 
 #### Step 4: Run the Application
-Launch the containerized triage service in the background:
-```bash
-docker compose up -d
-```
+Phase 1 operates as a batch execution pipeline rather than an always-on background listener.
 
-To run in the foreground with live console logs:
+To execute the 100-scenario benchmark suite once and exit:
 ```bash
 docker compose up
+```
+
+To process a single email payload once and exit:
+```bash
+docker compose run --rm email-triage python main.py --input data/sample_email.json --offline
 ```
 
 #### Step 5: Run Automated Tests Inside Docker
@@ -211,7 +232,7 @@ docker compose run --rm email-triage pytest tests/ -v
 ```
 
 #### Step 6: Interactive Terminal / Debugging
-If you need to enter the running container to inspect the environment, SQLite database, or files:
+If you need to enter the container environment to inspect SQLite data or files:
 ```bash
 docker compose run --rm email-triage bash
 ```
@@ -222,19 +243,20 @@ docker compose run --rm email-triage bash
 
 The container uses a dedicated data volume mount defined in `docker-compose.yml`:
 * **Persistent SQLite Database:** `./data:/app/data` stores the SQLite idempotency database file (`data/triage.db`). The host repository source code is not mounted into `/app`, ensuring container immutability and preventing host filesystem modification.
-* Even if the container is stopped, deleted, or rebuilt, **all processing history and idempotency locks remain safely persisted on your host machine**.
+* Even if the container is deleted or rebuilt, **all processing history and idempotency locks remain safely persisted on your host machine**.
 
 ---
 
-### 4. Essential Docker Management Commands
+### 4. Essential Docker Commands
 
 | Action | Command |
 |:---|:---|
-| **View Live Container Logs** | `docker compose logs -f email-triage` |
-| **Stop Running Containers** | `docker compose stop` |
-| **Stop and Remove Containers** | `docker compose down` |
-| **Restart the Service** | `docker compose restart` |
-| **View Running Container Status** | `docker compose ps` |
+| **Run Offline Benchmark (100 Scenarios)** | `docker compose up` |
+| **Process Single Email Payload** | `docker compose run --rm email-triage python main.py --input data/sample_email.json --offline` |
+| **Run Container Test Suite** | `docker compose run --rm email-triage pytest tests/ -v` |
+| **Run Connectivity Smoke Test** | `docker compose run --rm email-triage python scripts/jev_smoke_test.py` |
+| **Clean Up Containers & Networks** | `docker compose down` |
+| **View Container Status** | `docker compose ps` |
 
 ---
 
@@ -270,13 +292,13 @@ python3 -m venv venv
 source venv/bin/activate  # On Windows: .\venv\Scripts\activate
 
 # 2. Install dependencies & spaCy NER model
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 python -m spacy download en_core_web_sm
 
 # 3. Configure environment
 cp .env.example .env
 
-# 4. Run automated test suite (254 tests, 100% passing)
+# 4. Run automated test suite (265 tests, 100% passing)
 pytest tests/ -v
 
 # 5. Run the synthetic benchmark suite across all 100 pipeline scenarios (default: offline)

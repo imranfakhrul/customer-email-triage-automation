@@ -16,11 +16,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && useradd --create-home --uid 1000 --shell /bin/bash appuser
 
 # Copy dependency specifications first for Docker layer caching
-COPY requirements.txt .
+COPY requirements.txt requirements-dev.txt ./
+
+# Build argument to control installation of dev/test dependencies (default: true)
+ARG WITH_TESTS=true
 
 # Install Python packages and download the pinned spaCy lightweight local NER model
 RUN pip install --upgrade pip && \
-    pip install -r requirements.txt && \
+    if [ "$WITH_TESTS" = "true" ]; then \
+        pip install -r requirements-dev.txt ; \
+    else \
+        pip install -r requirements.txt ; \
+    fi && \
     pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 
 # Copy project source files

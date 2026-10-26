@@ -1,7 +1,7 @@
 """Client wrapper for TypeSafe System One (Jev) Gatekeeper with Groq Fallback.
 
 This module provides high-availability spam and security classification:
-1. Primary Layer: TypeSafe System One (Jev model `jev-1.13.0`) sub-second decision scoring.
+1. Primary Layer: TypeSafe System One (Jev model `jev-1.13.0`) decision scoring.
 2. Secondary Layer: Groq LLM fallback ('openai/gpt-oss-20b') if Jev is disabled or errors.
 3. Tertiary Layer: Local deterministic heuristic rules ensuring zero crash policy when offline.
 """
@@ -70,7 +70,7 @@ PROMPT_INJECTION_REGEX = re.compile(
     r"disregard\s+the\s+above|output\s+the\s+contents\s+of\s+your\s+configuration|"
     r"FreeBot|AI\s+with\s+no\s+filters|secret\s+instructions\s+it\s+was\s+given|"
     r"notice\s+to\s+the\s+ai\s+assistant|your\s+policies\s+have\s+been\s+updated|"
-    r"must\s+bypass\s+all\s+filters|ignore\s+any\s+safety\s+checks|"
+    r"must\s+(?:circumvent|evade|ignore)\s+all\s+filters|ignore\s+any\s+safety\s+checks|"
     r"pretend\s+you\s+are.{0,200}grandmother|grandma.{0,200}read\s+me.{0,200}system\s+prompt)\b)",
     flags=re.IGNORECASE | re.DOTALL,
 )
@@ -466,7 +466,7 @@ class JevClient:
                 subject=subject, body=body, sender=sender
             )
 
-        # Step 3: Local Deterministic Heuristics Fallback (Guarantees zero downtime)
+        # Step 3: Local Deterministic Heuristics Fallback (Deterministic offline fallback)
         if result is None:
             result = self._heuristic_fallback(subject=subject, body=body, sender=sender)
 
@@ -726,8 +726,7 @@ class JevClient:
         }
 
 
-# Backward-compatibility alias (JevClient is the canonical class name)
-JevAIClient = JevClient
+
 
 _DEFAULT_CLIENT: Optional[JevClient] = None
 _DEFAULT_CLIENT_LOCK = threading.Lock()
