@@ -354,7 +354,6 @@ To guarantee strict isolation and zero regressions, Phase 1 has a concrete, veri
   - `sender_domain` (TEXT, Extracted sender domain)
   - `masked_subject` (TEXT, Precision-masked subject line)
   - `masked_body` (TEXT, Cleaned, signature-stripped, PII-masked body)
-  - `cleaned_body` (TEXT, Signature-stripped text before masking)
   - `is_active_thread` (INTEGER, Boolean flag indicating ongoing thread)
   - `gatekeeper_confidence` (REAL, Gatekeeper confidence score)
   - `classifier_used` (TEXT, Engine identifier e.g. `jev`, `groq`, `offline_heuristic`)
@@ -404,15 +403,15 @@ To guarantee strict isolation and zero regressions, Phase 1 has a concrete, veri
 
 | # | Code | Track | Commit Description | Target Files | Status |
 |:---:|:---:|:---|:---|:---|:---:|
-| **1** | **P2-01** | Track 1 | `feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node` | `nodes/classifier.py`, `utils/classifier_client.py`, `tests/test_p2_classifier.py` | ⏳ Ready |
+| **1** | **P2-01** | Track 1 | `feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node` | `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py` | ⏳ Ready |
 | **2** | **P2-02** | Track 1 | `feat(hitl): [P2-02] human-in-the-loop review queue router and state gating` | `nodes/hitl_queue.py`, `db/database.py`, `tests/test_p2_hitl.py` | ⏳ Pending |
-| **3** | **P2-03** | Track 2 | `feat(dispatch): [P2-03] multi-destination dispatcher router and abstract adapter base` | `nodes/dispatcher.py`, `utils/adapters/base.py`, `tests/test_p2_dispatcher_router.py` | ⏳ Pending |
+| **3** | **P2-03** | Track 2 | `feat(dispatch): [P2-03] multi-destination dispatcher router and abstract adapter base` | `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `tests/test_p2_dispatcher_router.py` | ⏳ Pending |
 | **4** | **P2-04** | Track 2 | `feat(adapters): [P2-04] github issues adapter for engineering bug reports` | `utils/adapters/github_adapter.py`, `tests/test_p2_github_adapter.py` | ⏳ Pending |
 | **5** | **P2-05** | Track 2 | `feat(adapters): [P2-05] freescout helpdesk adapter for general customer support` | `utils/adapters/freescout_adapter.py`, `tests/test_p2_freescout_adapter.py` | ⏳ Pending |
 | **6** | **P2-06** | Track 2 | `feat(adapters): [P2-06] crm lead ingestion adapter for sales demo and pricing inquiries` | `utils/adapters/crm_adapter.py`, `tests/test_p2_crm_adapter.py` | ⏳ Pending |
 | **7** | **P2-07** | Track 2 | `feat(adapters): [P2-07] webhook alert adapter for urgent billing and refund disputes` | `utils/adapters/webhook_adapter.py`, `tests/test_p2_webhook_adapter.py` | ⏳ Pending |
 | **8** | **P2-08** | Track 3 | `feat(pipeline): [P2-08] end-to-end langgraph phase 2 graph compilation and dispatch handoff` | `pipeline.py`, `tests/test_p2_pipeline_e2e.py` | ⏳ Pending |
-| **9** | **P2-09** | Track 3 | `feat(worker): [P2-09] persistent phase 2 queue worker and background poller` | `scripts/phase2_worker.py`, `tools/run_worker.sh`, `tests/test_p2_worker.py` | ⏳ Pending |
+| **9** | **P2-09** | Track 3 | `feat(worker): [P2-09] persistent phase 2 queue worker and background poller` | `scripts/phase2_worker.py`, `db/database.py`, `tools/run_worker.sh`, `tests/test_p2_worker.py` | ⏳ Pending |
 | **10** | **P2-10** | Track 3 | `feat(testing): [P2-10] phase 2 synthetic benchmark dataset and validation suite` | `data/benchmark_phase2.json`, `main.py`, `tests/test_p2_benchmark.py` | ⏳ Pending |
 | **11** | **P2-11** | Track 3 | `docs(phase2): [P2-11] complete phase 2 documentation, architecture diagrams, and runbooks` | `README.md`, `ROADMAP.md`, `docs/` | ⏳ Pending |
 
@@ -421,7 +420,7 @@ To guarantee strict isolation and zero regressions, Phase 1 has a concrete, veri
 ### 4. Detailed Specifications for Commits P2-01 through P2-11
 
 #### [P2-01] Deep LLM Intent, Category, and Sentiment Classifier Node
-* **Scope:** `nodes/classifier.py`, `utils/classifier_client.py`, `config.yaml`, `tests/test_p2_classifier.py`
+* **Scope:** `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py`
 * **Problem:** Approved emails lack deep semantic classification. Downstream systems cannot distinguish between engineering bug reports, sales inquiries, general support tickets, and urgent billing issues.
 * **Solution:**
   1. Implement `classifier_node(state: TriageState) -> dict` consuming `masked_subject` and `masked_body`, populating `state["classification"]` with an `EmailClassification` object.
@@ -432,7 +431,7 @@ To guarantee strict isolation and zero regressions, Phase 1 has a concrete, veri
      - `summary`: One-sentence clean summary.
      - `suggested_team`: `Engineering`, `Sales`, `Billing`, `Support`.
      - `confidence`: `0.0` to `1.0`.
-  3. Provide offline heuristic fallback when external AI keys are absent (`state["classifier_used"] = "offline_heuristic"`).
+  3. Track Phase 2 classifier engine via dedicated field `state["p2_classifier_used"]` (e.g. `"groq"` or `"offline_heuristic"`), preserving Phase 1's `state["classifier_used"]` (which records `"jev"`, `"groq"`, or `"regex"` gatekeeper decisions) without overwriting it.
   4. Enforce fail-closed normalization — unknown or malformed output defaults to `manual_review` routing.
 * **Done When:** Table-driven unit tests verify schema conformance, mock LLM responses, offline fallback, and confidence clamping.
 
@@ -450,7 +449,7 @@ To guarantee strict isolation and zero regressions, Phase 1 has a concrete, veri
 * **Done When:** Boundary tests verify confidence < 0.85 and frustrated+high-priority route to HITL; schema migration and review resolution APIs verified.
 
 #### [P2-03] Multi-Destination Dispatcher Router and Abstract Adapter Base
-* **Scope:** `nodes/dispatcher.py`, `utils/adapters/base.py`, `tests/test_p2_dispatcher_router.py`
+* **Scope:** `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `tests/test_p2_dispatcher_router.py`
 * **Problem:** Downstream integrations are varied. Hard-coding API calls in pipeline nodes violates separation of concerns and creates duplicate external actions on unhandled retries.
 * **Solution:**
   1. Define abstract base class `BaseDestinationAdapter(ABC)` with `dispatch()`, `validate_config()`, and `health_check()`.
@@ -460,7 +459,7 @@ To guarantee strict isolation and zero regressions, Phase 1 has a concrete, veri
      - `Demo Request`, `Pricing Inquiry` ➔ CRM Leads (`crm`)
      - `General Query` ➔ FreeScout Helpdesk (`freescout`)
      - `Billing Issue`, `Refund Request`:
-       - If `priority in ["Critical", "High"]` OR dispute/chargeback detected ➔ Webhook Alert (`webhook`)
+       - If `priority in ["Critical", "High"]` (e.g. urgent billing disputes, double-charging, and payment failures that pass Phase 1; explicit "chargeback" keywords are already diverted in Phase 1's `sensitive_skip` node) ➔ Webhook Alert (`webhook`)
        - If `priority in ["Medium", "Low"]` (routine invoice/receipt query) ➔ FreeScout Helpdesk (`freescout`)
      - Any unmapped category ➔ Fails closed to `manual_review` / `hitl_pending`.
   4. Idempotency Key Specification: Every dispatch operation generates a deterministic `idempotency_key = f"{email_id}:{destination}:{action_type}"` to protect against duplicate dispatch.
@@ -497,7 +496,7 @@ To guarantee strict isolation and zero regressions, Phase 1 has a concrete, veri
 
 #### [P2-07] Webhook Alert Adapter for Urgent Billing and Refund Disputes
 * **Scope:** `utils/adapters/webhook_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_webhook_adapter.py`
-* **Problem:** Urgent billing disputes, chargeback threats, or payment errors require immediate notification to on-call or finance teams without duplicate alert spamming on retries.
+* **Problem:** Urgent billing disputes, double-charging, or payment failures that pass Phase 1 (since explicit "chargeback" keywords are already diverted in Phase 1's `sensitive_skip` node) require immediate notification to on-call or finance teams without duplicate alert spamming on retries.
 * **Solution:**
   1. Implement `WebhookAdapter` delivering cryptographically signed HTTP POST webhooks.
   2. Compute HMAC-SHA256 signature in `X-Signature-SHA256` header using shared secret.
@@ -516,7 +515,7 @@ To guarantee strict isolation and zero regressions, Phase 1 has a concrete, veri
 * **Done When:** Integration tests execute approved emails through the full LangGraph Phase 2 pipeline to adapter mock stubs with all state fields correctly populated.
 
 #### [P2-09] Persistent Phase 2 Queue Worker and Background Poller
-* **Scope:** `scripts/phase2_worker.py`, `tools/run_worker.sh`, `tests/test_p2_worker.py`
+* **Scope:** `scripts/phase2_worker.py`, `db/database.py`, `tools/run_worker.sh`, `tests/test_p2_worker.py`
 * **Problem:** In production, triage classification and downstream dispatching operate asynchronously from mailbox ingestion, requiring atomic batch claiming, worker crash recovery, and double-dispatch prevention.
 * **Solution:**
   1. Implement continuous polling worker querying atomic `db.claim_gatekeeper_approved(batch_size=10, worker_id=...)`.

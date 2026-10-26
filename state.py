@@ -90,6 +90,7 @@ class TriageState(TypedDict):
     customer_tier: Optional[str]  # 'Enterprise', 'Free', etc.
     sla_target: Optional[str]
     classification: Optional[EmailClassification]
+    p2_classifier_used: Optional[str]  # 'groq' or 'offline_heuristic'
 
     # Labeling & Dispatch (Nodes 11 & 12)
     labels_to_apply: List[str]
