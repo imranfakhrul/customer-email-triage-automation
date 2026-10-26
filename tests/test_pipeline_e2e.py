@@ -376,9 +376,9 @@ class TestPipelineE2E(unittest.TestCase):
                     )
                     self.db.mark_done(prior_email_id, routing_status="gatekeeper_approved")
 
-                # If testing duplicate item, mark the previous run done in DB first
+                # If testing duplicate delivery scenario, transmit identical payload once first to populate store
                 if expected.get("routing_status") == "duplicate_skipped":
-                    self.db.mark_done(item["email_id"], routing_status="completed")
+                    run_triage_pipeline(item, pipeline=self.pipeline, db=self.db)
 
                 result = run_triage_pipeline(item, pipeline=self.pipeline, db=self.db)
 

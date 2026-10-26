@@ -1016,7 +1016,6 @@
     "expected": {
       "gatekeeper_decision": "legitimate",
       "routing_status": "gatekeeper_approved",
-      "gatekeeper_confidence": 1.0,
       "is_active_thread": true,
       "dispatch_status": "done"
     }
@@ -1038,7 +1037,6 @@
     "expected": {
       "gatekeeper_decision": "legitimate",
       "routing_status": "gatekeeper_approved",
-      "gatekeeper_confidence": 1.0,
       "is_active_thread": true,
       "dispatch_status": "done"
     }
@@ -1060,7 +1058,6 @@
     "expected": {
       "gatekeeper_decision": "legitimate",
       "routing_status": "gatekeeper_approved",
-      "gatekeeper_confidence": 1.0,
       "is_active_thread": true,
       "dispatch_status": "done"
     }
@@ -1082,7 +1079,6 @@
     "expected": {
       "gatekeeper_decision": "legitimate",
       "routing_status": "gatekeeper_approved",
-      "gatekeeper_confidence": 1.0,
       "is_active_thread": true,
       "dispatch_status": "done"
     }
@@ -1104,7 +1100,6 @@
     "expected": {
       "gatekeeper_decision": "legitimate",
       "routing_status": "gatekeeper_approved",
-      "gatekeeper_confidence": 1.0,
       "is_active_thread": true,
       "dispatch_status": "done"
     }
@@ -1126,7 +1121,6 @@
     "expected": {
       "gatekeeper_decision": "legitimate",
       "routing_status": "gatekeeper_approved",
-      "gatekeeper_confidence": 1.0,
       "is_active_thread": true,
       "dispatch_status": "done"
     }
@@ -1148,7 +1142,6 @@
     "expected": {
       "gatekeeper_decision": "legitimate",
       "routing_status": "gatekeeper_approved",
-      "gatekeeper_confidence": 1.0,
       "is_active_thread": true,
       "dispatch_status": "done"
     }
@@ -1170,7 +1163,6 @@
     "expected": {
       "gatekeeper_decision": "legitimate",
       "routing_status": "gatekeeper_approved",
-      "gatekeeper_confidence": 1.0,
       "is_active_thread": true,
       "dispatch_status": "done"
     }
@@ -1192,7 +1184,6 @@
     "expected": {
       "gatekeeper_decision": "legitimate",
       "routing_status": "gatekeeper_approved",
-      "gatekeeper_confidence": 1.0,
       "is_active_thread": true,
       "dispatch_status": "done"
     }
@@ -1214,7 +1205,6 @@
     "expected": {
       "gatekeeper_decision": "legitimate",
       "routing_status": "gatekeeper_approved",
-      "gatekeeper_confidence": 1.0,
       "is_active_thread": true,
       "dispatch_status": "done"
     }

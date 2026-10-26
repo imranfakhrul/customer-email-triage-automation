@@ -45,14 +45,14 @@ def print_banner() -> None:
 def run_benchmark_suite(
     benchmark_path: Optional[str] = None,
     use_temp_db: bool = True,
-    offline: bool = False,
+    offline: bool = True,
 ) -> bool:
     """Executes the synthetic benchmark dataset through the complete triage pipeline.
 
     Args:
         benchmark_path: Optional path to benchmark JSON file.
         use_temp_db: Whether to use an isolated temporary database for benchmarking.
-        offline: Whether to force offline deterministic mode (preserves API quotas).
+        offline: Whether to force offline deterministic mode (preserves API quotas). Defaults to True.
 
     Returns:
         True if all benchmark scenarios pass matching assertions, False otherwise.
@@ -111,12 +111,12 @@ def run_benchmark_suite(
             )
             db.mark_done(prior_email_id, routing_status="gatekeeper_approved")
 
-        # If testing duplicate delivery scenario, mark previous run done in DB first
+        # If testing duplicate delivery scenario, transmit identical email payload once first to populate store naturally
         if expected.get("routing_status") == "duplicate_skipped":
-            db.mark_done(item["email_id"], routing_status="completed")
+            run_triage_pipeline(item, pipeline=pipeline, db=db, client=client, offline=offline)
 
         t0 = time.perf_counter()
-        result = run_triage_pipeline(item, pipeline=pipeline, db=db, client=client)
+        result = run_triage_pipeline(item, pipeline=pipeline, db=db, client=client, offline=offline)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         total_duration_ms += elapsed_ms
 
@@ -124,22 +124,24 @@ def run_benchmark_suite(
         gatekeeper_decision = str(result.get("gatekeeper_decision") or "—")
         classifier_used = str(result.get("classifier_used") or "—")
 
-        # Verify against expected outcomes
+        # Verify against expected outcomes: assert ALL keys present in scenario expected dictionary (C1)
         case_passed = True
-        if "routing_status" in expected and result.get("routing_status") != expected["routing_status"]:
-            case_passed = False
-        if "routing_status_in" in expected and result.get("routing_status") not in expected["routing_status_in"]:
-            case_passed = False
-        if "gatekeeper_decision" in expected and result.get("gatekeeper_decision") != expected["gatekeeper_decision"]:
-            case_passed = False
-        if "is_sensitive" in expected and result.get("is_sensitive") != expected["is_sensitive"]:
-            case_passed = False
-        if "is_spam" in expected and result.get("is_spam") != expected["is_spam"]:
-            case_passed = False
+        failed_reasons = []
+        for key, exp_val in expected.items():
+            if key == "routing_status_in":
+                if result.get("routing_status") not in exp_val:
+                    case_passed = False
+                    failed_reasons.append(f"routing_status not in {exp_val} (got {result.get('routing_status')})")
+            else:
+                act_val = result.get(key)
+                if act_val != exp_val:
+                    case_passed = False
+                    failed_reasons.append(f"{key}: expected {exp_val!r}, got {act_val!r}")
 
         if not case_passed:
             all_passed = False
             status_badge = "❌ FAIL"
+            logger.error(f"[Benchmark Failure] Scenario {scenario_id} failed: {'; '.join(failed_reasons)}")
         else:
             status_badge = "✅ PASS"
 
@@ -280,24 +282,37 @@ def main() -> None:
         help="Custom path to benchmark dataset JSON file.",
     )
     parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Enable live network calls to external AI providers (Groq/Jev). Default is offline deterministic heuristics.",
+    )
+    parser.add_argument(
         "--offline",
         action="store_true",
-        help="Run using offline deterministic heuristics (avoids external API quotas).",
+        default=None,
+        help="Run using offline deterministic heuristics (default).",
     )
 
     args = parser.parse_args()
 
+    # Determine offline mode: default to True; require explicit --live for network calls (C1)
+    is_offline = True
+    if args.live:
+        is_offline = False
+    if args.offline is True:
+        is_offline = True
+
     print_banner()
 
-    prepare_runtime(offline=args.offline)
+    prepare_runtime(offline=is_offline)
 
     if args.input:
-        process_single_email(args.input, offline=args.offline)
+        process_single_email(args.input, offline=is_offline)
     else:
         # Default behavior: run benchmark verification suite
         success = run_benchmark_suite(
             benchmark_path=args.dataset,
-            offline=args.offline,
+            offline=is_offline,
         )
         if not success:
             sys.exit(1)

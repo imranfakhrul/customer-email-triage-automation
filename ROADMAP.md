@@ -8,7 +8,7 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ## 🎯 Next Up & Recommended Execution Order
 
-**Next up:** **[B6] Optimize Process Lifecycle & Eliminate Repeated Work** (or **[A12] Container Security & Environment File Locations**)
+**Next up:** **[C2] Deterministic Test Environment Isolation** (or **[A12] Container Security & Environment File Locations**)
 
 ### Recommended Execution Roadmap:
 1. **Critical PII & Fail-Closed Guardrails:** `A1` -> `A2` -> `A4` -> `A3` -> `A8` -> `A13`
@@ -53,8 +53,8 @@ The following foundational improvements were implemented and merged in earlier P
 | **17** | **B3** | Correctness | Tune sensitive keywords to intent phrases and establish single source in `config.yaml` | ✅ Resolved |
 | **18** | **B4** | Correctness | Harmonize returned state with SQLite database and persist clean text for Phase 2 | ✅ Resolved |
 | **19** | **B5** | Correctness | Resolve config relative to root, fail fast on invalid YAML, and honor environment overrides | ✅ Resolved |
-| **20** | **B6** | Performance | Preload models and precompile regexes once at startup to eliminate per-email overhead | ⏳ Pending |
-| **21** | **C1** | Testing | Expand synthetic benchmark validation to check all expected fields and default to offline | ⏳ Pending |
+| **20** | **B6** | Performance | Preload models and precompile regexes once at startup to eliminate per-email overhead | ✅ Resolved (`9646e04`) |
+| **21** | **C1** | Testing | Expand synthetic benchmark validation to check all expected fields and default to offline | ✅ Resolved |
 | **22** | **C2** | Testing | Isolate test suite from host environment variables (`.env`) for reproducible test runs | ⏳ Pending |
 | **23** | **C3** | Testing | Ensure `scripts/jev_smoke_test.py` strictly verifies Jev response and exits non-zero on failure | ⏳ Pending |
 | **24** | **C4** | Documentation | Reconcile README/ROADMAP test counts, directory trees, class names, and claim metrics | ⏳ Pending |
@@ -261,7 +261,8 @@ The following foundational improvements were implemented and merged in earlier P
   5. **Startup Fail-Fast (`main.py`):** Evaluated and validated config as the very first operation in `main()`. On `FileNotFoundError` or `ConfigError`, prints `[-] Configuration error: <message>` to `stderr` and exits immediately with code `2` with zero traceback and zero DB creation.
 * **Done When:** Table-driven unit tests verify invalid YAML/types/typos raise `ConfigError`, CWD-independent resolution passes, env overrides take effect and flow into nodes, 13 swallows confirmed removed, and 221 unit tests + 100/100 benchmark scenarios pass.
 
-### [B6] Optimize Process Lifecycle & Eliminate Repeated Work [COMPLETED]
+### [B6] Optimize Process Lifecycle & Eliminate Repeated Work
+* **Status:** ✅ **Resolved (`9646e04`)**
 * **Problem:** spaCy model is repeatedly re-attempted on failure; `load_config()` reads YAML from disk on every email; regex patterns are recompiled on every invocation; LangGraph pipeline rebuilt per email in `process_single_email`.
 * **Solution:**
   1. **Thread-Safe Config Caching (`utils/config.py`):** Added `get_config()` loading and validating once per process under a mutex lock; added `reset_config_cache()`; `load_config()` stays uncached; eliminated all per-email `load_config()` calls across `nodes/ingest.py`, `nodes/pii_masker.py`, `nodes/sensitive_skip.py`, `nodes/jev_gatekeeper.py`, `db/database.py`, `utils/jev_client.py`, and `main.py`.
@@ -276,13 +277,14 @@ The following foundational improvements were implemented and merged in earlier P
 ## Part C: Tests and Documentation
 
 ### [C1] Comprehensive Benchmark Validation & Offline Default
-* **Problem:** Benchmark runner only validates 5 fields, ignoring discrepancies in `dispatch_status`, `is_threat`, etc. Benchmark defaults to live API keys. Duplicate test fakes state with manual `db.mark_done()`.
+* **Status:** ✅ **Resolved**
+* **Problem:** Benchmark runner only validated 5 fields, ignoring discrepancies in `dispatch_status`, `is_threat`, etc. Benchmark defaulted to live API keys. Duplicate test faked state with manual `db.mark_done()`.
 * **Solution:**
-  1. Assert all keys present in scenario `expected` dictionary.
-  2. Default to `--offline` mode; require explicit `--live` flag for network calls.
-  3. Transmit identical email payload twice through pipeline to verify duplicate delivery naturally.
-* **Note on Benchmark Transitions:** Benchmark rows 76-99 currently assert `spam_skipped`. They will be systematically updated to expect `manual_review` alongside the implementation of A3 and B2.
-* **Done When:** Benchmark runner checks 100% of expected fields across all 100 scenarios.
+  1. **Comprehensive Field Assertions (`main.py`):** Replaced hardcoded 5-field checks with a full loop checking 100% of keys in each scenario's `expected` dictionary (`routing_status`, `routing_status_in`, `dispatch_status`, `dispatch_target`, `gatekeeper_decision`, `is_active_thread`, `is_sensitive`, `is_spam`, `is_threat`).
+  2. **Safe Default Offline Mode & `--live` Flag (`main.py`):** Defaulted CLI execution to `offline = True` unless `--live` is explicitly passed. Preserved `--offline` argument for backward compatibility.
+  3. **Natural Duplicate Delivery (`main.py` & `tests/test_pipeline_e2e.py`):** Removed artificial `db.mark_done(...)` state tampering; transmitted payload once through the pipeline naturally, allowing subsequent benchmark invocation to verify true idempotency deduplication.
+  4. **Benchmark Harmonization (`data/benchmark_emails.json`):** Aligned scenarios 51-60 with post-A5 security architecture where active threads are evaluated by the gatekeeper rather than bypassed (removed stale `gatekeeper_confidence: 1.0`).
+* **Done When:** All 100 benchmark scenarios pass with 100% of expected fields asserted; `--live` flag verified; natural duplicate retransmission verified; 232 pytest unit tests pass.
 
 ### [C2] Deterministic Test Environment Isolation
 * **Problem:** Tests make live calls to external APIs if host `.env` file contains keys, causing flaky tests, rate-limiting, and test data leaks.
