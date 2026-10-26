@@ -27,7 +27,7 @@ from nodes import (
     signature_stripper_node,
 )
 from state import TriageState
-from utils.config import load_config
+from utils.config import get_config
 from utils.jev_client import JevAIClient
 
 logger = logging.getLogger("triage.pipeline")
@@ -205,3 +205,36 @@ def run_triage_pipeline(
 
     final_state = pipeline.invoke(initial_state)
     return final_state
+
+
+def prepare_runtime(offline: bool = False) -> None:
+    """Preloads and warms up process-wide configuration, regex patterns, spaCy, and AI client.
+
+    Ensures zero repeated initialization during per-email processing.
+
+    Args:
+        offline: Whether pipeline is running in offline mode.
+    """
+    cfg = get_config()
+
+    # Precompile sensitive keyword patterns
+    from nodes.sensitive_skip import get_compiled_keyword_patterns
+    keywords = cfg.get("privacy", {}).get("sensitive_keywords", [])
+    get_compiled_keyword_patterns(keywords)
+
+    # Preload tech terms whitelist and context words
+    from nodes.pii_masker import (
+        load_tech_terms_tiers,
+        load_tech_context_words,
+        validate_startup,
+    )
+    load_tech_terms_tiers()
+    load_tech_context_words(cfg)
+
+    # Preload / validate spaCy model
+    validate_startup(config=cfg, offline=offline)
+
+    # Lazily initialize default gatekeeper client if running online
+    if not offline:
+        from utils.jev_client import get_default_client
+        get_default_client(config=cfg)

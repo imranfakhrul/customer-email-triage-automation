@@ -261,13 +261,15 @@ The following foundational improvements were implemented and merged in earlier P
   5. **Startup Fail-Fast (`main.py`):** Evaluated and validated config as the very first operation in `main()`. On `FileNotFoundError` or `ConfigError`, prints `[-] Configuration error: <message>` to `stderr` and exits immediately with code `2` with zero traceback and zero DB creation.
 * **Done When:** Table-driven unit tests verify invalid YAML/types/typos raise `ConfigError`, CWD-independent resolution passes, env overrides take effect and flow into nodes, 13 swallows confirmed removed, and 221 unit tests + 100/100 benchmark scenarios pass.
 
-### [B6] Optimize Process Lifecycle & Eliminate Repeated Work
-* **Problem:** spaCy model is repeatedly re-attempted on failure; `load_config()` reads YAML from disk on every email; regex patterns are recompiled on every invocation.
+### [B6] Optimize Process Lifecycle & Eliminate Repeated Work [COMPLETED]
+* **Problem:** spaCy model is repeatedly re-attempted on failure; `load_config()` reads YAML from disk on every email; regex patterns are recompiled on every invocation; LangGraph pipeline rebuilt per email in `process_single_email`.
 * **Solution:**
-  1. Preload and cache spaCy model once at startup.
-  2. Load configuration once in `main.py` and pass down.
-  3. Precompile all keyword and heuristic regexes at startup.
-* **Done When:** Tests verify that spaCy loading, config I/O, and pattern compilation occur exactly once per process.
+  1. **Thread-Safe Config Caching (`utils/config.py`):** Added `get_config()` loading and validating once per process under a mutex lock; added `reset_config_cache()`; `load_config()` stays uncached; eliminated all per-email `load_config()` calls across `nodes/ingest.py`, `nodes/pii_masker.py`, `nodes/sensitive_skip.py`, `nodes/jev_gatekeeper.py`, `db/database.py`, `utils/jev_client.py`, and `main.py`.
+  2. **Keyword Pattern Caching (`nodes/sensitive_skip.py`):** Added `get_compiled_keyword_patterns(keywords)` caching compiled regex tuples under a lock with `reset_keyword_patterns_cache()`.
+  3. **spaCy Per-Model Caching (`nodes/pii_masker.py`):** Cache per model name in `_SPACY_MODELS`, remember failures in `_SPACY_FAILED_MODELS` without retrying; thread-safe tech terms tiers and context words caching.
+  4. **Shared Default JevClient (`utils/jev_client.py` & `nodes/jev_gatekeeper.py`):** Reuse one lazily created, thread-safe, process-wide `JevClient` via `get_default_client()` with `reset_default_client()`, preserving the A13 session-wide 401 disable state across all emails.
+  5. **Pipeline Reuse & Warmup (`pipeline.py` & `main.py`):** `process_single_email` compiles pipeline once; added `prepare_runtime(offline=...)` preloading config, keyword regexes, tech terms, spaCy, and default client at startup.
+* **Done When:** Verified 100/100 benchmark equivalence against pre-B6 baseline (0 diff between `/tmp/b6_before.json` and `/tmp/b6_after.json`); average benchmark latency reduced by 57% (from 68.8ms to 29.7ms/email); unit test suite expanded to 229 tests including concurrency (8 threads) and lifecycle count tests (`yaml.safe_load == 1`, `spacy.load == 1`, `re.compile("subpoena") == 1`, `JevClient <= 1`).
 
 ---
 

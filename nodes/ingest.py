@@ -12,7 +12,7 @@ import uuid
 
 from db.database import TriageDatabase
 from state import TriageState
-from utils.config import load_config
+from utils.config import get_config
 
 
 def ingest_node(
@@ -31,7 +31,7 @@ def ingest_node(
         db = TriageDatabase()
 
     # Load system settings
-    config = load_config()
+    config = get_config()
     stale_minutes = config.get("system", {}).get("idempotency_stale_minutes", 10)
     max_retries = config.get("system", {}).get("max_dispatch_retries", 3)
 

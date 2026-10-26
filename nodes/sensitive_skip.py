@@ -13,9 +13,10 @@ import re
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 import logging
+import threading
 from db.database import TriageDatabase
 from state import TriageState
-from utils.config import load_config
+from utils.config import get_config
 from utils.text_tools import bounded_scan_text
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,33 @@ def compile_keyword_patterns(keywords: List[str]) -> List[Tuple[str, re.Pattern]
     return patterns
 
 
+_KEYWORD_PATTERNS_CACHE: Dict[Tuple[str, ...], List[Tuple[str, re.Pattern]]] = {}
+_KEYWORD_PATTERNS_LOCK = threading.Lock()
+
+
+def get_compiled_keyword_patterns(keywords: List[str]) -> List[Tuple[str, re.Pattern]]:
+    """Retrieves compiled keyword patterns from cache, compiling once per keyword tuple.
+
+    Thread-safe.
+    """
+    key = tuple(keywords)
+    if key in _KEYWORD_PATTERNS_CACHE:
+        return _KEYWORD_PATTERNS_CACHE[key]
+    with _KEYWORD_PATTERNS_LOCK:
+        if key in _KEYWORD_PATTERNS_CACHE:
+            return _KEYWORD_PATTERNS_CACHE[key]
+        compiled = compile_keyword_patterns(keywords)
+        _KEYWORD_PATTERNS_CACHE[key] = compiled
+        return compiled
+
+
+def reset_keyword_patterns_cache() -> None:
+    """Clears the compiled keyword patterns cache (used for testing or config resets)."""
+    global _KEYWORD_PATTERNS_CACHE
+    with _KEYWORD_PATTERNS_LOCK:
+        _KEYWORD_PATTERNS_CACHE.clear()
+
+
 def evaluate_sensitive(
     text: str,
     subject: str = "",
@@ -125,14 +153,14 @@ def evaluate_sensitive(
         Tuple of (is_sensitive: bool, sensitive_reason: Optional[str]).
     """
     if config is None:
-        config = load_config()
+        config = get_config()
 
     privacy_cfg = config.get("privacy", {})
     keywords = privacy_cfg.get("sensitive_keywords", EMERGENCY_SENSITIVE_KEYWORDS)
     max_code_density = privacy_cfg.get("max_code_density", DEFAULT_MAX_CODE_DENSITY)
 
     # 1. Keyword / Phrase Inspection across subject, cleaned/masked body, and raw body
-    compiled_patterns = compile_keyword_patterns(keywords)
+    compiled_patterns = get_compiled_keyword_patterns(keywords)
     texts_to_check = [t for t in [subject, text, raw_body] if t]
 
     for candidate_text in texts_to_check:

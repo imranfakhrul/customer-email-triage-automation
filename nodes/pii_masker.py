@@ -19,16 +19,21 @@ import logging
 import os
 import re
 import secrets
+import threading
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import phonenumbers
 
 from state import TriageState
-from utils.config import load_config
+from utils.config import get_config
 
 logger = logging.getLogger(__name__)
 
 # Cached spaCy NLP model state
+_SPACY_LOCK = threading.Lock()
+_SPACY_MODELS: Dict[str, Any] = {}
+_SPACY_FAILED_MODELS: Set[str] = set()
+_SPACY_WARNED_MODELS: Set[str] = set()
 _SPACY_NLP = None
 _SPACY_INITIALIZED: bool = False
 _SPACY_FAILED: bool = False
@@ -71,7 +76,7 @@ def is_external_ai_enabled(
             return False
 
     if config is None:
-        config = load_config()
+        config = get_config()
 
     jev_env = config.get("jev", {}).get("api_key_env", "JEV_API_KEY")
     groq_env = config.get("groq", {}).get("api_key_env", "GROQ_API_KEY")
@@ -83,9 +88,9 @@ def is_external_ai_enabled(
 
 
 def get_spacy_nlp(model_name: Optional[str] = None):
-    """Loads and caches the spaCy language pipeline model once at startup.
+    """Loads and caches the spaCy language pipeline model once at startup per model name.
 
-    Remembers a failure and does not retry on every email.
+    Remembers a failure and does not retry on every email. Thread-safe.
 
     Args:
         model_name: Optional name of the spaCy model. Defaults to config or 'en_core_web_sm'.
@@ -94,46 +99,68 @@ def get_spacy_nlp(model_name: Optional[str] = None):
         Loaded Language pipeline, or None if unavailable.
     """
     global _SPACY_NLP, _SPACY_INITIALIZED, _SPACY_FAILED, _SPACY_WARNED_STARTUP
-    if _SPACY_INITIALIZED:
-        return _SPACY_NLP
-
-    _SPACY_INITIALIZED = True
     if model_name is None:
-        cfg = load_config()
+        cfg = get_config()
         model_name = cfg.get("privacy", {}).get("spacy_model", "en_core_web_sm")
 
-    try:
-        import spacy
+    with _SPACY_LOCK:
+        if model_name in _SPACY_FAILED_MODELS:
+            _SPACY_FAILED = True
+            _SPACY_INITIALIZED = True
+            _SPACY_NLP = None
+            return None
 
-        _SPACY_NLP = spacy.load(model_name)
-        _SPACY_FAILED = False
-    except Exception as exc:
-        _SPACY_NLP = None
-        _SPACY_FAILED = True
-        if not is_external_ai_enabled():
-            if not _SPACY_WARNED_STARTUP:
-                logger.warning(
-                    "spaCy model unavailable and external AI is disabled; "
-                    "names will only be masked by regex rules."
-                )
-                _SPACY_WARNED_STARTUP = True
+        if model_name in _SPACY_MODELS:
+            _SPACY_FAILED = False
+            _SPACY_INITIALIZED = True
+            _SPACY_NLP = _SPACY_MODELS[model_name]
+            return _SPACY_MODELS[model_name]
 
-    return _SPACY_NLP
+        try:
+            import spacy
+
+            nlp = spacy.load(model_name)
+            _SPACY_MODELS[model_name] = nlp
+            _SPACY_FAILED = False
+            _SPACY_NLP = nlp
+            _SPACY_INITIALIZED = True
+            return nlp
+        except Exception as exc:
+            _SPACY_FAILED_MODELS.add(model_name)
+            _SPACY_NLP = None
+            _SPACY_FAILED = True
+            _SPACY_INITIALIZED = True
+            if not is_external_ai_enabled():
+                if model_name not in _SPACY_WARNED_MODELS:
+                    logger.warning(
+                        "spaCy model unavailable and external AI is disabled; "
+                        "names will only be masked by regex rules."
+                    )
+                    _SPACY_WARNED_MODELS.add(model_name)
+                    _SPACY_WARNED_STARTUP = True
+            return None
 
 
 def is_spacy_available(model_name: Optional[str] = None) -> bool:
     """Returns True if spaCy NLP is loaded and has not failed at runtime."""
     nlp = get_spacy_nlp(model_name)
-    return (nlp is not None) and (not _SPACY_FAILED)
+    if model_name is None:
+        cfg = get_config()
+        model_name = cfg.get("privacy", {}).get("spacy_model", "en_core_web_sm")
+    return (nlp is not None) and (not _SPACY_FAILED) and (model_name not in _SPACY_FAILED_MODELS)
 
 
 def reset_spacy_cache() -> None:
     """Resets cached spaCy NLP state (for unit testing)."""
     global _SPACY_NLP, _SPACY_INITIALIZED, _SPACY_FAILED, _SPACY_WARNED_STARTUP
-    _SPACY_NLP = None
-    _SPACY_INITIALIZED = False
-    _SPACY_FAILED = False
-    _SPACY_WARNED_STARTUP = False
+    with _SPACY_LOCK:
+        _SPACY_MODELS.clear()
+        _SPACY_FAILED_MODELS.clear()
+        _SPACY_WARNED_MODELS.clear()
+        _SPACY_NLP = None
+        _SPACY_INITIALIZED = False
+        _SPACY_FAILED = False
+        _SPACY_WARNED_STARTUP = False
 
 
 def validate_startup(
@@ -338,6 +365,7 @@ GREETING_SIGNOFF_REGEX = re.compile(
 )
 
 # Cached tech-terms sets loaded from config
+_TECH_TERMS_LOCK = threading.Lock()
 _TECH_TERMS_CACHE: Optional[Set[str]] = None
 _UNAMBIGUOUS_CACHE: Optional[Set[str]] = None
 _AMBIGUOUS_CACHE: Optional[Set[str]] = None
@@ -362,52 +390,56 @@ def load_tech_terms_tiers(
     if _UNAMBIGUOUS_CACHE is not None and _AMBIGUOUS_CACHE is not None and filepath is None:
         return _UNAMBIGUOUS_CACHE, _AMBIGUOUS_CACHE
 
-    unambiguous: Set[str] = set(NON_PERSON_ENTITIES)
-    ambiguous: Set[str] = set()
+    with _TECH_TERMS_LOCK:
+        if _UNAMBIGUOUS_CACHE is not None and _AMBIGUOUS_CACHE is not None and filepath is None:
+            return _UNAMBIGUOUS_CACHE, _AMBIGUOUS_CACHE
 
-    target_path = filepath
-    if target_path is None:
-        cfg = load_config()
-        target_path = cfg.get("privacy", {}).get(
-            "tech_terms_file", "config/tech_terms.txt"
-        )
+        unambiguous: Set[str] = set(NON_PERSON_ENTITIES)
+        ambiguous: Set[str] = set()
 
-    if target_path:
-        from pathlib import Path
+        target_path = filepath
+        if target_path is None:
+            cfg = get_config()
+            target_path = cfg.get("privacy", {}).get(
+                "tech_terms_file", "config/tech_terms.txt"
+            )
 
-        candidate = Path(target_path)
-        if not candidate.is_absolute():
-            repo_root = Path(__file__).resolve().parent.parent
-            resolved = repo_root / target_path
-            if resolved.exists():
-                candidate = resolved
+        if target_path:
+            from pathlib import Path
 
-        if candidate.exists():
-            current_section = "unambiguous"
-            try:
-                with open(candidate, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line or line.startswith("#"):
-                            continue
-                        if line.startswith("[") and line.endswith("]"):
-                            sec = line[1:-1].strip().lower()
-                            if sec in ("unambiguous", "ambiguous"):
-                                current_section = sec
-                            continue
-                        if current_section == "ambiguous":
-                            ambiguous.add(line.lower())
-                        else:
-                            unambiguous.add(line.lower())
-            except Exception:
-                pass
+            candidate = Path(target_path)
+            if not candidate.is_absolute():
+                repo_root = Path(__file__).resolve().parent.parent
+                resolved = repo_root / target_path
+                if resolved.exists():
+                    candidate = resolved
 
-    if filepath is None:
-        _UNAMBIGUOUS_CACHE = unambiguous
-        _AMBIGUOUS_CACHE = ambiguous
-        _TECH_TERMS_CACHE = unambiguous | ambiguous
+            if candidate.exists():
+                current_section = "unambiguous"
+                try:
+                    with open(candidate, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line or line.startswith("#"):
+                                continue
+                            if line.startswith("[") and line.endswith("]"):
+                                sec = line[1:-1].strip().lower()
+                                if sec in ("unambiguous", "ambiguous"):
+                                    current_section = sec
+                                continue
+                            if current_section == "ambiguous":
+                                ambiguous.add(line.lower())
+                            else:
+                                unambiguous.add(line.lower())
+                except Exception:
+                    pass
 
-    return unambiguous, ambiguous
+        if filepath is None:
+            _UNAMBIGUOUS_CACHE = unambiguous
+            _AMBIGUOUS_CACHE = ambiguous
+            _TECH_TERMS_CACHE = unambiguous | ambiguous
+
+        return unambiguous, ambiguous
 
 
 def load_tech_terms_whitelist(filepath: Optional[str] = None) -> Set[str]:
@@ -428,10 +460,11 @@ def load_tech_terms_whitelist(filepath: Optional[str] = None) -> Set[str]:
 def reset_tech_terms_cache() -> None:
     """Resets cached tech terms whitelist (used for testing or dynamic reloads)."""
     global _TECH_TERMS_CACHE, _UNAMBIGUOUS_CACHE, _AMBIGUOUS_CACHE, _TECH_CONTEXT_WORDS_CACHE
-    _TECH_TERMS_CACHE = None
-    _UNAMBIGUOUS_CACHE = None
-    _AMBIGUOUS_CACHE = None
-    _TECH_CONTEXT_WORDS_CACHE = None
+    with _TECH_TERMS_LOCK:
+        _TECH_TERMS_CACHE = None
+        _UNAMBIGUOUS_CACHE = None
+        _AMBIGUOUS_CACHE = None
+        _TECH_CONTEXT_WORDS_CACHE = None
 
 
 def load_tech_context_words(config: Optional[Dict[str, Any]] = None) -> Set[str]:
@@ -440,19 +473,23 @@ def load_tech_context_words(config: Optional[Dict[str, Any]] = None) -> Set[str]
     if _TECH_CONTEXT_WORDS_CACHE is not None and config is None:
         return _TECH_CONTEXT_WORDS_CACHE
 
-    words = set(DEFAULT_TECH_CONTEXT_WORDS)
-    cfg = config
-    if cfg is None:
-        cfg = load_config()
+    with _TECH_TERMS_LOCK:
+        if _TECH_CONTEXT_WORDS_CACHE is not None and config is None:
+            return _TECH_CONTEXT_WORDS_CACHE
 
-    if cfg:
-        custom_words = cfg.get("privacy", {}).get("tech_context_words")
-        if custom_words and isinstance(custom_words, (list, set, tuple)):
-            words = {str(w).strip().lower() for w in custom_words if w}
+        words = set(DEFAULT_TECH_CONTEXT_WORDS)
+        cfg = config
+        if cfg is None:
+            cfg = get_config()
 
-    if config is None:
-        _TECH_CONTEXT_WORDS_CACHE = words
-    return words
+        if cfg:
+            custom_words = cfg.get("privacy", {}).get("tech_context_words")
+            if custom_words and isinstance(custom_words, (list, set, tuple)):
+                words = {str(w).strip().lower() for w in custom_words if w}
+
+        if config is None:
+            _TECH_CONTEXT_WORDS_CACHE = words
+        return words
 
 
 def is_greeting_or_signoff(text: str, start_char: int) -> bool:
@@ -630,7 +667,7 @@ def mask_pii(
 
     # 6. Library Pass: Phone Numbers (phonenumbers library)
     if default_phone_region is None:
-        cfg = load_config()
+        cfg = get_config()
         default_phone_region = cfg.get("privacy", {}).get(
             "default_phone_region", "US"
         )
@@ -685,7 +722,7 @@ def mask_pii(
         nlp = nlp_override
     else:
         if spacy_model_name is None:
-            cfg = load_config()
+            cfg = get_config()
             spacy_model_name = cfg.get("privacy", {}).get(
                 "spacy_model", "en_core_web_sm"
             )
@@ -743,9 +780,15 @@ def mask_pii(
                 working = working[:start_char] + token + working[end_char:]
         except Exception as exc:
             _SPACY_FAILED = True
+            eff_model = spacy_model_name or get_config().get("privacy", {}).get("spacy_model", "en_core_web_sm")
+            with _SPACY_LOCK:
+                _SPACY_FAILED_MODELS.add(eff_model)
             logger.warning(f"spaCy NER processing failed at runtime: {exc}")
     else:
         _SPACY_FAILED = True
+        eff_model = spacy_model_name or get_config().get("privacy", {}).get("spacy_model", "en_core_web_sm")
+        with _SPACY_LOCK:
+            _SPACY_FAILED_MODELS.add(eff_model)
 
     # 9. Consistency Pass: Ensure any pre-existing tokens from token_map are replaced
     unambiguous_terms, ambiguous_terms = load_tech_terms_tiers()
@@ -822,7 +865,7 @@ def pii_masker_node(
     email_id = state.get("email_id") or "unknown"
 
     if config is None:
-        config = load_config()
+        config = get_config()
     default_region = config.get("privacy", {}).get("default_phone_region", "US")
 
     token_map = dict(state.get("token_map") or {})

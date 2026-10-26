@@ -14,7 +14,12 @@ from typing import Any, Dict, Optional
 import logging
 from db.database import TriageDatabase
 from state import TriageState
-from utils.jev_client import JevClient, normalize_result
+from utils.jev_client import (
+    JevClient,
+    get_default_client,
+    normalize_result,
+    reset_default_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +126,7 @@ def jev_gatekeeper_node(
     email_id = state.get("email_id", "")
 
     if client is None:
-        client = JevClient()
+        client = get_default_client()
 
     # Fail-closed privacy safeguard: if masked_subject is missing/None, do not egress to AI
     subject = state.get("masked_subject")

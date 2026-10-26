@@ -12,12 +12,13 @@ import math
 import os
 import re
 import secrets
+import threading
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import requests
 from prompts import GATEKEEPER_SYSTEM_PROMPT, build_gatekeeper_system_prompt
-from utils.config import get_env_var, load_config
+from utils.config import get_config, get_env_var
 from utils.text_tools import bounded_scan_text
 
 logger = logging.getLogger(__name__)
@@ -269,7 +270,7 @@ class JevClient:
             api_url: Optional URL override for Jev AI endpoint.
         """
         if config is None:
-            config = load_config()
+            config = get_config()
 
         self.config = config
         gatekeeper_cfg = config.get("gatekeeper", {})
@@ -727,3 +728,32 @@ class JevClient:
 
 # Convenient alias for architectural consistency
 JevAIClient = JevClient
+
+_DEFAULT_CLIENT: Optional[JevClient] = None
+_DEFAULT_CLIENT_LOCK = threading.Lock()
+
+
+def get_default_client(config: Optional[Dict[str, Any]] = None) -> JevClient:
+    """Retrieves or creates the thread-safe process-wide default JevClient.
+
+    Args:
+        config: Optional configuration dictionary.
+
+    Returns:
+        The shared JevClient instance.
+    """
+    global _DEFAULT_CLIENT
+    if _DEFAULT_CLIENT is not None:
+        return _DEFAULT_CLIENT
+    with _DEFAULT_CLIENT_LOCK:
+        if _DEFAULT_CLIENT is not None:
+            return _DEFAULT_CLIENT
+        _DEFAULT_CLIENT = JevClient(config=config)
+        return _DEFAULT_CLIENT
+
+
+def reset_default_client() -> None:
+    """Resets the process-wide default JevClient instance (used for testing)."""
+    global _DEFAULT_CLIENT
+    with _DEFAULT_CLIENT_LOCK:
+        _DEFAULT_CLIENT = None

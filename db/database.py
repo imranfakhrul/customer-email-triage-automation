@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 from typing import Any, Dict, Generator, List, Optional, Tuple
-from utils.config import load_config
+from utils.config import get_config
 
 
 class PersistenceError(Exception):
@@ -28,7 +28,7 @@ class TriageDatabase:
             db_path: Path to the SQLite database file. If None, loaded from config.yaml.
         """
         if db_path is None:
-            config = load_config()
+            config = get_config()
             db_path = config["system"]["database_path"]
 
         self.db_path = db_path
@@ -488,7 +488,7 @@ class TriageDatabase:
         if config is not None:
             persist_text = config.get("system", {}).get("persist_masked_text", True)
         else:
-            cfg = load_config()
+            cfg = get_config()
             persist_text = cfg.get("system", {}).get("persist_masked_text", True)
 
         # Rule: masked_subject and masked_body persisted ONLY for gatekeeper_approved and manual_review

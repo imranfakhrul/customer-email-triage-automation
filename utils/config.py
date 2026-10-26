@@ -6,6 +6,7 @@ plaintext config files.
 
 import os
 from pathlib import Path
+import threading
 from typing import Any, Dict, List, Optional
 import yaml
 from dotenv import load_dotenv
@@ -386,6 +387,46 @@ def load_config(config_path=None) -> Dict[str, Any]:
     return raw
 
 
+_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_CONFIG_LOCK = threading.Lock()
+
+
+def get_config(config_path=None) -> Dict[str, Any]:
+    """Retrieves cached configuration, loading and validating it once per process.
+
+    Thread-safe.
+
+    Args:
+        config_path: Path to configuration file. None uses DEFAULT_CONFIG_PATH.
+
+    Returns:
+        The validated configuration dictionary.
+    """
+    global _CONFIG_CACHE
+    if _CONFIG_CACHE is not None and config_path is None:
+        return _CONFIG_CACHE
+
+    with _CONFIG_LOCK:
+        if _CONFIG_CACHE is not None and config_path is None:
+            return _CONFIG_CACHE
+        loaded = load_config(config_path)
+        if config_path is None:
+            _CONFIG_CACHE = loaded
+        return loaded
+
+
+def reset_config_cache() -> None:
+    """Resets the process-wide cached configuration (used for tests)."""
+    global _CONFIG_CACHE
+    with _CONFIG_LOCK:
+        _CONFIG_CACHE = None
+    try:
+        from nodes.sensitive_skip import reset_keyword_patterns_cache
+        reset_keyword_patterns_cache()
+    except ImportError:
+        pass
+
+
 def get_env_var(
     var_name: Optional[str], default: Optional[str] = None
 ) -> Optional[str]:
@@ -423,7 +464,7 @@ def resolve_destination_config(
         Resolved destination dict or None if team is not configured.
     """
     if config is None:
-        config = load_config(config_path)
+        config = get_config(config_path)
 
     destinations = config.get("destinations", {})
     team_config = destinations.get(team_name)

@@ -420,6 +420,14 @@ class TestEnvironmentOverrides(unittest.TestCase):
 class TestNoSwallow(unittest.TestCase):
     """TriageDatabase(), JevClient(), and pii_masker_node raise ConfigError on bad config."""
 
+    def setUp(self):
+        import utils.config as cfg_mod
+        cfg_mod.reset_config_cache()
+
+    def tearDown(self):
+        import utils.config as cfg_mod
+        cfg_mod.reset_config_cache()
+
     def _patch_default_config(self, bad_yaml: str):
         """Context manager: patches DEFAULT_CONFIG_PATH to a temp file with bad_yaml."""
         import utils.config as cfg_mod
@@ -428,10 +436,12 @@ class TestNoSwallow(unittest.TestCase):
             bad.write_text(bad_yaml)
             orig = cfg_mod.DEFAULT_CONFIG_PATH
             cfg_mod.DEFAULT_CONFIG_PATH = bad
+            cfg_mod.reset_config_cache()
             try:
                 yield
             finally:
                 cfg_mod.DEFAULT_CONFIG_PATH = orig
+                cfg_mod.reset_config_cache()
 
     from contextlib import contextmanager
     _patch_default_config = contextmanager(_patch_default_config)
@@ -444,12 +454,14 @@ class TestNoSwallow(unittest.TestCase):
             bad = Path(tmp) / "bad.yaml"
             bad.write_text("")  # empty → ConfigError
             cfg_mod.DEFAULT_CONFIG_PATH = bad
+            cfg_mod.reset_config_cache()
             try:
                 from db.database import TriageDatabase
                 with self.assertRaises((ConfigError, FileNotFoundError)):
                     TriageDatabase()
             finally:
                 cfg_mod.DEFAULT_CONFIG_PATH = orig
+                cfg_mod.reset_config_cache()
 
     def test_jev_client_raises_on_bad_config(self):
         """JevClient() with no explicit config must raise ConfigError when config is broken."""
@@ -459,12 +471,14 @@ class TestNoSwallow(unittest.TestCase):
             bad = Path(tmp) / "bad.yaml"
             bad.write_text("")  # empty → ConfigError
             cfg_mod.DEFAULT_CONFIG_PATH = bad
+            cfg_mod.reset_config_cache()
             try:
                 from utils.jev_client import JevClient
                 with self.assertRaises((ConfigError, FileNotFoundError)):
                     JevClient()  # no config= arg → will call load_config()
             finally:
                 cfg_mod.DEFAULT_CONFIG_PATH = orig
+                cfg_mod.reset_config_cache()
 
     def test_pii_masker_node_raises_on_bad_config(self):
         """pii_masker_node() with no config arg must raise ConfigError when config is broken."""
@@ -474,6 +488,7 @@ class TestNoSwallow(unittest.TestCase):
             bad = Path(tmp) / "bad.yaml"
             bad.write_text("")  # empty → ConfigError
             cfg_mod.DEFAULT_CONFIG_PATH = bad
+            cfg_mod.reset_config_cache()
             try:
                 from nodes.pii_masker import pii_masker_node
                 state = {
@@ -487,6 +502,7 @@ class TestNoSwallow(unittest.TestCase):
                     pii_masker_node(state)
             finally:
                 cfg_mod.DEFAULT_CONFIG_PATH = orig
+                cfg_mod.reset_config_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -494,6 +510,14 @@ class TestNoSwallow(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class TestMainConfigError(unittest.TestCase):
     """main() must exit code 2, print to stderr, and produce no triage output."""
+
+    def setUp(self):
+        import utils.config as cfg_mod
+        cfg_mod.reset_config_cache()
+
+    def tearDown(self):
+        import utils.config as cfg_mod
+        cfg_mod.reset_config_cache()
 
     def test_main_exits_code_2_on_empty_config(self):
         """In-process: empty config → sys.exit(2), stderr contains 'Configuration error'."""
@@ -503,6 +527,7 @@ class TestMainConfigError(unittest.TestCase):
             bad = Path(tmp) / "empty.yaml"
             bad.write_text("")  # empty → ConfigError
             cfg_mod.DEFAULT_CONFIG_PATH = bad
+            cfg_mod.reset_config_cache()
             try:
                 import importlib
                 import main as main_mod
@@ -520,6 +545,7 @@ class TestMainConfigError(unittest.TestCase):
                 self.assertNotIn("Traceback", stdout_buf.getvalue())
             finally:
                 cfg_mod.DEFAULT_CONFIG_PATH = orig
+                cfg_mod.reset_config_cache()
 
     def test_main_subprocess_invalid_config_exits_2(self):
         """Subprocess test: rename config.yaml, run main.py --offline, expect exit code 2."""

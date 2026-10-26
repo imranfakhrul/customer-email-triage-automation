@@ -19,8 +19,8 @@ import time
 from typing import Any, Dict, List, Optional
 
 from db.database import TriageDatabase
-from pipeline import create_triage_pipeline, run_triage_pipeline
-from utils.config import load_config, ConfigError
+from pipeline import create_triage_pipeline, prepare_runtime, run_triage_pipeline
+from utils.config import ConfigError, get_config
 
 # Configure structured logging
 logging.basicConfig(
@@ -214,7 +214,10 @@ def process_single_email(json_path: str, offline: bool = False) -> None:
             if offline
             else None
         )
-        result = run_triage_pipeline(payload, db=db, client=client, offline=offline)
+        pipeline = create_triage_pipeline(db=db, client=client, offline=offline)
+        result = run_triage_pipeline(
+            payload, pipeline=pipeline, db=db, client=client, offline=offline
+        )
 
         print("\n--- Pipeline Triage Result ---")
         output_summary = {
@@ -242,9 +245,9 @@ def process_single_email(json_path: str, offline: bool = False) -> None:
 
 def main() -> None:
     """CLI entrypoint."""
-    # ── B5: Fail-fast config load (first thing, before any pipeline work) ────
+    # ── B5/B6: Fail-fast cached config load (first thing, before any pipeline work) ────
     try:
-        config = load_config()
+        config = get_config()
     except FileNotFoundError as exc:
         print(f"[-] Configuration error: {exc}", file=sys.stderr)
         sys.exit(2)
@@ -286,8 +289,7 @@ def main() -> None:
 
     print_banner()
 
-    from nodes.pii_masker import validate_startup
-    validate_startup(offline=args.offline)
+    prepare_runtime(offline=args.offline)
 
     if args.input:
         process_single_email(args.input, offline=args.offline)
