@@ -20,11 +20,11 @@ Each issue is implemented individually with corresponding unit tests, verified a
 ### Phase 2 Implementation Sequence:
 1. **Track 0: Architectural Decisions & Client Alignment:** `P2-00` ✅ (Delivered in `docs/phase2_decisions.md`)
 2. **Track 1: Intelligence Classification Engine:** `P2-01` ✅ (Deep Classifier) ➔ `P2-02` ✅ (HITL Review Queue)
-3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` (Router Node & Matrix) ➔ `P2-04` (GitHub) ➔ `P2-05` (FreeScout) ➔ `P2-06` (CRM) ➔ `P2-07` (Webhook)
+3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04` (GitHub) ➔ `P2-05` (FreeScout) ➔ `P2-06` (CRM) ➔ `P2-07` (Webhook)
 4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` (LangGraph Integration) ➔ `P2-09` (Queue Worker) ➔ `P2-10` (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
 5. **Track 4: Mailbox Ingestion Connector:** `P2-12` (Gmail Pub/Sub Connector)
 
-**Next Immediate Task:** `P2-03b` (`feat(dispatch): [P2-03b] multi-destination dispatcher router node, matrix gating, and dual-action webhook alerts`).
+**Next Immediate Task:** `P2-04` (`feat(adapters): [P2-04] github issues adapter with output hardening and idempotency verification`).
 
 ---
 
@@ -521,7 +521,8 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 | **0** | **P2-00** | Track 0 | `docs(decisions): [P2-00] phase 2 architectural decisions, client alignment questionnaire, and destination data policies` | `docs/phase2_decisions.md`, `ROADMAP.md` | ✅ Complete |
 | **1** | **P2-01** | Track 1 | `feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node with phase 1 guardrails` | `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py`, `tests/test_p2_egress.py` | ✅ Complete |
 | **2** | **P2-02** | Track 1 | `feat(hitl): [P2-02] human-in-the-loop review queue, state gating, and reviewer cli interface` | `nodes/hitl_queue.py`, `scripts/hitl_cli.py`, `db/database.py`, `config.yaml`, `tests/test_p2_hitl.py` | ✅ Complete |
-| **3** | **P2-03** | Track 2 | `feat(dispatch): [P2-03] multi-destination dispatcher router, outbox ledger, and safety rails` | `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `tests/test_p2_dispatcher_router.py` | ⏳ Ready |
+| **3a** | **P2-03a** | Track 2 | `feat(dispatch): [P2-03a] dispatcher foundations, base adapter contract, and outbox ledger` | `utils/adapters/__init__.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `utils/config.py`, `state.py`, `tests/test_p2_dispatch_foundations.py`, `docs/ARCHITECTURE.md`, `docs/phase2_decisions.md`, `ROADMAP.md`, `README.md` | ✅ Complete |
+| **3b** | **P2-03b** | Track 2 | `feat(dispatch): [P2-03b] multi-destination dispatcher router node, rate caps, and circuit breakers` | `nodes/dispatcher.py`, `nodes/__init__.py`, `tests/test_p2_dispatcher.py`, `ROADMAP.md`, `docs/ARCHITECTURE.md`, `README.md` | ✅ Complete |
 | **4** | **P2-04** | Track 2 | `feat(adapters): [P2-04] github issues adapter with output hardening and idempotency verification` | `utils/adapters/github_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_github_adapter.py` | ⏳ Pending |
 | **5** | **P2-05** | Track 2 | `feat(adapters): [P2-05] freescout helpdesk adapter with output hardening and thread continuity` | `utils/adapters/freescout_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_freescout_adapter.py` | ⏳ Pending |
 | **6** | **P2-06** | Track 2 | `feat(adapters): [P2-06] crm lead ingestion adapter with output hardening and lead scoring` | `utils/adapters/crm_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_crm_adapter.py` | ⏳ Pending |
@@ -643,8 +644,8 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 * **Done When:** 28 unit tests in `tests/test_p2_dispatch_foundations.py` verify base adapter abstraction, payload clamping, stable hashing, outbox ledger atomic transitions, dry-run/live coexistence, retry to dead_letter, unknown resolution, daily counts, and strict config validation.
 
 #### [P2-03b] Multi-Destination Dispatcher Router Node, Matrix Gating, and Dual-Action Webhook Alerts
-* **Status:** ⏳ Pending
-* **Scope:** `nodes/dispatcher.py`, `nodes/__init__.py`, `tests/test_p2_dispatcher_router.py`
+* **Status:** ✅ **Complete**
+* **Scope:** `nodes/dispatcher.py`, `nodes/__init__.py`, `tests/test_p2_dispatcher.py`
 * **Problem:** Downstream integrations need an intelligent router node that gates intake, evaluates the 10-category taxonomy against destination services, supports dual-action alerts for critical issues, and coordinates with the outbox ledger.
 * **Solution:**
   1. Dispatch Intake Gating:

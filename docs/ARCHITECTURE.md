@@ -31,7 +31,7 @@ Incoming Email
 [ `nodes/hitl_queue.py` ] ──(hitl_status='pending')──► END (Review/HITL Queue)
       │ (hitl_status in 'auto_approved','approved')
       ▼
-[ Downstream Dispatcher (P2-03) ] ──► GitHub / FreeScout / CRM / Webhook
+[ `nodes/dispatcher.py` ] ──► GitHub / FreeScout / CRM / Webhook
 ```
 
 ## 3. Node Table
@@ -44,6 +44,7 @@ Incoming Email
 | `nodes/jev_gatekeeper.py` | `jev_gatekeeper_node` | `masked_subject`, `masked_body`, `email_subject`, `cleaned_body`, `email_body`, `email_id`, `is_active_thread`, `labels_to_apply` | `gatekeeper_decision`, `is_spam`, `gatekeeper_confidence`, `is_threat`, `threat_details`, `classifier_used`, `labels_to_apply`, `routing_status`, `dispatch_target`, `dispatch_status`, `is_active_thread`, `is_starred`, `error_message` | HTTPS to Jev/Groq; SQLite update | `should_route_after_gatekeeper`: `continue` (approved) or `end` (spam/manual review/persist failed) |
 | `nodes/classifier.py` | `classifier_node` | `email_id`, `masked_subject`, `masked_body` | `classification`, `p2_classifier_used` | HTTPS to Groq/Jev (if enabled) | Linear: proceeds to `nodes/hitl_queue.py` |
 | `nodes/hitl_queue.py` | `hitl_queue_node` | `email_id`, `classification`, `p2_classifier_used`, `is_threat` | `hitl_status`, `hitl_reason`, `p2_status`, `dispatch_status`, `error_message` | SQLite Phase 2 update | `should_route_after_hitl`: `continue` (auto_approved/approved) or `end` (pending/persist failed) |
+| `nodes/dispatcher.py` | `dispatcher_node` | `email_id` | `p2_status`, `dispatch_results` | SQLite ledger claims (`p2_dispatch_log`), HTTPS adapter calls | `should_route_after_dispatcher`: `end` (terminal node) |
 
 ## 4. State Contract (`TriageState`)
 - `email_id` (`str`): Ingestion (`nodes/ingest.py`). Canonical message identifier.
