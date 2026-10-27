@@ -13,6 +13,7 @@ import pytest
 
 from utils.config import reset_config_cache
 from utils.jev_client import reset_default_client
+from nodes.classifier import reset_default_classifier_client
 
 
 # ==============================================================================
@@ -135,8 +136,10 @@ def isolate_test_environment(monkeypatch):
 
     reset_config_cache()
     reset_default_client()
+    reset_default_classifier_client()
 
     yield
 
     reset_config_cache()
     reset_default_client()
+    reset_default_classifier_client()

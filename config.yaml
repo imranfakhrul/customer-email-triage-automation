@@ -131,6 +131,21 @@ llm:
   temperature: 0.1
   confidence_threshold: 0.70
 
+classification:
+  primary: "jev"                     # Primary engine: TypeSafe System One choice router
+  fallback: "groq"                   # Secondary engine: Groq LLM (openai/gpt-oss-120b)
+  hitl_threshold: 0.85               # Diverts to HITL review queue if confidence < 0.85
+  always_review_categories:
+    - "Security/Account"
+  max_subject_chars: 2000            # Bounded scan limit for subject (A6 defense)
+  max_body_chars: 10000              # Bounded scan limit for body (A6 defense)
+  jev:
+    enabled: false                   # Disabled by default: Jev's 4 routing choices cannot express the 10-category taxonomy
+    model: "jev-1.13.0"
+    api_url: "https://api.typesafe.ai/v1/systemone"
+    router_question_id: "gmail_router"
+    timeout_seconds: 5.0
+
 destinations:
   Engineering:
     service: "github"

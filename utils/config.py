@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 import yaml
 from dotenv import load_dotenv
 
+from state import ALLOWED_CATEGORIES
+
 # Automatically load environment variables from .env if present (preserve existing environment variables)
 load_dotenv(override=False)
 
@@ -48,6 +50,13 @@ _KNOWN_KEYS: Dict[str, List[str]] = {
     ],
     "llm": [
         "model", "temperature", "confidence_threshold", "groq_api_key_env",
+    ],
+    "classification": [
+        "primary", "fallback", "hitl_threshold", "always_review_categories",
+        "max_subject_chars", "max_body_chars", "jev",
+    ],
+    "classification.jev": [
+        "enabled", "model", "api_url", "router_question_id", "timeout_seconds",
     ],
 }
 
@@ -283,6 +292,70 @@ def validate_config(config: Dict[str, Any]) -> None:
         raise ConfigError(
             f"'llm.confidence_threshold' must satisfy 0 < value <= 1, got {conf}"
         )
+
+    # ── classification (Phase 2 optional) ───────────────────────────────────
+    classification = config.get("classification")
+    if classification is not None:
+        if not isinstance(classification, dict):
+            raise ConfigError("'classification' section must be a mapping")
+        _check_unknown_keys(classification, "classification")
+
+        hitl_th = classification.get("hitl_threshold")
+        if hitl_th is not None:
+            if isinstance(hitl_th, bool) or not isinstance(hitl_th, (int, float)):
+                raise ConfigError(
+                    f"'classification.hitl_threshold' must be a number, got {type(hitl_th).__name__!r}"
+                )
+            if not (0.0 < float(hitl_th) <= 1.0):
+                raise ConfigError(
+                    f"'classification.hitl_threshold' must satisfy 0 < value <= 1, got {hitl_th}"
+                )
+
+        always_rev = classification.get("always_review_categories")
+        if always_rev is not None:
+            if isinstance(always_rev, (str, bool)) or not isinstance(always_rev, list):
+                raise ConfigError(
+                    f"'classification.always_review_categories' must be a list, got {type(always_rev).__name__!r}"
+                )
+            for item in always_rev:
+                if not isinstance(item, str) or item not in ALLOWED_CATEGORIES:
+                    raise ConfigError(
+                        f"'classification.always_review_categories' items must be known categories, got {item!r}"
+                    )
+
+        max_sub = classification.get("max_subject_chars")
+        if max_sub is not None:
+            _require_int_gt(max_sub, "classification.max_subject_chars", 0, strictly_greater=True)
+
+        max_b = classification.get("max_body_chars")
+        if max_b is not None:
+            _require_int_gt(max_b, "classification.max_body_chars", 0, strictly_greater=True)
+
+        primary = classification.get("primary")
+        if primary is not None:
+            _require_nonempty_str(primary, "classification.primary")
+
+        fallback = classification.get("fallback")
+        if fallback is not None:
+            _require_nonempty_str(fallback, "classification.fallback")
+
+        class_jev = classification.get("jev")
+        if class_jev is not None:
+            if not isinstance(class_jev, dict):
+                raise ConfigError("'classification.jev' must be a mapping")
+            _check_unknown_keys(class_jev, "classification.jev")
+            if "enabled" in class_jev:
+                _require_bool(class_jev["enabled"], "classification.jev.enabled")
+            if "model" in class_jev:
+                _require_nonempty_str(class_jev["model"], "classification.jev.model")
+            if "api_url" in class_jev:
+                _require_nonempty_str(class_jev["api_url"], "classification.jev.api_url")
+            if "router_question_id" in class_jev:
+                _require_nonempty_str(
+                    class_jev["router_question_id"], "classification.jev.router_question_id"
+                )
+            if "timeout_seconds" in class_jev:
+                _require_number_gt(class_jev["timeout_seconds"], "classification.jev.timeout_seconds", 0)
 
 
 def _apply_env_overrides(cfg: Dict[str, Any]) -> None:
