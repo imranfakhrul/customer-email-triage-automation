@@ -58,6 +58,20 @@ _KNOWN_KEYS: Dict[str, List[str]] = {
     "classification.jev": [
         "enabled", "model", "api_url", "router_question_id", "timeout_seconds",
     ],
+    "dispatch": [
+        "dry_run", "kill_switch", "max_attempts", "pending_timeout_minutes",
+        "backoff_base_seconds", "backoff_max_seconds",
+    ],
+    "destinations": [
+        "github", "freescout", "crm", "webhook",
+    ],
+    "destinations.item": [
+        "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
+        "target", "token_env", "api_key_env", "target_env", "labels", "mailbox_id",
+    ],
+    "destinations.circuit_breaker": [
+        "failure_threshold", "cooldown_seconds",
+    ],
 }
 
 
@@ -357,6 +371,152 @@ def validate_config(config: Dict[str, Any]) -> None:
             if "timeout_seconds" in class_jev:
                 _require_number_gt(class_jev["timeout_seconds"], "classification.jev.timeout_seconds", 0)
 
+    # ── dispatch (Phase 2 section) ──────────────────────────────────────────
+    if "dispatch" in config:
+        dispatch = _require_mapping(config, "dispatch")
+        _check_unknown_keys(dispatch, "dispatch")
+
+        dry_run = dispatch.get("dry_run")
+        if dry_run is None:
+            raise ConfigError("'dispatch.dry_run' is required")
+        _require_bool(dry_run, "dispatch.dry_run")
+
+        kill_switch = dispatch.get("kill_switch")
+        if kill_switch is None:
+            raise ConfigError("'dispatch.kill_switch' is required")
+        _require_bool(kill_switch, "dispatch.kill_switch")
+
+        max_attempts = dispatch.get("max_attempts")
+        if max_attempts is None:
+            raise ConfigError("'dispatch.max_attempts' is required")
+        _require_int_gt(max_attempts, "dispatch.max_attempts", 0, strictly_greater=True)
+        if max_attempts > 10:
+            raise ConfigError(f"'dispatch.max_attempts' must be <= 10, got {max_attempts}")
+
+        pending_timeout = dispatch.get("pending_timeout_minutes")
+        if pending_timeout is None:
+            raise ConfigError("'dispatch.pending_timeout_minutes' is required")
+        _require_int_gt(
+            pending_timeout, "dispatch.pending_timeout_minutes", 0, strictly_greater=True
+        )
+
+        backoff_base = dispatch.get("backoff_base_seconds")
+        if backoff_base is None:
+            raise ConfigError("'dispatch.backoff_base_seconds' is required")
+        _require_number_gt(backoff_base, "dispatch.backoff_base_seconds", 0)
+
+        backoff_max = dispatch.get("backoff_max_seconds")
+        if backoff_max is None:
+            raise ConfigError("'dispatch.backoff_max_seconds' is required")
+        _require_number_gt(backoff_max, "dispatch.backoff_max_seconds", 0)
+
+        if backoff_max < backoff_base:
+            raise ConfigError(
+                f"'dispatch.backoff_max_seconds' ({backoff_max}) must be >= "
+                f"'dispatch.backoff_base_seconds' ({backoff_base})"
+            )
+
+    # ── destinations (Phase 2 section) ──────────────────────────────────────
+    if "destinations" in config:
+        destinations = _require_mapping(config, "destinations")
+        _check_unknown_keys(destinations, "destinations")
+
+        required_dests = ("github", "freescout", "crm", "webhook")
+        for dest_name in required_dests:
+            if dest_name not in destinations:
+                raise ConfigError(
+                    f"Missing required destination in 'destinations': '{dest_name}'"
+                )
+
+        for dest_name, dest_cfg in destinations.items():
+            if not isinstance(dest_cfg, dict):
+                raise ConfigError(f"'destinations.{dest_name}' must be a mapping")
+            _check_unknown_keys(dest_cfg, "destinations.item")
+
+            enabled = dest_cfg.get("enabled")
+            if enabled is None:
+                raise ConfigError(f"'destinations.{dest_name}.enabled' is required")
+            _require_bool(enabled, f"destinations.{dest_name}.enabled")
+
+            daily_cap = dest_cfg.get("daily_cap")
+            if daily_cap is None:
+                raise ConfigError(f"'destinations.{dest_name}.daily_cap' is required")
+            _require_int_gt(
+                daily_cap, f"destinations.{dest_name}.daily_cap", 0, strictly_greater=True
+            )
+
+            use_masked = dest_cfg.get("use_masked_text_only")
+            if use_masked is None:
+                raise ConfigError(
+                    f"'destinations.{dest_name}.use_masked_text_only' is required"
+                )
+            _require_bool(use_masked, f"destinations.{dest_name}.use_masked_text_only")
+
+            circuit_breaker = dest_cfg.get("circuit_breaker")
+            if circuit_breaker is None:
+                raise ConfigError(
+                    f"'destinations.{dest_name}.circuit_breaker' is required"
+                )
+            if not isinstance(circuit_breaker, dict):
+                raise ConfigError(
+                    f"'destinations.{dest_name}.circuit_breaker' must be a mapping"
+                )
+            _check_unknown_keys(circuit_breaker, "destinations.circuit_breaker")
+
+            f_thresh = circuit_breaker.get("failure_threshold")
+            if f_thresh is None:
+                raise ConfigError(
+                    f"'destinations.{dest_name}.circuit_breaker.failure_threshold' is required"
+                )
+            _require_int_gt(
+                f_thresh,
+                f"destinations.{dest_name}.circuit_breaker.failure_threshold",
+                0,
+                strictly_greater=True,
+            )
+
+            cooldown = circuit_breaker.get("cooldown_seconds")
+            if cooldown is None:
+                raise ConfigError(
+                    f"'destinations.{dest_name}.circuit_breaker.cooldown_seconds' is required"
+                )
+            _require_int_gt(
+                cooldown,
+                f"destinations.{dest_name}.circuit_breaker.cooldown_seconds",
+                0,
+                strictly_greater=True,
+            )
+
+            if "target" in dest_cfg:
+                _require_nonempty_str(dest_cfg["target"], f"destinations.{dest_name}.target")
+            if "token_env" in dest_cfg:
+                _require_nonempty_str(
+                    dest_cfg["token_env"], f"destinations.{dest_name}.token_env"
+                )
+            if "api_key_env" in dest_cfg:
+                _require_nonempty_str(
+                    dest_cfg["api_key_env"], f"destinations.{dest_name}.api_key_env"
+                )
+            if "target_env" in dest_cfg:
+                _require_nonempty_str(
+                    dest_cfg["target_env"], f"destinations.{dest_name}.target_env"
+                )
+            if "mailbox_id" in dest_cfg:
+                _require_int_gt(
+                    dest_cfg["mailbox_id"],
+                    f"destinations.{dest_name}.mailbox_id",
+                    0,
+                    strictly_greater=True,
+                )
+            if "labels" in dest_cfg:
+                labels = dest_cfg["labels"]
+                if not isinstance(labels, list) or not all(
+                    isinstance(lbl, str) for lbl in labels
+                ):
+                    raise ConfigError(
+                        f"'destinations.{dest_name}.labels' must be a list of strings"
+                    )
+
 
 def _apply_env_overrides(cfg: Dict[str, Any]) -> None:
     """Applies DATABASE_PATH, IDEMPOTENCY_STALE_MINUTES, MAX_DISPATCH_RETRIES from env.
@@ -518,35 +678,35 @@ def get_env_var(
 
 
 def resolve_destination_config(
-    team_name: str,
+    destination: str,
     config: Optional[Dict[str, Any]] = None,
     config_path=None,
 ) -> Optional[Dict[str, Any]]:
-    """Retrieves and resolves credentials for a specific destination team.
+    """Retrieves and resolves credentials for a specific destination service.
 
     Replaces any `*_env` field with its corresponding live environment variable
     value. For example, if destination config contains `token_env: GITHUB_TOKEN`,
     the returned dict will include `resolved_token: <value_of_GITHUB_TOKEN>`.
 
     Args:
-        team_name: Name of the team (e.g., 'Engineering', 'Support', 'Sales', 'Billing').
+        destination: Name of the destination service ('github', 'freescout', 'crm', 'webhook').
         config: Optional pre-loaded config dict. If None, loaded from config_path.
         config_path: Path to config.yaml if config is None (None → DEFAULT_CONFIG_PATH).
 
     Returns:
-        Resolved destination dict or None if team is not configured.
+        Resolved destination dict or None if destination is not configured.
     """
     if config is None:
         config = get_config(config_path)
 
     destinations = config.get("destinations", {})
-    team_config = destinations.get(team_name)
-    if not team_config:
+    dest_config = destinations.get(destination)
+    if not dest_config:
         return None
 
-    resolved = dict(team_config)
+    resolved = dict(dest_config)
     # Automatically resolve any *_env fields to live environment secrets
-    for key, value in team_config.items():
+    for key, value in dest_config.items():
         if key.endswith("_env") and isinstance(value, str):
             secret_key = key[:-4]  # e.g., 'token_env' -> 'token'
             resolved[f"resolved_{secret_key}"] = get_env_var(value)

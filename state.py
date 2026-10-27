@@ -1,4 +1,4 @@
-from typing import Dict, List, Literal, Optional, TypedDict
+from typing import Any, Dict, List, Literal, Optional, TypedDict
 from pydantic import BaseModel, Field
 
 
@@ -122,7 +122,7 @@ class TriageState(TypedDict):
     sla_target: Optional[str]
     classification: Optional[EmailClassification]
     p2_classifier_used: Optional[str]  # 'jev', 'groq', 'offline_heuristic', or 'fail_closed'
-    p2_status: Optional[str]  # 'hitl_pending', 'auto_approved', or 'persist_failed'
+    p2_status: Optional[str]  # 'hitl_pending', 'auto_approved', 'persist_failed', 'not_eligible', 'dispatched', 'simulated', 'deferred', 'failed', 'dead_letter'
     hitl_status: Optional[str]  # 'none', 'pending', 'auto_approved', 'approved', or 'rejected'
     hitl_reason: Optional[str]  # Reason why email was diverted to HITL review queue
 
@@ -131,6 +131,7 @@ class TriageState(TypedDict):
     is_starred: bool
     dispatch_target: Optional[str]  # 'github', 'freescout', 'crm', 'webhook'
     dispatch_status: Optional[str]  # 'processing', 'done', 'failed'
+    dispatch_results: Optional[List[Dict[str, Any]]]  # Results from downstream adapters
     retry_count: int
     error_message: Optional[str]
     routing_status: Optional[str]

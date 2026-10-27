@@ -8,6 +8,7 @@ tracks active email threads to allow thread-level continuity.
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any, Dict, Generator, List, Optional, Tuple
 from utils.config import get_config
@@ -21,6 +22,11 @@ class PersistenceError(Exception):
 
 class HitlStateError(Exception):
     """Raised when an HITL review cannot be resolved because the record is not in 'pending' status."""
+    pass
+
+
+class LedgerStateError(Exception):
+    """Raised when an outbox ledger state transition is invalid or the record is missing."""
     pass
 
 
@@ -84,17 +90,17 @@ class TriageDatabase:
                     classifier_used TEXT
                 );
                 """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_thread_id ON email_triage(thread_id);"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_status ON email_triage(status);"
-            )
-
             # Migration for existing databases: add missing columns safely via ALTER TABLE
             cursor = conn.execute("PRAGMA table_info(email_triage);")
             existing_columns = {row["name"] for row in cursor.fetchall()}
             new_columns = [
+                ("message_id", "TEXT"),
+                ("thread_id", "TEXT"),
+                ("sender_email", "TEXT"),
+                ("retry_count", "INTEGER DEFAULT 0"),
+                ("routing_status", "TEXT"),
+                ("dispatch_target", "TEXT"),
+                ("error_message", "TEXT"),
                 ("masked_subject", "TEXT"),
                 ("masked_body", "TEXT"),
                 ("is_active_thread", "INTEGER"),
@@ -121,7 +127,41 @@ class TriageDatabase:
                     conn.execute(f"ALTER TABLE email_triage ADD COLUMN {col_name} {col_type};")
 
             conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_thread_id ON email_triage(thread_id);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_status ON email_triage(status);"
+            )
+            conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_hitl_status ON email_triage(hitl_status);"
+            )
+
+            # Phase 2 Dispatch Outbox Ledger table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS p2_dispatch_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email_id TEXT NOT NULL,
+                    destination TEXT NOT NULL CHECK(destination IN ('github', 'freescout', 'crm', 'webhook')),
+                    action_type TEXT NOT NULL CHECK(action_type IN ('create_issue', 'create_ticket', 'create_lead', 'alert')),
+                    idempotency_key TEXT NOT NULL,
+                    mode TEXT NOT NULL CHECK(mode IN ('dry_run', 'live')),
+                    state TEXT NOT NULL CHECK(state IN ('pending', 'confirmed', 'failed', 'unknown', 'dead_letter', 'simulated', 'deferred')),
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    remote_id TEXT,
+                    reason TEXT,
+                    error_class TEXT,
+                    payload_sha256 TEXT,
+                    resolved_by TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(idempotency_key, mode)
+                );
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_dispatch_email_id ON p2_dispatch_log(email_id);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_dispatch_dest_state ON p2_dispatch_log(destination, state, updated_at);"
             )
 
     def get_record(self, email_id: str) -> Optional[Dict[str, Any]]:
@@ -856,7 +896,530 @@ class TriageDatabase:
 
         return True
 
-    def clear_all(self) -> None:
-        """Clears all records in the email_triage table (used for testing)."""
+    @staticmethod
+    def build_idempotency_key(email_id: str, destination: str, action_type: str) -> str:
+        """Constructs a deterministic composite idempotency key.
+
+        Args:
+            email_id: Unique identifier of the incoming email.
+            destination: Downstream service name ('github', 'freescout', 'crm', 'webhook').
+            action_type: Action type ('create_issue', 'create_ticket', 'create_lead', 'alert').
+
+        Returns:
+            Formatted string 'email_id:destination:action_type'.
+        """
+        return f"{email_id}:{destination}:{action_type}"
+
+    def begin_dispatch(
+        self,
+        email_id: str,
+        destination: str,
+        action_type: str,
+        mode: str,
+        payload_sha256: Optional[str] = None,
+        max_attempts: int = 3,
+    ) -> Tuple[Dict[str, Any], bool]:
+        """Atomically acquires an outbox dispatch lock or initiates a new dispatch log entry.
+
+        Args:
+            email_id: Target email id.
+            destination: Service destination ('github', 'freescout', 'crm', 'webhook').
+            action_type: Action ('create_issue', 'create_ticket', 'create_lead', 'alert').
+            mode: Mode ('dry_run' or 'live').
+            payload_sha256: Optional SHA-256 hash of the DispatchPayload.
+            max_attempts: Maximum retry attempts before transitioning to dead_letter.
+
+        Returns:
+            Tuple of (row_dict, acquired_bool).
+
+        Raises:
+            ValueError: If arguments fail type or range validation.
+            PersistenceError: If email does not exist with routing_status 'gatekeeper_approved'.
+        """
+        if not isinstance(email_id, str) or not email_id.strip():
+            raise ValueError("email_id must be a non-empty string")
+        if destination not in ("github", "freescout", "crm", "webhook"):
+            raise ValueError(f"Invalid destination '{destination}'")
+        if action_type not in ("create_issue", "create_ticket", "create_lead", "alert"):
+            raise ValueError(f"Invalid action_type '{action_type}'")
+        if mode not in ("dry_run", "live"):
+            raise ValueError(f"Invalid mode '{mode}'. Must be 'dry_run' or 'live'")
+        if (
+            not isinstance(max_attempts, int)
+            or isinstance(max_attempts, bool)
+            or max_attempts < 1
+        ):
+            raise ValueError("max_attempts must be an integer >= 1")
+
+        idempotency_key = self.build_idempotency_key(email_id, destination, action_type)
+        now_iso = datetime.now(timezone.utc).isoformat()
+
         with self.get_connection() as conn:
+            # Enforce prerequisite: Email must exist with Phase 1 gatekeeper_approved
+            cur = conn.execute(
+                "SELECT routing_status FROM email_triage WHERE email_id = ?",
+                (email_id,),
+            )
+            email_row = cur.fetchone()
+            if email_row is None or email_row["routing_status"] != "gatekeeper_approved":
+                raise PersistenceError(
+                    f"Email '{email_id}' does not exist or is not in 'gatekeeper_approved' status "
+                    f"(status: {email_row['routing_status'] if email_row else 'NOT_FOUND'})"
+                )
+
+            # Step 1: INSERT ... ON CONFLICT DO NOTHING
+            cursor = conn.execute(
+                """
+                INSERT INTO p2_dispatch_log (
+                    email_id, destination, action_type, idempotency_key, mode,
+                    state, attempts, payload_sha256, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+                ON CONFLICT(idempotency_key, mode) DO NOTHING;
+                """,
+                (
+                    email_id,
+                    destination,
+                    action_type,
+                    idempotency_key,
+                    mode,
+                    payload_sha256,
+                    now_iso,
+                    now_iso,
+                ),
+            )
+            if cursor.rowcount == 1:
+                cur = conn.execute(
+                    "SELECT * FROM p2_dispatch_log WHERE idempotency_key = ? AND mode = ?",
+                    (idempotency_key, mode),
+                )
+                return dict(cur.fetchone()), True
+
+            # Step 2: UPDATE to 'pending' if in failed/deferred and attempts < max_attempts
+            cursor = conn.execute(
+                """
+                UPDATE p2_dispatch_log
+                SET state = 'pending',
+                    payload_sha256 = COALESCE(?, payload_sha256),
+                    updated_at = ?
+                WHERE idempotency_key = ? AND mode = ?
+                  AND state IN ('failed', 'deferred')
+                  AND attempts < ?;
+                """,
+                (payload_sha256, now_iso, idempotency_key, mode, max_attempts),
+            )
+            if cursor.rowcount == 1:
+                cur = conn.execute(
+                    "SELECT * FROM p2_dispatch_log WHERE idempotency_key = ? AND mode = ?",
+                    (idempotency_key, mode),
+                )
+                return dict(cur.fetchone()), True
+
+            # Step 3: Move failed row with attempts >= max_attempts to 'dead_letter'
+            conn.execute(
+                """
+                UPDATE p2_dispatch_log
+                SET state = 'dead_letter',
+                    reason = 'retries_exhausted',
+                    updated_at = ?
+                WHERE idempotency_key = ? AND mode = ?
+                  AND state = 'failed'
+                  AND attempts >= ?;
+                """,
+                (now_iso, idempotency_key, mode, max_attempts),
+            )
+
+            # Step 4: Return current row with acquired=False
+            cur = conn.execute(
+                "SELECT * FROM p2_dispatch_log WHERE idempotency_key = ? AND mode = ?",
+                (idempotency_key, mode),
+            )
+            return dict(cur.fetchone()), False
+
+    def record_dispatch_attempt(self, ledger_id: int) -> int:
+        """Increments the attempt counter for a pending dispatch log row.
+
+        Args:
+            ledger_id: Primary key id of p2_dispatch_log.
+
+        Returns:
+            New attempts count.
+
+        Raises:
+            LedgerStateError: If row does not exist or is not in 'pending' state.
+        """
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE p2_dispatch_log
+                SET attempts = attempts + 1,
+                    updated_at = ?
+                WHERE id = ? AND state = 'pending';
+                """,
+                (now_iso, ledger_id),
+            )
+            if cursor.rowcount == 0:
+                raise LedgerStateError(
+                    f"Cannot record attempt on dispatch log #{ledger_id}: "
+                    "row not found or not in 'pending' state"
+                )
+
+            cur = conn.execute(
+                "SELECT attempts FROM p2_dispatch_log WHERE id = ?",
+                (ledger_id,),
+            )
+            return int(cur.fetchone()["attempts"])
+
+    def finish_dispatch(
+        self,
+        ledger_id: int,
+        state: str,
+        remote_id: Optional[str] = None,
+        reason: Optional[str] = None,
+        error_class: Optional[str] = None,
+    ) -> bool:
+        """Transitions a pending dispatch log row to a terminal or deferred state.
+
+        Args:
+            ledger_id: Primary key id of p2_dispatch_log.
+            state: Target state in ('confirmed', 'failed', 'unknown', 'dead_letter', 'simulated', 'deferred').
+            remote_id: Optional remote identifier (<= 128 chars matching ^[A-Za-z0-9._:/#-]+$).
+            reason: Optional reason code (matching ^[a-z_]{1,40}$).
+            error_class: Optional exception class name (<= 64 chars matching ^[A-Za-z0-9_]+$).
+
+        Returns:
+            True on successful transition.
+
+        Raises:
+            ValueError: If arguments violate format contracts.
+            LedgerStateError: If row is not found or not currently in 'pending' state.
+        """
+        allowed_targets = (
+            "confirmed",
+            "failed",
+            "unknown",
+            "dead_letter",
+            "simulated",
+            "deferred",
+        )
+        if state not in allowed_targets:
+            raise ValueError(
+                f"Invalid target state '{state}'. Must be one of {allowed_targets}"
+            )
+
+        if remote_id is not None and (
+            not isinstance(remote_id, str)
+            or not remote_id.strip()
+            or len(remote_id) > 128
+            or not re.match(r"^[A-Za-z0-9._:/#-]+$", remote_id)
+        ):
+            raise ValueError(
+                "remote_id must be a non-empty string of at most 128 characters "
+                f"matching ^[A-Za-z0-9._:/#-]+$, got {remote_id!r}"
+            )
+
+        if reason is not None and (
+            not isinstance(reason, str) or not re.match(r"^[a-z_]{1,40}$", reason)
+        ):
+            raise ValueError(
+                f"reason must match ^[a-z_]{{1,40}}$, got {reason!r}"
+            )
+
+        if error_class is not None and (
+            not isinstance(error_class, str)
+            or len(error_class) > 64
+            or not re.match(r"^[A-Za-z0-9_]+$", error_class)
+        ):
+            raise ValueError(
+                "error_class must be a string of at most 64 characters "
+                f"matching ^[A-Za-z0-9_]+$, got {error_class!r}"
+            )
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE p2_dispatch_log
+                SET state = ?,
+                    remote_id = ?,
+                    reason = ?,
+                    error_class = ?,
+                    updated_at = ?
+                WHERE id = ? AND state = 'pending';
+                """,
+                (state, remote_id, reason, error_class, now_iso, ledger_id),
+            )
+            if cursor.rowcount == 0:
+                raise LedgerStateError(
+                    f"Cannot finish dispatch log #{ledger_id} to '{state}': "
+                    "row not found or not in 'pending' state"
+                )
+
+        return True
+
+    def resolve_unknown_dispatch(
+        self,
+        ledger_id: int,
+        outcome: str,
+        resolved_by: str,
+        remote_id: Optional[str] = None,
+    ) -> bool:
+        """Resolves an 'unknown' outcome dispatch log row following duplicate verification.
+
+        Args:
+            ledger_id: Primary key id of p2_dispatch_log.
+            outcome: Either 'confirmed' (verified delivered) or 'not_sent' (safe to retry).
+            resolved_by: Identifier of the operator or automated resolver (<= 64 chars).
+            remote_id: Remote identifier (required when outcome is 'confirmed').
+
+        Returns:
+            True on successful resolution.
+
+        Raises:
+            ValueError: If arguments violate format requirements.
+            PersistenceError: If row does not exist.
+            LedgerStateError: If row is not currently in 'unknown' state.
+        """
+        if outcome not in ("confirmed", "not_sent"):
+            raise ValueError(f"Invalid outcome '{outcome}'. Must be 'confirmed' or 'not_sent'")
+
+        if (
+            not isinstance(resolved_by, str)
+            or not resolved_by.strip()
+            or len(resolved_by) > 64
+        ):
+            raise ValueError(
+                "resolved_by must be a non-empty string of at most 64 characters, "
+                f"got {resolved_by!r}"
+            )
+
+        if outcome == "confirmed" and (
+            not remote_id
+            or not isinstance(remote_id, str)
+            or not remote_id.strip()
+            or len(remote_id) > 128
+            or not re.match(r"^[A-Za-z0-9._:/#-]+$", remote_id)
+        ):
+            raise ValueError(
+                "outcome 'confirmed' requires non-empty remote_id (at most 128 chars "
+                f"matching ^[A-Za-z0-9._:/#-]+$), got {remote_id!r}"
+            )
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self.get_connection() as conn:
+            if outcome == "confirmed":
+                cursor = conn.execute(
+                    """
+                    UPDATE p2_dispatch_log
+                    SET state = 'confirmed',
+                        remote_id = ?,
+                        resolved_by = ?,
+                        updated_at = ?
+                    WHERE id = ? AND state = 'unknown';
+                    """,
+                    (remote_id, resolved_by, now_iso, ledger_id),
+                )
+            else:  # not_sent
+                cursor = conn.execute(
+                    """
+                    UPDATE p2_dispatch_log
+                    SET state = 'failed',
+                        reason = 'operator_not_sent',
+                        resolved_by = ?,
+                        updated_at = ?
+                    WHERE id = ? AND state = 'unknown';
+                    """,
+                    (resolved_by, now_iso, ledger_id),
+                )
+
+            if cursor.rowcount == 0:
+                cur = conn.execute(
+                    "SELECT state FROM p2_dispatch_log WHERE id = ?",
+                    (ledger_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise PersistenceError(f"Dispatch log #{ledger_id} not found")
+                raise LedgerStateError(
+                    f"Dispatch log #{ledger_id} is in state '{row['state']}', expected 'unknown'"
+                )
+
+        return True
+
+    def expire_stale_pending(
+        self,
+        older_than_minutes: int,
+        now: Optional[datetime] = None,
+    ) -> int:
+        """Transitions stale pending dispatches older than cutoff to 'unknown'.
+
+        Args:
+            older_than_minutes: Stale threshold in minutes.
+            now: Optional reference UTC datetime.
+
+        Returns:
+            Number of rows transitioned.
+        """
+        ref_now = now or datetime.now(timezone.utc)
+        cutoff = (ref_now - timedelta(minutes=older_than_minutes)).isoformat()
+        now_iso = ref_now.isoformat()
+
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE p2_dispatch_log
+                SET state = 'unknown',
+                    reason = 'stale_pending',
+                    updated_at = ?
+                WHERE state = 'pending' AND updated_at < ?;
+                """,
+                (now_iso, cutoff),
+            )
+            return cursor.rowcount
+
+    def get_dispatch_log(self, email_id: str) -> List[Dict[str, Any]]:
+        """Retrieves all dispatch log rows for a given email_id ordered by id.
+
+        Args:
+            email_id: Unique identifier of the incoming email.
+
+        Returns:
+            List of dispatch log row dictionaries.
+        """
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                "SELECT * FROM p2_dispatch_log WHERE email_id = ? ORDER BY id ASC;",
+                (email_id,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def count_confirmed_today(
+        self,
+        destination: str,
+        now: Optional[datetime] = None,
+    ) -> int:
+        """Counts confirmed live dispatches for a destination on or after 00:00 UTC today.
+
+        Simulated dry-run rows and dispatches from previous UTC days are ignored.
+
+        Args:
+            destination: Downstream service name ('github', 'freescout', 'crm', 'webhook').
+            now: Optional reference UTC datetime.
+
+        Returns:
+            Integer count of confirmed dispatches today.
+        """
+        ref_now = now or datetime.now(timezone.utc)
+        start_of_day = (
+            ref_now.astimezone(timezone.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .isoformat()
+        )
+
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                """
+                SELECT COUNT(*) as cnt FROM p2_dispatch_log
+                WHERE destination = ?
+                  AND mode = 'live'
+                  AND state = 'confirmed'
+                  AND updated_at >= ?;
+                """,
+                (destination, start_of_day),
+            )
+            return int(cur.fetchone()["cnt"])
+
+    def get_failure_streak(
+        self,
+        destination: str,
+        now: Optional[datetime] = None,
+    ) -> Tuple[int, Optional[str]]:
+        """Calculates consecutive failures in newest-first live rows for a destination.
+
+        Streak resets immediately when a 'confirmed' row is encountered.
+        Pending, deferred, and simulated rows are ignored.
+
+        Args:
+            destination: Downstream service name ('github', 'freescout', 'crm', 'webhook').
+            now: Optional reference UTC datetime.
+
+        Returns:
+            Tuple of (consecutive_failures_count, newest_failure_updated_at or None).
+        """
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                """
+                SELECT state, updated_at FROM p2_dispatch_log
+                WHERE destination = ? AND mode = 'live'
+                ORDER BY updated_at DESC, id DESC;
+                """,
+                (destination,),
+            )
+            count = 0
+            newest_failure_updated_at: Optional[str] = None
+            for row in cur.fetchall():
+                st = row["state"]
+                if st in ("pending", "deferred", "simulated"):
+                    continue
+                if st in ("failed", "dead_letter", "unknown"):
+                    if count == 0:
+                        newest_failure_updated_at = row["updated_at"]
+                    count += 1
+                elif st == "confirmed":
+                    break
+
+            return count, newest_failure_updated_at
+
+    def divert_to_hitl(self, email_id: str, reason: str) -> bool:
+        """Diverts an auto_approved or approved email back to pending HITL review.
+
+        Strictly preserves Phase 1 columns and does not alter reviewed_by/reviewed_at.
+
+        Args:
+            email_id: Unique identifier of the email.
+            reason: Reason code matching ^[a-z_]{1,40}$.
+
+        Returns:
+            True on successful update.
+
+        Raises:
+            ValueError: If reason code format is invalid.
+            PersistenceError: If email does not exist.
+            HitlStateError: If email is not currently in ('auto_approved', 'approved').
+        """
+        if not isinstance(reason, str) or not re.match(r"^[a-z_]{1,40}$", reason):
+            raise ValueError(f"reason must match ^[a-z_]{{1,40}}$, got {reason!r}")
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE email_triage
+                SET hitl_status = 'pending',
+                    hitl_reason = ?,
+                    updated_at = ?
+                WHERE email_id = ? AND hitl_status IN ('auto_approved', 'approved');
+                """,
+                (reason, now_iso, email_id),
+            )
+            if cursor.rowcount == 0:
+                cur = conn.execute(
+                    "SELECT hitl_status FROM email_triage WHERE email_id = ?",
+                    (email_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise PersistenceError(f"Email '{email_id}' not found")
+                current_status = row["hitl_status"]
+                raise HitlStateError(
+                    f"Email '{email_id}' has hitl_status '{current_status}', "
+                    "expected 'auto_approved' or 'approved'"
+                )
+
+        return True
+
+    def clear_all(self) -> None:
+        """Clears all records in triage tables (used for testing)."""
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM p2_dispatch_log;")
             conn.execute("DELETE FROM email_triage;")

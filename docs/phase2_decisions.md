@@ -29,14 +29,21 @@ Before implementing downstream destination adapters, this document formally reco
 
 ### 1.2 Destination-Specific Egress Policies
 
-`config.yaml` lines 134–158 configure destination behaviors. The table below codifies the architectural rules for each target service:
+`config.yaml` configures destination behaviors under `destinations:` keyed by canonical service names: `github`, `freescout`, `crm`, and `webhook` (replacing legacy team-named keys `Engineering`, `Support`, `Sales`, and `Billing`; see mapping note below). Adapters receive only an immutable `DispatchPayload`, never the raw state.
 
-| Destination | Target Service | `use_masked_text_only` in `config.yaml` | Permitted Data Egress | Architectural Rationale & Privacy Guarantee |
+> [!NOTE]
+> **Destination Key Mapping:**
+> - `github` (formerly `Engineering`): Engineering bug reports and feature requests.
+> - `freescout` (formerly `Support`): Customer support tickets and routine billing inquiries.
+> - `crm` (formerly `Sales`): Sales demo requests and enterprise pricing leads.
+> - `webhook` (formerly `Billing`): Urgent billing disputes and critical outage alerts.
+
+| Destination Key | Target Service | `use_masked_text_only` in `config.yaml` | Permitted Data Egress | Architectural Rationale & Privacy Guarantee |
 |:---|:---|:---:|:---|:---|
-| **Engineering** | GitHub Issues (`github`) | `true` | **Masked Text Only** (`masked_subject`, `masked_body`) | Software bug reports are posted to public or team-shared GitHub repositories. Under zero circumstances should customer PII (real email, phone, name) appear in GitHub issues or commit logs. |
-| **Customer Support** | FreeScout Helpdesk (`freescout`) | `false` | **Mailbox Re-fetched Original Text** (or Masked Fallback) | Support agents need customer contact details and exact problem descriptions to respond. Rather than violating local privacy by storing unmasked data in SQLite, FreeScout adapter re-fetches original text on-demand from the authorized mailbox API (via P2-12) using `message_id`. If mailbox re-fetch is disabled, FreeScout receives masked text. |
-| **Sales** | CRM Ingestion (`crm`) | `false` | **Mailbox Re-fetched Contact Info** + Sanitized Company Domain | CRM leads need customer work email and name. The adapter extracts company domain from `sender_email` and re-fetches original customer identity via mailbox API, while sanitizing customer notes against formula injection (`=`, `+`, `-`, `@`). |
-| **Billing & Infrastructure** | Webhook Alerts (`webhook`) | `false` (Payload Sanitized) | **Structured Metadata + Masked Context** | High-urgency billing disputes and outage alerts are pushed to notification channels (e.g., Slack, PagerDuty). To prevent PII exposure in shared chat channels, alerts include structured metadata (`email_id`, `category`, `priority`, `amount_detected`, `masked_summary`) signed with HMAC-SHA256, omitting raw customer bodies. |
+| `github` | GitHub Issues (`github`) | `true` | **Masked Text Only** (`masked_subject`, `masked_body`) | Software bug reports are posted to public or team-shared GitHub repositories. Under zero circumstances should customer PII (real email, phone, name) appear in GitHub issues or commit logs. |
+| `freescout` | FreeScout Helpdesk (`freescout`) | `false` | **Mailbox Re-fetched Original Text** (or Masked Fallback) | Support agents need customer contact details and exact problem descriptions to respond. Rather than violating local privacy by storing unmasked data in SQLite, FreeScout adapter re-fetches original text on-demand from the authorized mailbox API (via P2-12) using `message_id`. If mailbox re-fetch is disabled, FreeScout receives masked text. |
+| `crm` | CRM Ingestion (`crm`) | `false` | **Mailbox Re-fetched Contact Info** + Sanitized Company Domain | CRM leads need customer work email and name. The adapter extracts company domain from `sender_email` and re-fetches original customer identity via mailbox API, while sanitizing customer notes against formula injection (`=`, `+`, `-`, `@`). |
+| `webhook` | Webhook Alerts (`webhook`) | `false` (Payload Sanitized) | **Structured Metadata + Masked Context** | High-urgency billing disputes and outage alerts are pushed to notification channels (e.g., Slack, PagerDuty). To prevent PII exposure in shared chat channels, alerts include structured metadata (`email_id`, `category`, `priority`, `amount_detected`, `masked_summary`) signed with HMAC-SHA256, omitting raw customer bodies. |
 
 ---
 
@@ -74,8 +81,8 @@ To prevent accidental creation of live issues, tickets, CRM contacts, or webhook
 * `dispatch.dry_run: true` is enforced by default in `config.yaml`.
 * In Dry-Run mode:
   1. Full classification, HITL gating, and routing decisions execute identically to production.
-  2. The Outbox ledger (`p2_dispatch_log`) creates a row with `state = 'sent'` and `remote_id = 'dry_run_simulated'`.
-  3. The adapter formats the full outgoing payload and emits a structured audit log entry (`[DRY_RUN_DISPATCH] target={service} destination={dest} payload_preview={...}`).
+  2. The Outbox ledger (`p2_dispatch_log`) creates a row with `state = 'simulated'` and `mode = 'dry_run'` (never `'sent'`). Real dispatches use `mode = 'live'`. A simulated row never blocks a subsequent live dispatch.
+  3. The adapter formats the full outgoing payload and emits a structured audit log entry (`[DRY_RUN_DISPATCH] email_id={id} destination={dest} action_type={act} payload_sha256={hash} payload_bytes={len}`). Dry-run logs carry zero customer text or response bodies.
   4. **Zero external HTTP requests are emitted.** Network isolation is 100% maintained.
 
 ### 3.2 Production Promotion Protocol
@@ -93,18 +100,18 @@ To protect downstream APIs from rate limits, unexpected billing charges, or aler
 
 ### 4.1 Daily Caps Configuration (`config.yaml`)
 
-| Destination | Service Adapter | Default Daily Cap | Reset Interval | Action When Cap Exceeded |
+| Destination Key | Service Adapter | Default Daily Cap | Reset Interval | Action When Cap Exceeded |
 |:---|:---|:---:|:---:|:---|
-| `Engineering` | GitHub Issues | **200 issues / day** | 00:00 UTC | Trips circuit breaker, alerts operators, diverts subsequent bugs to `hitl_pending`. |
-| `Support` | FreeScout Helpdesk | **1,000 tickets / day** | 00:00 UTC | Trips circuit breaker, diverts excess tickets to `hitl_pending`. |
-| `Sales` | CRM Ingestion | **500 leads / day** | 00:00 UTC | Trips circuit breaker, halts new lead creation, logs warning. |
-| `Billing` | Webhook Alerts | **200 alerts / day** | 00:00 UTC | Trips circuit breaker, aggregates subsequent alerts into hourly digests to avoid chat spam. |
+| `github` | GitHub Issues | **200 issues / day** | 00:00 UTC | Trips circuit breaker, alerts operators, defers subsequent attempts (`state = 'deferred'`, `reason = 'daily_cap_exceeded'`). |
+| `freescout` | FreeScout Helpdesk | **1,000 tickets / day** | 00:00 UTC | Trips circuit breaker, defers excess tickets (`state = 'deferred'`, `reason = 'daily_cap_exceeded'`). |
+| `crm` | CRM Ingestion | **500 leads / day** | 00:00 UTC | Trips circuit breaker, halts new lead creation, defers attempts (`state = 'deferred'`, `reason = 'daily_cap_exceeded'`). |
+| `webhook` | Webhook Alerts | **200 alerts / day** | 00:00 UTC | Trips circuit breaker, defers subsequent alerts (`state = 'deferred'`, `reason = 'daily_cap_exceeded'`). |
 
 ### 4.2 Circuit Breaker Behavior
 * When an adapter encounters 5 consecutive network failures or exceeds its daily cap:
   1. The circuit breaker flips to `OPEN`.
   2. An operational alert is logged.
-  3. All subsequent dispatch attempts for that destination are deferred to `state = 'hitl_pending'` in `p2_jobs` with `error_message = 'Circuit breaker OPEN for destination'`.
+  3. All subsequent dispatch attempts for that destination are deferred (`state = 'deferred'`, `reason = 'circuit_breaker_open'`). They do not divert to HITL.
   4. The circuit half-opens after 15 minutes, attempting 1 trial request before resuming full automated dispatch.
 
 ---

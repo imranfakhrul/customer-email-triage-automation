@@ -80,17 +80,20 @@ Incoming Email
 - `is_starred` (`bool`): Guardrail / Gatekeeper. Mailbox priority flag.
 - `dispatch_target` (`Optional[str]`): Guardrail / Gatekeeper. Service destination or review queue.
 - `dispatch_status` (`Optional[str]`): Ingestion / Gatekeeper / Dispatcher. 'processing', 'done', 'failed'.
+- `dispatch_results` (`Optional[List[Dict[str, Any]]]`): Dispatcher (`utils/adapters/base.py`). Downstream adapter execution results.
 - `retry_count` (`int`): Ingestion (`nodes/ingest.py`). Retries executed count.
 - `error_message` (`Optional[str]`): Ingestion / Gatekeeper. Error string on failure.
 - `routing_status` (`Optional[str]`): Ingestion / Gatekeeper. Phase 1 lifecycle status.
 
 ## 5. Database (`triage.db`)
-Main table: `email_triage`.
-- Columns: `email_id` (TEXT PK), `message_id` (TEXT), `thread_id` (TEXT), `sender_email` (TEXT), `status` (TEXT), `retry_count` (INTEGER), `routing_status` (TEXT), `dispatch_target` (TEXT), `error_message` (TEXT), `created_at` (TEXT), `updated_at` (TEXT), `masked_subject` (TEXT), `masked_body` (TEXT), `is_active_thread` (INTEGER), `gatekeeper_decision` (TEXT), `gatekeeper_confidence` (REAL), `classifier_used` (TEXT), `p2_category` (TEXT), `p2_priority` (TEXT), `p2_sentiment` (TEXT), `p2_customer_emotion` (TEXT), `p2_summary` (TEXT), `p2_suggested_team` (TEXT), `p2_confidence` (REAL), `p2_classifier_used` (TEXT), `hitl_status` (TEXT), `hitl_reason` (TEXT), `hitl_notes` (TEXT), `reviewed_by` (TEXT), `reviewed_at` (TEXT).
+Tables: `email_triage` and `p2_dispatch_log`.
+- `email_triage` Columns: `email_id` (TEXT PK), `message_id` (TEXT), `thread_id` (TEXT), `sender_email` (TEXT), `status` (TEXT), `retry_count` (INTEGER), `routing_status` (TEXT), `dispatch_target` (TEXT), `error_message` (TEXT), `created_at` (TEXT), `updated_at` (TEXT), `masked_subject` (TEXT), `masked_body` (TEXT), `is_active_thread` (INTEGER), `gatekeeper_decision` (TEXT), `gatekeeper_confidence` (REAL), `classifier_used` (TEXT), `p2_category` (TEXT), `p2_priority` (TEXT), `p2_sentiment` (TEXT), `p2_customer_emotion` (TEXT), `p2_summary` (TEXT), `p2_suggested_team` (TEXT), `p2_confidence` (REAL), `p2_classifier_used` (TEXT), `hitl_status` (TEXT), `hitl_reason` (TEXT), `hitl_notes` (TEXT), `reviewed_by` (TEXT), `reviewed_at` (TEXT).
 - Status CHECK: `CHECK(status IN ('processing', 'done', 'failed'))`.
 - Routing Status values: `processing`, `duplicate_skipped`, `in_flight_skipped`, `max_retries_exceeded`, `stale_recovery`, `retry`, `sensitive_diverted`, `spam_diverted`, `manual_review`, `gatekeeper_approved`, `persist_failed`.
+- `p2_dispatch_log` Columns: `id` (INTEGER PK), `email_id` (TEXT), `destination` (TEXT), `action_type` (TEXT), `idempotency_key` (TEXT), `mode` (TEXT), `state` (TEXT), `attempts` (INTEGER), `remote_id` (TEXT), `reason` (TEXT), `error_class` (TEXT), `payload_sha256` (TEXT), `resolved_by` (TEXT), `created_at` (TEXT), `updated_at` (TEXT).
+- `p2_dispatch_log` Constraints: `UNIQUE(idempotency_key, mode)`, `CHECK(destination IN ('github', 'freescout', 'crm', 'webhook'))`, `CHECK(action_type IN ('create_issue', 'create_ticket', 'create_lead', 'alert'))`, `CHECK(mode IN ('dry_run', 'live'))`, `CHECK(state IN ('pending', 'confirmed', 'failed', 'unknown', 'dead_letter', 'simulated', 'deferred'))`.
 - Phase 1 vs Phase 2: Phase 1 writes `status`, `routing_status`, and gatekeeper columns. Phase 2 writes ONLY `p2_*` columns, `hitl_*`, `reviewed_by`, and `reviewed_at`. Phase 2 NEVER overwrites `routing_status` or `status`.
-- Migration method: `TriageDatabase._init_db()` executes idempotent `ALTER TABLE ADD COLUMN` statements guarded by `PRAGMA table_info`.
+- Migration method: `TriageDatabase._init_db()` executes idempotent `ALTER TABLE ADD COLUMN` statements and `CREATE TABLE IF NOT EXISTS` guarded by `PRAGMA table_info`.
 
 ## 6. Configuration (`config.yaml`)
 Schema validated strictly by `utils/config.py` (`validate_config`, unknown keys raise `ConfigError`).
@@ -100,7 +103,8 @@ Schema validated strictly by `utils/config.py` (`validate_config`, unknown keys 
 - `gatekeeper`: Decision models and timeouts (`timeout_seconds`, `max_retries`, `api_key_env`, `fallback_model`, `groq_api_key_env`, `jev`).
 - `llm`: Secondary fallback generative LLM (`model`, `temperature`, `confidence_threshold`, `groq_api_key_env`).
 - `classification`: Semantic taxonomy settings (`primary`, `fallback`, `hitl_threshold`, `always_review_categories`, `max_subject_chars`, `max_body_chars`, `jev`).
-- `destinations`: Downstream adapter targets (`Engineering`, `Support`, `Sales`, `Billing`).
+- `dispatch`: Outbox safety rails (`dry_run`, `kill_switch`, `max_attempts`, `pending_timeout_minutes`, `backoff_base_seconds`, `backoff_max_seconds`).
+- `destinations`: Downstream adapter service configurations (`github`, `freescout`, `crm`, `webhook`).
 - Env overrides: `DATABASE_PATH`, `IDEMPOTENCY_STALE_MINUTES`, `MAX_DISPATCH_RETRIES`. Secrets via `*_env` names.
 
 ## 7. External Calls
@@ -121,6 +125,8 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/text_tools.py`: Bounded scanning and ReDoS prevention utilities.
 - `utils/jev_client.py`: TypeSafe System One client with Groq and heuristic fallback.
 - `utils/classifier_client.py`: Multi-tier classifier client with bounded scan and pre-filter.
+- `utils/adapters/base.py`: Abstract destination adapter contract, DispatchPayload, and DispatchResult.
+- `utils/adapters/__init__.py`: Thread-safe adapter registry and exports.
 - `db/database.py`: SQLite idempotency store, retry tracking, and review resolution.
 - `scripts/hitl_cli.py`: Reviewer CLI tool to list, show, approve, and reject reviews.
 - `scripts/manual_classifier_check.py`: Standalone forced-offline classifier verification check.
@@ -137,7 +143,7 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - **Add a Test:** Create `tests/test_<feature>.py`, mock external clients or use `temp_db` fixture, assert specific states.
 
 ## 10. Singletons & Test Isolation
-- Process Singletons: Config cache (`reset_config_cache` in `utils/config.py`), spaCy model (`reset_spacy_cache` in `nodes/pii_masker.py`), JevClient (`reset_default_client` in `utils/jev_client.py`), ClassifierClient (`reset_default_classifier_client` in `nodes/classifier.py`).
+- Process Singletons: Config cache (`reset_config_cache` in `utils/config.py`), spaCy model (`reset_spacy_cache` in `nodes/pii_masker.py`), JevClient (`reset_default_client` in `utils/jev_client.py`), ClassifierClient (`reset_default_classifier_client` in `nodes/classifier.py`), Adapter registry (`reset_adapters` in `utils/adapters/__init__.py`).
 - Test Isolation (`tests/conftest.py`): Blocks external socket egress, clears API env keys, and resets all singletons before and after every test.
 
 ## 11. Known Limitations & Open Items

@@ -146,28 +146,52 @@ classification:
     router_question_id: "gmail_router"
     timeout_seconds: 5.0
 
+dispatch:
+  dry_run: true
+  kill_switch: false
+  max_attempts: 3
+  pending_timeout_minutes: 10
+  backoff_base_seconds: 1.0
+  backoff_max_seconds: 20.0
+
 destinations:
-  Engineering:
-    service: "github"
+  github:
+    enabled: false
+    daily_cap: 200
+    use_masked_text_only: true
     target: "my-company/backend-repo"
     token_env: "GITHUB_TOKEN"
     labels: ["bug", "triage-bot"]
-    use_masked_text_only: true
+    circuit_breaker:
+      failure_threshold: 5
+      cooldown_seconds: 900
 
-  Support:
-    service: "freescout"
+  freescout:
+    enabled: false
+    daily_cap: 1000
+    use_masked_text_only: false
     target: "https://support.mycompany.com"
     api_key_env: "FREESCOUT_API_KEY"
     mailbox_id: 1
-    use_masked_text_only: false
+    circuit_breaker:
+      failure_threshold: 5
+      cooldown_seconds: 900
 
-  Sales:
-    service: "crm"
+  crm:
+    enabled: false
+    daily_cap: 500
+    use_masked_text_only: false
     target_env: "CRM_API_ENDPOINT"
     api_key_env: "CRM_API_KEY"
-    use_masked_text_only: false
+    circuit_breaker:
+      failure_threshold: 5
+      cooldown_seconds: 900
 
-  Billing:
-    service: "webhook"
-    target_env: "SLACK_BILLING_WEBHOOK_URL"
+  webhook:
+    enabled: false
+    daily_cap: 200
     use_masked_text_only: false
+    target_env: "SLACK_BILLING_WEBHOOK_URL"
+    circuit_breaker:
+      failure_threshold: 5
+      cooldown_seconds: 900

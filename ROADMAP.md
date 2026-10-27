@@ -20,11 +20,11 @@ Each issue is implemented individually with corresponding unit tests, verified a
 ### Phase 2 Implementation Sequence:
 1. **Track 0: Architectural Decisions & Client Alignment:** `P2-00` ✅ (Delivered in `docs/phase2_decisions.md`)
 2. **Track 1: Intelligence Classification Engine:** `P2-01` ✅ (Deep Classifier) ➔ `P2-02` ✅ (HITL Review Queue)
-3. **Track 2: Downstream Destination Adapters:** `P2-03` (Router & Outbox Ledger) ➔ `P2-04` (GitHub) ➔ `P2-05` (FreeScout) ➔ `P2-06` (CRM) ➔ `P2-07` (Webhook)
+3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` (Router Node & Matrix) ➔ `P2-04` (GitHub) ➔ `P2-05` (FreeScout) ➔ `P2-06` (CRM) ➔ `P2-07` (Webhook)
 4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` (LangGraph Integration) ➔ `P2-09` (Queue Worker) ➔ `P2-10` (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
 5. **Track 4: Mailbox Ingestion Connector:** `P2-12` (Gmail Pub/Sub Connector)
 
-**Next Immediate Task:** `P2-03` (`feat(dispatch): [P2-03] multi-destination dispatcher router, outbox ledger, and safety rails`).
+**Next Immediate Task:** `P2-03b` (`feat(dispatch): [P2-03b] multi-destination dispatcher router node, matrix gating, and dual-action webhook alerts`).
 
 ---
 
@@ -614,43 +614,54 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
      - Re-running Phase 2 classification never overwrites a human approval or rejection (`record_phase2_classification` returns `False`).
 * **Done When:** Unit tests verify confidence threshold, emotion triggers, mandatory policy categories, prompt-injection diversion, Phase 1 status isolation, concurrency races, CLI commands, and exit codes.
 
-#### [P2-03] Multi-Destination Dispatcher Router, Outbox Ledger, and Safety Rails
-* **Scope:** `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `tests/test_p2_dispatcher_router.py`
+#### [P2-03a] Dispatcher Foundations: Base Adapter, Outbox Ledger, and Safety Rails Configuration
+* **Status:** ✅ Complete
+* **Scope:** `utils/adapters/__init__.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `utils/config.py`, `state.py`, `tests/test_p2_dispatch_foundations.py`, `ROADMAP.md`, `docs/phase2_decisions.md`, `docs/ARCHITECTURE.md`, `README.md`
 * **Problem:** Downstream integrations are varied. Hardcoding dispatch logic without an outbox ledger leads to duplicate dispatches on network timeouts. Missing safety rails risk runaway API billing or alert storms.
 * **Solution:**
   1. Base Adapter Abstract Contract (`BaseDestinationAdapter` in `utils/adapters/base.py`):
-     - `dispatch(state: TriageState) -> DispatchResult`
-     - `check_duplicate(idempotency_key: str, state: TriageState) -> Optional[str]`
-     - `validate_config() -> bool`
-     - `health_check() -> bool`
-  2. Dispatch Intake Gating:
-     - Dispatcher consumes emails only when `hitl_status IN ('auto_approved', 'approved')` and Phase 1 `routing_status == 'gatekeeper_approved'`.
-  3. Outbox Pattern Dispatch Ledger (`p2_dispatch_log`):
-     - Before invoking remote API, write row: `state = 'pending'`, `idempotency_key = f"{email_id}:{destination}:{action_type}"`, `attempt_number = 1`.
-     - After successful send, update to `state = 'confirmed'` with `remote_id`.
-     - On failure before send, update to `state = 'failed'` with `error_message`.
-     - **Handling Uncertain Outcomes (`unknown`):** If network timeout or socket disconnect occurs AFTER send request is initiated, update to `state = 'unknown'`. **Blind retries are strictly prohibited.**
-     - The system resolves `'unknown'` by calling `adapter.check_duplicate()`. If confirmed on remote system, marks `'confirmed'`. If unconfirmed or unsupported, diverts to `hitl_status = 'pending'` for operator verification.
-  3. Comprehensive 10-Category Deterministic Routing Matrix:
-     - `Bug Report` ➔ GitHub Issues (`github`)
-     - `Feature Request` ➔ GitHub Issues (`github`) with `type:feature` label
-     - `Demo Request`, `Pricing Inquiry` ➔ CRM Leads (`crm`)
-     - `General Query`, `Complaint` ➔ FreeScout Helpdesk (`freescout`)
-     - `Security/Account` ➔ Diverted to HITL Review Queue (`hitl_pending`) + Webhook Alert
-     - `Billing Issue`, `Refund Request`:
-       - If `priority in ["Critical", "High"]` (urgent billing disputes, double-charging, payment failures that pass Phase 1) ➔ Webhook Alert (`webhook`)
-       - If `priority in ["Medium", "Low"]` (routine receipts, invoices) ➔ FreeScout Helpdesk (`freescout`)
-     - `Critical Outage` / Incident (production downtime reports) ➔ Webhook Alert (`webhook`)
+     - Consumes `DispatchPayload` (D7: adapters receive only `DispatchPayload`, never the state; exactly 16 fields, zero PII, no `sender_email`, no `token_map`, stable SHA-256 hash).
+     - Defines `DispatchResult` (non-empty `remote_id` <= 128 chars).
+     - Exceptions: `AdapterError` base; `AdapterTransientError` (safe to retry), `AdapterPermanentError` (rejected), and `AdapterUnknownOutcomeError` (timeout after send, blind retries forbidden).
+     - Thread-safe registry (`register_adapter`, `get_adapter`, `reset_adapters`) for canonical services (`github`, `freescout`, `crm`, `webhook`).
+  2. Outbox Pattern Dispatch Ledger (`p2_dispatch_log` in `db/database.py`):
+     - Table with composite unique constraint `UNIQUE(idempotency_key, mode)`: dry runs use state `'simulated'` and mode `'dry_run'` (never `'sent'`), live dispatches use mode `'live'`. Simulated rows never block later real dispatches (D1).
+     - Every state change is ONE atomic SQL statement checking rowcount (never SELECT-then-UPDATE).
+     - `begin_dispatch`: requires Phase 1 `routing_status == 'gatekeeper_approved'`. First attempt inserts `pending`, retries update `failed`/`deferred` rows if `attempts < max_attempts`, exhaust transitions to `'dead_letter'` (reason `'retries_exhausted'`) directly on the ledger (D6).
+     - `record_dispatch_attempt`: increments attempts on pending rows only.
+     - `finish_dispatch`: validates target state in (`confirmed`, `failed`, `unknown`, `dead_letter`, `simulated`, `deferred`) and code formats.
+     - `resolve_unknown_dispatch`: resolves `'unknown'` rows to `'confirmed'` (with `remote_id`) or `'failed'` (reason `'operator_not_sent'`).
+     - `count_confirmed_today`: counts live confirmed dispatches since 00:00 UTC today; ignores simulated rows and older days.
+     - `get_failure_streak`: counts consecutive failures in newest-first live rows; resets on `'confirmed'`.
+     - `divert_to_hitl`: diverts auto_approved/approved emails to pending HITL review with zero modification to Phase 1 data.
+  3. Configuration & Safety Rails (`config.yaml` & `utils/config.py`):
+     - Canonical destination service names: `github`, `freescout`, `crm`, `webhook` (replacing legacy `Engineering`, `Support`, `Sales`, `Billing` per D3).
+     - B5 fail-fast schema validation: `dispatch` section (`dry_run: true`, `kill_switch: false`, `max_attempts: 3`, `pending_timeout_minutes: 10`, `backoff_base_seconds: 1.0`, `backoff_max_seconds: 20.0`).
+     - B5 destination validation: `destinations.<service>` requires all 4 destinations with `enabled: false`, `daily_cap: int`, `use_masked_text_only: bool`, and `circuit_breaker` (`failure_threshold: 5`, `cooldown_seconds: 900`).
+     - Defer Policy (D4): Daily cap exceeded, open circuit breaker, kill switch active, disabled destination, or missing adapter DEFER the action (ledger state `'deferred'` + reason code). They do NOT divert to HITL.
+     - Dry-run audit logging (D2): Structured audit log carrying zero customer text (only `email_id`, `destination`, `action_type`, `payload_sha256`, `payload_bytes`).
+* **Done When:** 28 unit tests in `tests/test_p2_dispatch_foundations.py` verify base adapter abstraction, payload clamping, stable hashing, outbox ledger atomic transitions, dry-run/live coexistence, retry to dead_letter, unknown resolution, daily counts, and strict config validation.
+
+#### [P2-03b] Multi-Destination Dispatcher Router Node, Matrix Gating, and Dual-Action Webhook Alerts
+* **Status:** ⏳ Pending
+* **Scope:** `nodes/dispatcher.py`, `nodes/__init__.py`, `tests/test_p2_dispatcher_router.py`
+* **Problem:** Downstream integrations need an intelligent router node that gates intake, evaluates the 10-category taxonomy against destination services, supports dual-action alerts for critical issues, and coordinates with the outbox ledger.
+* **Solution:**
+  1. Dispatch Intake Gating:
+     - Dispatcher node consumes emails only when `hitl_status IN ('auto_approved', 'approved')` and Phase 1 `routing_status == 'gatekeeper_approved'`.
+  2. Comprehensive Deterministic Routing Matrix (D5):
+     - `Bug Report` ➔ GitHub Issues (`github`). If `priority == "Critical"`, also triggers Webhook Alert (`webhook`).
+     - `Feature Request` ➔ GitHub Issues (`github`) with `type:feature` label.
+     - `Demo Request`, `Pricing Inquiry` ➔ CRM Leads (`crm`).
+     - `General Query`, `Complaint` ➔ FreeScout Helpdesk (`freescout`). If `priority == "Critical"`, also triggers Webhook Alert (`webhook`).
+     - `Security/Account` ➔ Diverted to HITL Review Queue (`hitl_pending`) + Webhook Alert (`webhook`).
+     - `Billing Issue`, `Refund Request`: Always create a FreeScout ticket (`freescout`), and when `priority in ("Critical", "High")`, also trigger Webhook Alert (`webhook`).
      - `Other` or unmapped category ➔ Fails closed directly to HITL (`hitl_pending`).
-  4. Operational Safety Rails:
-     - `dispatch.dry_run: true` default: logs structured payload, sets ledger to `'sent'` (simulated), sends zero network requests.
-     - Per-destination enable flags (`destinations.<name>.enabled: true/false`).
-     - Global kill switch (`dispatch.kill_switch: false`).
-     - Daily caps & circuit breaker (`destinations.<name>.daily_cap: int`).
-     - Dead-letter state: after 3 failed attempts, transitions to `dead_letter` in `p2_jobs` and triggers operational alert.
-     - Host allowlists & HTTPS-only per adapter (A13 security pattern).
-     - Privacy Invariant: Remote response bodies and customer text are NEVER logged.
-* **Done When:** Table-driven tests verify complete 10-category routing, outbox state transitions, 'unknown' timeout resolution without blind retries, dry-run simulation, daily caps, and kill-switch behavior.
+  3. Dispatcher Node Implementation:
+     - Implement `dispatcher_node(state: TriageState) -> dict` returning owned state keys: `dispatch_target`, `dispatch_status`, `dispatch_results`, and `error_message`.
+     - Implement conditional edge `should_route_after_dispatcher(state: TriageState) -> str`.
+     - Coordinates with `db.begin_dispatch()`, adapter execution, and `db.finish_dispatch()`.
+* **Done When:** Table-driven tests verify complete 10-category routing, dual-action critical alerts, intake gating, and dry-run execution.
 
 #### [P2-04] GitHub Issues Adapter with Output Hardening and Idempotency Verification
 * **Scope:** `utils/adapters/github_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_github_adapter.py`
@@ -704,14 +715,15 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
      - Check CRM for existing lead by `email_id` custom property or sender domain within a 24-hour sliding window before creating contact or deal.
 * **Done When:** Unit tests verify formula injection neutralization, domain extraction, lead score calculation, deal deduplication, and mock CRM ingestion.
 
-#### [P2-07] Webhook Alert Adapter with HMAC Signing for Urgent Billing and Outage Alerts
+#### [P2-07] Webhook Alert Adapter with HMAC Signing for Urgent Billing and Critical Alerts
 * **Scope:** `utils/adapters/webhook_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_webhook_adapter.py`
-* **Problem:** Urgent billing disputes (double-charging, payment failures) and critical production outages require instantaneous notification to finance or on-call channels with cryptographic authenticity and replay protection.
+* **Problem:** Urgent billing disputes (double-charging, payment failures) and critical issues require instantaneous notification to finance or on-call channels with cryptographic authenticity and replay protection.
 * **Solution:**
   1. Implement `WebhookAdapter` delivering cryptographically signed HTTP POST webhooks.
-  2. Trigger Routing:
-     - Urgent billing disputes, double-charging, and payment failures passing Phase 1 (explicit "chargeback" keywords already diverted in Phase 1's `sensitive_skip`).
-     - Critical production outages and severe infrastructure failure reports (`category == "Other" | "General Query"` with `priority == "Critical"`).
+  2. Trigger Routing (per D5 dual-action alert rules):
+     - Priority `Critical` on `Bug Report`, `General Query`, or `Complaint` (triggers webhook alert alongside primary GitHub/FreeScout dispatch).
+     - Priority `High` or `Critical` on `Billing Issue` or `Refund Request` (triggers webhook alert alongside primary FreeScout ticket dispatch).
+     - High-risk security inquiries (`Security/Account` category).
   3. Cryptographic Authenticity & Security Headers:
      - Compute HMAC-SHA256 signature in `X-Signature-SHA256` computed over raw request body using shared secret (`WEBHOOK_SECRET_KEY_ENV`).
      - Include `Idempotency-Key: {email_id}:{destination}:alert` and `X-Correlation-ID: {email_id}` headers.
