@@ -1,0 +1,95 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["venv", "data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "BLE", "S", "T20", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["nodes", "utils", "db", "state", "pipeline", "prompts"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use assert, hardcoded mock tokens, pseudo-randomness, and print statements
+"tests/*" = ["S101", "S105", "S106", "S311", "BLE001", "T20"]
+# CLI and tool entrypoint files legitimately print to stdout
+"main.py" = ["T20", "BLE001", "E501", "F841", "SIM118", "UP006", "UP015", "UP035", "UP045"] # TODO(lint): legacy baseline
+"scripts/*" = ["T20"]
+"tools/*" = ["T20"]
+
+# Baseline debt for existing modules (TODO: resolve lint warnings in future refactors)
+"db/database.py" = ["BLE001", "E501", "I001", "S110", "UP006", "UP017", "UP035", "UP045"] # TODO(lint)
+"nodes/__init__.py" = ["F401", "I001", "RUF022"] # TODO(lint)
+"nodes/classifier.py" = ["BLE001", "E501", "UP006", "UP035", "UP045"] # TODO(lint)
+"nodes/hitl_queue.py" = ["BLE001", "E501", "F841", "UP006", "UP035", "UP045"] # TODO(lint)
+"nodes/ingest.py" = ["E501", "I001", "RUF059", "SIM108", "UP006", "UP035", "UP045"] # TODO(lint)
+"nodes/jev_gatekeeper.py" = ["BLE001", "E501", "F401", "I001", "S110", "SIM105", "UP006", "UP035", "UP045"] # TODO(lint)
+"nodes/pii_masker.py" = ["BLE001", "E501", "F841", "S110", "SIM102", "SIM103", "SIM118", "UP006", "UP015", "UP035", "UP045"] # TODO(lint)
+"nodes/sensitive_skip.py" = ["BLE001", "E501", "I001", "RUF001", "S110", "SIM105", "SIM118", "UP006", "UP035", "UP045"] # TODO(lint)
+"nodes/signature_stripper.py" = ["E501", "E741", "UP006", "UP035"] # TODO(lint)
+"pipeline.py" = ["I001", "UP006", "UP035", "UP045"] # TODO(lint)
+"prompts.py" = ["E501"] # TODO(lint)
+"scripts/hitl_cli.py" = ["BLE001", "F401", "I001", "UP006", "UP017", "UP035", "UP045"] # TODO(lint)
+"scripts/manual_classifier_check.py" = ["E501"] # TODO(lint)
+"state.py" = ["E501", "I001", "UP006", "UP035", "UP045"] # TODO(lint)
+"tests/conftest.py" = ["E501", "I001"] # TODO(lint)
+"tests/test_a12_container_security.py" = ["E501", "F401", "I001", "UP015"] # TODO(lint)
+"tests/test_a14_dependency_pinning.py" = ["E501", "F401", "I001"] # TODO(lint)
+"tests/test_benchmark_runner.py" = ["E501", "F401", "I001", "RUF005", "SIM117"] # TODO(lint)
+"tests/test_c2_isolation.py" = ["E501", "I001"] # TODO(lint)
+"tests/test_c3_smoke_test.py" = ["I001", "SIM117"] # TODO(lint)
+"tests/test_fix_b4_state_db_sync.py" = ["E501", "I001", "SIM117"] # TODO(lint)
+"tests/test_fix_b5_config.py" = ["E401", "E501", "F401", "I001", "SIM117"] # TODO(lint)
+"tests/test_fix_b6_lifecycle.py" = ["E501", "F401", "F841", "I001", "SIM117"] # TODO(lint)
+"tests/test_ingest_idempotency.py" = ["B023", "E501", "I001", "UP017"] # TODO(lint)
+"tests/test_jev_client.py" = ["E501", "I001"] # TODO(lint)
+"tests/test_jev_gatekeeper.py" = ["E501", "I001", "UP015"] # TODO(lint)
+"tests/test_main.py" = ["E501", "S603"] # TODO(lint)
+"tests/test_no_stale_claims.py" = ["I001"] # TODO(lint)
+"tests/test_p2_classifier.py" = ["E501", "F401", "F841", "I001"] # TODO(lint)
+"tests/test_p2_egress.py" = ["E501", "F401", "I001"] # TODO(lint)
+"tests/test_p2_hitl.py" = ["E501", "F401", "I001", "RUF043", "S603", "UP035"] # TODO(lint)
+"tests/test_pii_masker.py" = ["E501", "F401", "RUF015", "RUF059", "SIM117", "SIM118"] # TODO(lint)
+"tests/test_pipeline_e2e.py" = ["E501", "F401", "UP015"] # TODO(lint)
+"tests/test_readme_metrics.py" = ["E501", "I001"] # TODO(lint)
+"tests/test_sensitive_skip.py" = ["E501", "I001", "RUF001"] # TODO(lint)
+"tests/test_signature_stripper.py" = ["E501"] # TODO(lint)
+"tools/check_concurrency.py" = ["BLE001", "E402", "I001", "RUF059", "S110", "SIM105", "UP006", "UP017", "UP035"] # TODO(lint)
+"tools/egress_check.py" = ["BLE001", "E401", "E402", "I001", "SIM105"] # TODO(lint)
+"utils/classifier_client.py" = ["BLE001", "E501", "F401", "I001", "SIM103", "UP006", "UP035", "UP045"] # TODO(lint)
+"utils/config.py" = ["B904", "E501", "F541", "I001", "UP006", "UP015", "UP035", "UP045"] # TODO(lint)
+"utils/jev_client.py" = ["BLE001", "E501", "F401", "F541", "I001", "SIM102", "SIM103", "SIM114", "UP006", "UP035", "UP045"] # TODO(lint)
+"utils/text_tools.py" = ["SIM105", "UP006", "UP035", "UP045"] # TODO(lint)
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = false
+files = [
+    "nodes",
+    "utils",
+    "db",
+    "main.py",
+    "pipeline.py",
+    "state.py",
+    "prompts.py",
+]
+
+[[tool.mypy.overrides]]
+module = ["db.database", "nodes.pii_masker", "utils.classifier_client", "utils.jev_client", "pipeline"]
+# TODO(lint): legacy modules with type debt
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["nodes.classifier", "nodes.hitl_queue"]
+disallow_untyped_defs = true
+
+[tool.bandit]
+exclude_dirs = ["venv", "tests", ".git", "data"]
+skips = ["B110"]

@@ -82,15 +82,23 @@ Customer-Email-Triage-Automation/
 ├── .dockerignore              # Docker build exclusions
 ├── .env.example              # Environment variables template
 ├── .gitignore                # Git repository ignore rules
-├── check.sh                  # All-in-one testing and egress verification script
+├── AGENTS.md                 # Operating rules, invariants, and guardrails for AI agents
+├── check.sh                  # All-in-one testing, linting, and egress verification script
 ├── config/
 │   └── tech_terms.txt        # Two-tier technical terms whitelist (unambiguous / ambiguous)
 ├── config.yaml               # Central system and threshold configuration
 ├── Dockerfile                # Production container specification
 ├── docker-compose.yml        # Multi-container orchestration
+├── docs/
+│   ├── ARCHITECTURE.md       # Pipeline architecture, state map, database schema, & config reference
+│   ├── contracts/            # External API contract specifications
+│   └── phase2_decisions.md   # Architectural decisions for Phase 2
+├── GEMINI.md -> AGENTS.md    # Agent instructions symlink
 ├── main.py                   # Production entry point and CLI benchmark runner
 ├── pipeline.py               # LangGraph compiled pipeline orchestrator
 ├── prompts.py                # Classifier LLM system and user prompt templates
+├── pyproject.toml            # Development tool configurations (ruff, mypy, bandit, pytest)
+├── README.md                 # Project documentation and quickstart guide
 ├── requirements.txt          # Pinned runtime production dependencies
 ├── requirements-dev.txt      # Pinned development and testing dependencies
 ├── ROADMAP.md                # 24-point senior review remediation roadmap
@@ -106,15 +114,18 @@ Customer-Email-Triage-Automation/
 │   ├── signature_stripper.py # Node 02: Quote and signature removal
 │   ├── pii_masker.py         # Node 03: Local spaCy & regex redaction
 │   ├── sensitive_skip.py     # Node 04: Sensitive guardrail diversion
-│   └── jev_gatekeeper.py     # Node 05: Jev AI decision engine
+│   ├── jev_gatekeeper.py     # Node 05: Jev AI decision engine
+│   ├── classifier.py         # Node 06: Phase 2 category & priority classifier
+│   └── hitl_queue.py         # Node 07: Phase 2 human-in-the-loop review queue
 ├── scripts/
 │   ├── hitl_cli.py           # Reviewer CLI interface for HITL queue management
 │   ├── jev_smoke_test.py     # Standalone TypeSafe System One connectivity smoke test
 │   └── manual_classifier_check.py # Offline classifier verification script
-├── tests/                    # Comprehensive unit and integration test suite (306 tests)
+├── tests/                    # Comprehensive unit and integration test suite (312 tests)
 │   ├── conftest.py           # Test isolation fixtures & network egress guards
 │   ├── test_a12_container_security.py
 │   ├── test_a14_dependency_pinning.py
+│   ├── test_architecture_doc.py
 │   ├── test_benchmark_runner.py
 │   ├── test_c2_isolation.py
 │   ├── test_c3_smoke_test.py
@@ -126,6 +137,9 @@ Customer-Email-Triage-Automation/
 │   ├── test_jev_gatekeeper.py
 │   ├── test_main.py
 │   ├── test_no_stale_claims.py
+│   ├── test_p2_classifier.py
+│   ├── test_p2_egress.py
+│   ├── test_p2_hitl.py
 │   ├── test_pii_masker.py
 │   ├── test_pipeline_e2e.py  # End-to-end integration and benchmark tests
 │   ├── test_readme_metrics.py
@@ -135,6 +149,7 @@ Customer-Email-Triage-Automation/
 │   ├── check_concurrency.py  # Multiprocess / multithread concurrency verification
 │   └── egress_check.py       # Zero-network-leak verification tool
 └── utils/
+    ├── classifier_client.py  # Multi-tier classifier client (Jev AI & Groq fallback)
     ├── config.py             # Environment and config loader
     ├── jev_client.py         # Jev AI client with fallback handler
     └── text_tools.py         # Bounded text scanning & normalization helpers
@@ -300,7 +315,7 @@ python -m spacy download en_core_web_sm
 # 3. Configure environment
 cp .env.example .env
 
-# 4. Run automated test suite (306 tests, 100% passing)
+# 4. Run automated test suite (312 tests, 100% passing)
 pytest tests/ -v
 
 # 5. Run the synthetic benchmark suite across all 100 pipeline scenarios (default: offline)

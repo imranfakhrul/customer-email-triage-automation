@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One place for all manual checks. Usage: ./check.sh test | bench | egress | all
+# One place for all manual checks. Usage: ./check.sh lint | test | bench | egress | all
 PY="${PYTHON:-./venv/bin/python}"
 if [ ! -f "$PY" ] && [ ! -x "$PY" ]; then
   if command -v python3 >/dev/null 2>&1; then
@@ -10,6 +10,7 @@ if [ ! -f "$PY" ] && [ ! -x "$PY" ]; then
 fi
 echo "[check.sh] Using Python interpreter: $PY"
 case "$1" in
+  lint)  $PY -m ruff check . && $PY -m mypy && $PY -m bandit -q -r . -c pyproject.toml ;;
   test)  $PY -m pytest -q 2>&1 | tail -3 ;;
   bench) $PY main.py --benchmark --offline 2>&1 | tail -3 ;;
   egress)
@@ -27,6 +28,6 @@ PYEOF
     JEV_API_KEY=fake-key GROQ_API_KEY=fake-key $PY tools/egress_check.py \
       --forbid "John Smith" --forbid "john.smith" --forbid "maria.lopez" --forbid "4111" \
       -- main.py --input /tmp/sample_email.json ;;
-  all) "$0" test; "$0" bench; "$0" egress ;;
-  *) echo "usage: ./check.sh test | bench | egress | all" ;;
+  all) "$0" lint; "$0" test; "$0" bench; "$0" egress ;;
+  *) echo "usage: ./check.sh lint | test | bench | egress | all" ;;
 esac
