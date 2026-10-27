@@ -161,7 +161,15 @@ destinations:
     use_masked_text_only: true
     target: "my-company/backend-repo"
     token_env: "GITHUB_TOKEN"
-    labels: ["bug", "triage-bot"]
+    labels: ["triage:automated"]
+    api_base_url: "https://api.github.com"
+    allowed_hosts: ["api.github.com"]
+    request_timeout_seconds: 15.0
+    duplicate_lookback_hours: 72
+    duplicate_max_pages: 10
+    precheck_duplicates: true
+    bot_login: null
+    api_version: "2022-11-28"
     circuit_breaker:
       failure_threshold: 5
       cooldown_seconds: 900

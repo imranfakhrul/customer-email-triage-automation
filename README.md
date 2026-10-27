@@ -121,7 +121,7 @@ Customer-Email-Triage-Automation/
 │   ├── hitl_cli.py           # Reviewer CLI interface for HITL queue management
 │   ├── jev_smoke_test.py     # Standalone TypeSafe System One connectivity smoke test
 │   └── manual_classifier_check.py # Offline classifier verification script
-├── tests/                    # Comprehensive unit and integration test suite (396 tests)
+├── tests/                    # Comprehensive unit and integration test suite (444 tests)
 │   ├── conftest.py           # Test isolation fixtures & network egress guards
 │   ├── test_a12_container_security.py
 │   ├── test_a14_dependency_pinning.py
@@ -315,7 +315,7 @@ python -m spacy download en_core_web_sm
 # 3. Configure environment
 cp .env.example .env
 
-# 4. Run automated test suite (396 tests, 100% passing)
+# 4. Run automated test suite (444 tests, 100% passing)
 pytest tests/ -v
 
 # 5. Run the synthetic benchmark suite across all 100 pipeline scenarios (default: offline)

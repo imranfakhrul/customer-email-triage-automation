@@ -1,0 +1,12 @@
+{
+  "message": "Invalid request.\n\n\"title\" is not present.",
+  "errors": [
+    {
+      "resource": "Issue",
+      "field": "title",
+      "code": "missing_field"
+    }
+  ],
+  "documentation_url": "https://docs.github.com/rest/issues/issues#create-an-issue",
+  "status": "422"
+}

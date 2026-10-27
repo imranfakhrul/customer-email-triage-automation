@@ -112,6 +112,7 @@ Schema validated strictly by `utils/config.py` (`validate_config`, unknown keys 
 All external HTTP requests are strictly HTTPS and validated against the domain allowlist (`validate_outbound_url`):
 - `api.typesafe.ai`: Called by `utils/jev_client.py` and `utils/classifier_client.py`. Receives masked text, returns mathematical routing choice.
 - `api.groq.com`: Called by `utils/jev_client.py` and `utils/classifier_client.py`. Receives masked text, returns JSON classification.
+- `api.github.com`: Called by GitHub adapter (`utils/adapters/github_adapter.py`). Creates issues and queries duplicate markers using masked text only.
 - Privacy guarantee: Raw customer PII, unmasked bodies, raw subjects, and `token_map` NEVER leave the host.
 
 ## 8. Module Index
@@ -122,12 +123,14 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `nodes/jev_gatekeeper.py`: Node 05: Spam, threat, and legitimacy gatekeeping.
 - `nodes/classifier.py`: Node 06: Deep LLM intent, category, and sentiment classifier.
 - `nodes/hitl_queue.py`: Node 07: Human-in-the-loop review queue and state gating.
+- `nodes/dispatcher.py`: Node 08: Action routing, two-phase outbox ledger, safety rails, and adapter dispatch.
 - `utils/config.py`: Configuration loading, validation schemas, and secret resolution.
 - `utils/text_tools.py`: Bounded scanning and ReDoS prevention utilities.
 - `utils/jev_client.py`: TypeSafe System One client with Groq and heuristic fallback.
 - `utils/classifier_client.py`: Multi-tier classifier client with bounded scan and pre-filter.
 - `utils/adapters/base.py`: Abstract destination adapter contract, DispatchPayload, and DispatchResult.
 - `utils/adapters/__init__.py`: Thread-safe adapter registry and exports.
+- `utils/adapters/github_format.py`: Formatting, output hardening, and anchored marker parser for GitHub issue payloads.
 - `db/database.py`: SQLite idempotency store, retry tracking, and review resolution.
 - `scripts/hitl_cli.py`: Reviewer CLI tool to list, show, approve, and reject reviews.
 - `scripts/manual_classifier_check.py`: Standalone forced-offline classifier verification check.

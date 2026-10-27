@@ -20,11 +20,11 @@ Each issue is implemented individually with corresponding unit tests, verified a
 ### Phase 2 Implementation Sequence:
 1. **Track 0: Architectural Decisions & Client Alignment:** `P2-00` ✅ (Delivered in `docs/phase2_decisions.md`)
 2. **Track 1: Intelligence Classification Engine:** `P2-01` ✅ (Deep Classifier) ➔ `P2-02` ✅ (HITL Review Queue)
-3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04` (GitHub) ➔ `P2-05` (FreeScout) ➔ `P2-06` (CRM) ➔ `P2-07` (Webhook)
+3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04a` ✅ (GitHub Formatting & Schema) ➔ `P2-04b` (GitHub Adapter & Remote Precheck) ➔ `P2-05` (FreeScout) ➔ `P2-06` (CRM) ➔ `P2-07` (Webhook)
 4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` (LangGraph Integration) ➔ `P2-09` (Queue Worker) ➔ `P2-10` (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
 5. **Track 4: Mailbox Ingestion Connector:** `P2-12` (Gmail Pub/Sub Connector)
 
-**Next Immediate Task:** `P2-04` (`feat(adapters): [P2-04] github issues adapter with output hardening and idempotency verification`).
+**Next Immediate Task:** `P2-04b` (`feat(adapters): [P2-04b] github issues adapter with deduplication precheck and retry`).
 
 ---
 
@@ -523,7 +523,8 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 | **2** | **P2-02** | Track 1 | `feat(hitl): [P2-02] human-in-the-loop review queue, state gating, and reviewer cli interface` | `nodes/hitl_queue.py`, `scripts/hitl_cli.py`, `db/database.py`, `config.yaml`, `tests/test_p2_hitl.py` | ✅ Complete |
 | **3a** | **P2-03a** | Track 2 | `feat(dispatch): [P2-03a] dispatcher foundations, base adapter contract, and outbox ledger` | `utils/adapters/__init__.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `utils/config.py`, `state.py`, `tests/test_p2_dispatch_foundations.py`, `docs/ARCHITECTURE.md`, `docs/phase2_decisions.md`, `ROADMAP.md`, `README.md` | ✅ Complete |
 | **3b** | **P2-03b** | Track 2 | `feat(dispatch): [P2-03b] multi-destination dispatcher router node, rate caps, and circuit breakers` | `nodes/dispatcher.py`, `nodes/__init__.py`, `tests/test_p2_dispatcher.py`, `ROADMAP.md`, `docs/ARCHITECTURE.md`, `README.md` | ✅ Complete |
-| **4** | **P2-04** | Track 2 | `feat(adapters): [P2-04] github issues adapter with output hardening and idempotency verification` | `utils/adapters/github_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_github_adapter.py` | ⏳ Pending |
+| **4a** | **P2-04a** | Track 2 | `feat(adapters): [P2-04a] github issues contract, fixtures, formatting, and config schema` | `docs/contracts/github_issues.md`, `tests/fixtures/github/*.json`, `utils/adapters/github_format.py`, `config.yaml`, `utils/config.py`, `.env.example`, `tests/test_p2_github_format.py`, `docs/ARCHITECTURE.md`, `ROADMAP.md`, `README.md` | ✅ Complete |
+| **4b** | **P2-04b** | Track 2 | `feat(adapters): [P2-04b] github issues adapter with deduplication precheck and retry` | `utils/adapters/github_adapter.py`, `tests/test_p2_github_adapter.py` | ⏳ Pending |
 | **5** | **P2-05** | Track 2 | `feat(adapters): [P2-05] freescout helpdesk adapter with output hardening and thread continuity` | `utils/adapters/freescout_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_freescout_adapter.py` | ⏳ Pending |
 | **6** | **P2-06** | Track 2 | `feat(adapters): [P2-06] crm lead ingestion adapter with output hardening and lead scoring` | `utils/adapters/crm_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_crm_adapter.py` | ⏳ Pending |
 | **7** | **P2-07** | Track 2 | `feat(adapters): [P2-07] webhook alert adapter with hmac signing for urgent billing and outage alerts` | `utils/adapters/webhook_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_webhook_adapter.py` | ⏳ Pending |
@@ -664,25 +665,31 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
      - Coordinates with `db.begin_dispatch()`, adapter execution, and `db.finish_dispatch()`.
 * **Done When:** Table-driven tests verify complete 10-category routing, dual-action critical alerts, intake gating, and dry-run execution.
 
-#### [P2-04] GitHub Issues Adapter with Output Hardening and Idempotency Verification
-* **Scope:** `utils/adapters/github_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_github_adapter.py`
+#### [P2-04a] GitHub Issues Contract, Fixtures, Output Formatting, and Config Schema
+* **Scope:** `docs/contracts/github_issues.md`, `tests/fixtures/github/*.json`, `utils/adapters/github_format.py`, `config.yaml`, `utils/config.py`, `.env.example`, `tests/test_p2_github_format.py`
+* **Status:** ✅ **Complete**
 * **Problem:** Automated GitHub issue creation without output hardening allows customer emails to inject arbitrary markdown, mention unintended GitHub users/teams, trigger cross-issue linking, or spoof deduplication markers.
 * **Solution:**
+  1. Contract documentation: Researched official docs (docs.github.com) and documented auth, rate limits, pagination, and endpoints in `docs/contracts/github_issues.md`. Created authentic response fixtures in `tests/fixtures/github/`.
+  2. Pure formatting and output hardening in `utils/adapters/github_format.py`:
+     - Anchored marker prefix (`<!-- triage-bot:v1\nkey: ...\n-->\n`) strictly at index 0 of body.
+     - Neutralize text: strips control chars and bidi overrides (`U+202A`–`U+202E`, `U+2066`–`U+2069`), defangs `@` mentions (`@\u200buser`) and `#` issue links (`#\u200b123`), escapes comment markers (`<!\u200b--`, `--\u200b>`).
+     - Adaptive code fences (`fence_block`) for summaries and customer text (length = max backtick run + 1, min 3). Customer text is never rendered unfenced.
+     - Title truncation (max 120 chars) and label generation (`triage:automated`, `type:bug`/`type:feature`, `urgency:{level}`).
+  3. Config schema & validation:
+     - Added GitHub destination settings in `config.yaml` and schema validation in `utils/config.py`. Enforces B5 rule (unknown keys on any destination raise `ConfigError`).
+* **Done When:** Table-driven tests verify complete output hardening, adaptive code fencing, marker parser anchoring, and config schema validation.
+
+#### [P2-04b] GitHub Issues Adapter with Deduplication Precheck and Remote Check
+* **Scope:** `utils/adapters/github_adapter.py`, `tests/test_p2_github_adapter.py`
+* **Status:** ⏳ **Pending**
+* **Problem:** Live HTTP dispatches require rate limit handling, duplicate detection, network error classification (transient vs permanent), and circuit breaking.
+* **Solution:**
   1. Implement `GitHubAdapter` interfacing with GitHub REST API v3 (`POST /repos/{owner}/{repo}/issues`).
-  2. Output Hardening Pipeline:
-     - Customer text rendered inside markdown fenced code block (` ``` `).
-     - Neutralize `@mentions` (replace `@` with `@​` zero-width space or backtick) to prevent user/team notification spam.
-     - Neutralize `#issue` references (escape as `\#123`) to prevent accidental issue linking.
-     - Strip or escape HTML comments (`<!--`, `-->`) and raw HTML tags.
-  3. System-Owned Correlation Marker Isolation:
-     - Correlation marker `email_id` is stored in GitHub Labels (`triage-id:{email_id}`) or a distinct bot-signed metadata block.
-     - **The correlation marker MUST NOT live in customer-controlled text.**
-  4. Duplicate Detection & Remote Check:
-     - Before creating issue, searches GitHub API: `repo:{owner}/{repo} label:"triage-id:{email_id}"`. If match found, returns existing issue ID and sets outbox state to `'confirmed'` without re-creating.
-  5. Security Test for Forged Markers:
-     - Dedicated test injecting an adversarial customer email containing forged markers (e.g., `<!-- triage-id: stolen-uuid -->`, `label: triage-id: fake`). Asserts system ignores body content, uses genuine system marker, and avoids hijacking.
-  6. Apply standard labels: `bug` / `feature`, `triage:automated`, `urgency:{level}`.
-* **Done When:** Unit tests verify output hardening (mentions, issue links, code fences), label correlation marker isolation, duplicate search check, forged marker rejection, and 429/503 exponential backoff.
+  2. Duplicate Detection & Remote Check:
+     - Before creating issue, searches recent bot issues (`GET /repos/{owner}/{repo}/issues`) for the anchored idempotency marker. If match found, returns existing issue ID without re-creating.
+  3. Token authentication, fine-grained PAT support, retry/backoff, and circuit breaker.
+* **Done When:** Unit tests with mocked HTTP responses verify issue creation, duplicate detection via markers, rate limiting, and failure classifications.
 
 #### [P2-05] FreeScout Helpdesk Adapter with Output Hardening and Thread Continuity
 * **Scope:** `utils/adapters/freescout_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_freescout_adapter.py`

@@ -6,8 +6,10 @@ plaintext config files.
 
 import os
 from pathlib import Path
+import re
 import threading
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 import yaml
 from dotenv import load_dotenv
 
@@ -68,6 +70,24 @@ _KNOWN_KEYS: Dict[str, List[str]] = {
     "destinations.item": [
         "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
         "target", "token_env", "api_key_env", "target_env", "labels", "mailbox_id",
+    ],
+    "destinations.github": [
+        "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
+        "target", "token_env", "labels", "api_base_url", "allowed_hosts",
+        "request_timeout_seconds", "duplicate_lookback_hours", "duplicate_max_pages",
+        "precheck_duplicates", "bot_login", "api_version",
+    ],
+    "destinations.freescout": [
+        "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
+        "target", "api_key_env", "mailbox_id",
+    ],
+    "destinations.crm": [
+        "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
+        "target_env", "api_key_env",
+    ],
+    "destinations.webhook": [
+        "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
+        "target_env",
     ],
     "destinations.circuit_breaker": [
         "failure_threshold", "cooldown_seconds",
@@ -431,7 +451,12 @@ def validate_config(config: Dict[str, Any]) -> None:
         for dest_name, dest_cfg in destinations.items():
             if not isinstance(dest_cfg, dict):
                 raise ConfigError(f"'destinations.{dest_name}' must be a mapping")
-            _check_unknown_keys(dest_cfg, "destinations.item")
+            section_key = (
+                f"destinations.{dest_name}"
+                if f"destinations.{dest_name}" in _KNOWN_KEYS
+                else "destinations.item"
+            )
+            _check_unknown_keys(dest_cfg, section_key)
 
             enabled = dest_cfg.get("enabled")
             if enabled is None:
@@ -487,8 +512,6 @@ def validate_config(config: Dict[str, Any]) -> None:
                 strictly_greater=True,
             )
 
-            if "target" in dest_cfg:
-                _require_nonempty_str(dest_cfg["target"], f"destinations.{dest_name}.target")
             if "token_env" in dest_cfg:
                 _require_nonempty_str(
                     dest_cfg["token_env"], f"destinations.{dest_name}.token_env"
@@ -508,14 +531,123 @@ def validate_config(config: Dict[str, Any]) -> None:
                     0,
                     strictly_greater=True,
                 )
-            if "labels" in dest_cfg:
-                labels = dest_cfg["labels"]
-                if not isinstance(labels, list) or not all(
-                    isinstance(lbl, str) for lbl in labels
-                ):
-                    raise ConfigError(
-                        f"'destinations.{dest_name}.labels' must be a list of strings"
+
+            if dest_name == "github":
+                if "target" in dest_cfg:
+                    _require_nonempty_str(dest_cfg["target"], "destinations.github.target")
+                    if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", dest_cfg["target"]):
+                        raise ConfigError(
+                            f"'destinations.github.target' must match owner/repo format "
+                            f"(^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$), got {dest_cfg['target']!r}"
+                        )
+                if "labels" in dest_cfg:
+                    labels = dest_cfg["labels"]
+                    if not isinstance(labels, list):
+                        raise ConfigError("'destinations.github.labels' must be a list of strings")
+                    for lbl in labels:
+                        if not isinstance(lbl, str) or not lbl or len(lbl) > 50 or "," in lbl:
+                            raise ConfigError(
+                                "'destinations.github.labels' items must be non-empty strings "
+                                "<= 50 characters with no commas"
+                            )
+                if "api_base_url" in dest_cfg:
+                    api_base_url = dest_cfg["api_base_url"]
+                    if not isinstance(api_base_url, str) or not api_base_url.strip():
+                        raise ConfigError("'destinations.github.api_base_url' must be a non-empty string")
+                    parsed_url = urlparse(api_base_url)
+                    if parsed_url.scheme != "https":
+                        raise ConfigError(
+                            f"'destinations.github.api_base_url' scheme must be https, got {parsed_url.scheme!r}"
+                        )
+                    if not parsed_url.netloc:
+                        raise ConfigError("'destinations.github.api_base_url' netloc must not be empty")
+                    if parsed_url.query:
+                        raise ConfigError("'destinations.github.api_base_url' must not contain query parameters")
+                    if parsed_url.fragment:
+                        raise ConfigError("'destinations.github.api_base_url' must not contain a fragment")
+                    if parsed_url.username or parsed_url.password:
+                        raise ConfigError("'destinations.github.api_base_url' must not contain credentials")
+
+                if "allowed_hosts" in dest_cfg:
+                    allowed_hosts = dest_cfg["allowed_hosts"]
+                    if not isinstance(allowed_hosts, list) or len(allowed_hosts) == 0:
+                        raise ConfigError(
+                            "'destinations.github.allowed_hosts' must be a non-empty list of hostnames"
+                        )
+                    for h in allowed_hosts:
+                        if not isinstance(h, str) or not h:
+                            raise ConfigError(
+                                "'destinations.github.allowed_hosts' items must be non-empty strings"
+                            )
+                        if h != h.lower():
+                            raise ConfigError(
+                                f"'destinations.github.allowed_hosts' hostname {h!r} must be lowercase"
+                            )
+                        if ":" in h or "/" in h:
+                            raise ConfigError(
+                                f"'destinations.github.allowed_hosts' item {h!r} must be a bare hostname (no scheme, port, or path)"
+                            )
+                    if "api_base_url" in dest_cfg and isinstance(dest_cfg["api_base_url"], str):
+                        parsed_base = urlparse(dest_cfg["api_base_url"])
+                        base_host = (parsed_base.hostname or "").lower()
+                        if base_host and base_host not in allowed_hosts:
+                            raise ConfigError(
+                                f"'destinations.github.allowed_hosts' must contain the hostname of 'api_base_url' ({base_host!r})"
+                            )
+
+                if "request_timeout_seconds" in dest_cfg:
+                    timeout = dest_cfg["request_timeout_seconds"]
+                    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+                        raise ConfigError(
+                            "'destinations.github.request_timeout_seconds' must be a number > 0"
+                        )
+
+                if "duplicate_lookback_hours" in dest_cfg:
+                    _require_int_gt(
+                        dest_cfg["duplicate_lookback_hours"],
+                        "destinations.github.duplicate_lookback_hours",
+                        0,
+                        strictly_greater=True,
                     )
+
+                if "duplicate_max_pages" in dest_cfg:
+                    _require_int_gt(
+                        dest_cfg["duplicate_max_pages"],
+                        "destinations.github.duplicate_max_pages",
+                        0,
+                        strictly_greater=True,
+                    )
+
+                if "precheck_duplicates" in dest_cfg:
+                    _require_bool(
+                        dest_cfg["precheck_duplicates"],
+                        "destinations.github.precheck_duplicates",
+                    )
+
+                if "bot_login" in dest_cfg and dest_cfg["bot_login"] is not None:
+                    b_login = dest_cfg["bot_login"]
+                    if not isinstance(b_login, str) or not b_login.strip() or len(b_login.strip()) > 39:
+                        raise ConfigError(
+                            "'destinations.github.bot_login' must be a non-empty string of at most 39 characters or None"
+                        )
+
+                if "api_version" in dest_cfg and dest_cfg["api_version"] is not None:
+                    a_ver = dest_cfg["api_version"]
+                    if not isinstance(a_ver, str) or not a_ver.strip():
+                        raise ConfigError(
+                            "'destinations.github.api_version' must be a non-empty string or None"
+                        )
+            else:
+                if "target" in dest_cfg:
+                    _require_nonempty_str(dest_cfg["target"], f"destinations.{dest_name}.target")
+                if "labels" in dest_cfg:
+                    labels = dest_cfg["labels"]
+                    if not isinstance(labels, list) or not all(
+                        isinstance(lbl, str) for lbl in labels
+                    ):
+                        raise ConfigError(
+                            f"'destinations.{dest_name}.labels' must be a list of strings"
+                        )
 
 
 def _apply_env_overrides(cfg: Dict[str, Any]) -> None:
