@@ -24,6 +24,15 @@ from nodes.jev_gatekeeper import (
     jev_gatekeeper_node,
     should_route_after_gatekeeper,
 )
+from nodes.classifier import (
+    classifier_node,
+    get_default_classifier_client,
+    reset_default_classifier_client,
+)
+from nodes.hitl_queue import (
+    hitl_queue_node,
+    should_route_after_hitl,
+)
 
 __all__ = [
     "ingest_node",
@@ -39,4 +48,9 @@ __all__ = [
     "should_route_after_sensitive",
     "jev_gatekeeper_node",
     "should_route_after_gatekeeper",
+    "classifier_node",
+    "get_default_classifier_client",
+    "reset_default_classifier_client",
+    "hitl_queue_node",
+    "should_route_after_hitl",
 ]
