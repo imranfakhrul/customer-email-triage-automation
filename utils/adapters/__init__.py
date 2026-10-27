@@ -11,6 +11,7 @@ from utils.adapters.base import (
     DispatchPayload,
     DispatchResult,
 )
+from utils.adapters.github_adapter import GitHubAdapter, create_github_adapter
 
 VALID_ADAPTER_NAMES = ("github", "freescout", "crm", "webhook")
 
@@ -81,6 +82,8 @@ __all__ = [
     "BaseDestinationAdapter",
     "DispatchPayload",
     "DispatchResult",
+    "GitHubAdapter",
+    "create_github_adapter",
     "get_adapter",
     "register_adapter",
     "reset_adapters",

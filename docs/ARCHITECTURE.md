@@ -131,6 +131,7 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/adapters/base.py`: Abstract destination adapter contract, DispatchPayload, and DispatchResult.
 - `utils/adapters/__init__.py`: Thread-safe adapter registry and exports.
 - `utils/adapters/github_format.py`: Formatting, output hardening, and anchored marker parser for GitHub issue payloads.
+- `utils/adapters/github_adapter.py`: GitHub Issues adapter with duplicate detection and rate limit classification.
 - `db/database.py`: SQLite idempotency store, retry tracking, and review resolution.
 - `scripts/hitl_cli.py`: Reviewer CLI tool to list, show, approve, and reject reviews.
 - `scripts/manual_classifier_check.py`: Standalone forced-offline classifier verification check.

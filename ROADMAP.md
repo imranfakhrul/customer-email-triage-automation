@@ -20,11 +20,11 @@ Each issue is implemented individually with corresponding unit tests, verified a
 ### Phase 2 Implementation Sequence:
 1. **Track 0: Architectural Decisions & Client Alignment:** `P2-00` ✅ (Delivered in `docs/phase2_decisions.md`)
 2. **Track 1: Intelligence Classification Engine:** `P2-01` ✅ (Deep Classifier) ➔ `P2-02` ✅ (HITL Review Queue)
-3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04a` ✅ (GitHub Formatting & Schema) ➔ `P2-04b` (GitHub Adapter & Remote Precheck) ➔ `P2-05` (FreeScout) ➔ `P2-06` (CRM) ➔ `P2-07` (Webhook)
+3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04a` ✅ (GitHub Formatting & Schema) ➔ `P2-04b` ✅ (GitHub Adapter & Remote Precheck) ➔ `P2-05` (FreeScout) ➔ `P2-06` (CRM) ➔ `P2-07` (Webhook)
 4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` (LangGraph Integration) ➔ `P2-09` (Queue Worker) ➔ `P2-10` (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
 5. **Track 4: Mailbox Ingestion Connector:** `P2-12` (Gmail Pub/Sub Connector)
 
-**Next Immediate Task:** `P2-04b` (`feat(adapters): [P2-04b] github issues adapter with deduplication precheck and retry`).
+**Next Immediate Task:** `P2-05` (`feat(adapters): [P2-05] freescout helpdesk adapter with output hardening and thread continuity`).
 
 ---
 
@@ -524,7 +524,7 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 | **3a** | **P2-03a** | Track 2 | `feat(dispatch): [P2-03a] dispatcher foundations, base adapter contract, and outbox ledger` | `utils/adapters/__init__.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `utils/config.py`, `state.py`, `tests/test_p2_dispatch_foundations.py`, `docs/ARCHITECTURE.md`, `docs/phase2_decisions.md`, `ROADMAP.md`, `README.md` | ✅ Complete |
 | **3b** | **P2-03b** | Track 2 | `feat(dispatch): [P2-03b] multi-destination dispatcher router node, rate caps, and circuit breakers` | `nodes/dispatcher.py`, `nodes/__init__.py`, `tests/test_p2_dispatcher.py`, `ROADMAP.md`, `docs/ARCHITECTURE.md`, `README.md` | ✅ Complete |
 | **4a** | **P2-04a** | Track 2 | `feat(adapters): [P2-04a] github issues contract, fixtures, formatting, and config schema` | `docs/contracts/github_issues.md`, `tests/fixtures/github/*.json`, `utils/adapters/github_format.py`, `config.yaml`, `utils/config.py`, `.env.example`, `tests/test_p2_github_format.py`, `docs/ARCHITECTURE.md`, `ROADMAP.md`, `README.md` | ✅ Complete |
-| **4b** | **P2-04b** | Track 2 | `feat(adapters): [P2-04b] github issues adapter with deduplication precheck and retry` | `utils/adapters/github_adapter.py`, `tests/test_p2_github_adapter.py` | ⏳ Pending |
+| **4b** | **P2-04b** | Track 2 | `feat(adapters): [P2-04b] github issues adapter with deduplication precheck and retry` | `utils/adapters/github_adapter.py`, `utils/adapters/__init__.py`, `tests/test_p2_github_adapter.py`, `docs/ARCHITECTURE.md`, `ROADMAP.md`, `README.md` | ✅ Complete |
 | **5** | **P2-05** | Track 2 | `feat(adapters): [P2-05] freescout helpdesk adapter with output hardening and thread continuity` | `utils/adapters/freescout_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_freescout_adapter.py` | ⏳ Pending |
 | **6** | **P2-06** | Track 2 | `feat(adapters): [P2-06] crm lead ingestion adapter with output hardening and lead scoring` | `utils/adapters/crm_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_crm_adapter.py` | ⏳ Pending |
 | **7** | **P2-07** | Track 2 | `feat(adapters): [P2-07] webhook alert adapter with hmac signing for urgent billing and outage alerts` | `utils/adapters/webhook_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_webhook_adapter.py` | ⏳ Pending |
@@ -681,14 +681,20 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 * **Done When:** Table-driven tests verify complete output hardening, adaptive code fencing, marker parser anchoring, and config schema validation.
 
 #### [P2-04b] GitHub Issues Adapter with Deduplication Precheck and Remote Check
-* **Scope:** `utils/adapters/github_adapter.py`, `tests/test_p2_github_adapter.py`
-* **Status:** ⏳ **Pending**
+* **Scope:** `utils/adapters/github_adapter.py`, `utils/adapters/__init__.py`, `tests/test_p2_github_adapter.py`
+* **Status:** ✅ **Complete**
 * **Problem:** Live HTTP dispatches require rate limit handling, duplicate detection, network error classification (transient vs permanent), and circuit breaking.
 * **Solution:**
-  1. Implement `GitHubAdapter` interfacing with GitHub REST API v3 (`POST /repos/{owner}/{repo}/issues`).
+  1. Implement `GitHubAdapter(BaseDestinationAdapter)` interfacing with GitHub REST API v3 (`POST /repos/{owner}/{repo}/issues`).
   2. Duplicate Detection & Remote Check:
-     - Before creating issue, searches recent bot issues (`GET /repos/{owner}/{repo}/issues`) for the anchored idempotency marker. If match found, returns existing issue ID without re-creating.
-  3. Token authentication, fine-grained PAT support, retry/backoff, and circuit breaker.
+     - Before creating issue, searches recent bot issues (`GET /repos/{owner}/{repo}/issues`) for the anchored idempotency marker (`<!-- triage-bot:v1\nkey: ...\n-->`). If match found, returns existing issue ID without re-creating.
+     - Ignores pull requests (`pull_request` key), issues created by other logins, and unanchored markers. Truncated lookbacks fail closed with `AdapterError`.
+  3. Safety, Authentication, and Exception Classification:
+     - Token read from `token_env` at call time and never logged or stored.
+     - Outbound URLs re-validated before session calls (insecure schemes, credentials, or non-allowlisted hosts abort with zero session calls).
+     - Response status codes and low-level network errors strictly mapped to `AdapterTransientError`, `AdapterPermanentError`, or `AdapterUnknownOutcomeError`.
+     - Log entries contain only `email_id`, status code, outcome class names, and constant reason codes.
+  4. Note: Registering the adapter at application/pipeline startup belongs to P2-08/P2-09.
 * **Done When:** Unit tests with mocked HTTP responses verify issue creation, duplicate detection via markers, rate limiting, and failure classifications.
 
 #### [P2-05] FreeScout Helpdesk Adapter with Output Hardening and Thread Continuity
