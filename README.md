@@ -108,8 +108,10 @@ Customer-Email-Triage-Automation/
 │   ├── sensitive_skip.py     # Node 04: Sensitive guardrail diversion
 │   └── jev_gatekeeper.py     # Node 05: Jev AI decision engine
 ├── scripts/
-│   └── jev_smoke_test.py     # Standalone TypeSafe System One connectivity smoke test
-├── tests/                    # Comprehensive unit and integration test suite (265 tests)
+│   ├── hitl_cli.py           # Reviewer CLI interface for HITL queue management
+│   ├── jev_smoke_test.py     # Standalone TypeSafe System One connectivity smoke test
+│   └── manual_classifier_check.py # Offline classifier verification script
+├── tests/                    # Comprehensive unit and integration test suite (306 tests)
 │   ├── conftest.py           # Test isolation fixtures & network egress guards
 │   ├── test_a12_container_security.py
 │   ├── test_a14_dependency_pinning.py
@@ -298,7 +300,7 @@ python -m spacy download en_core_web_sm
 # 3. Configure environment
 cp .env.example .env
 
-# 4. Run automated test suite (265 tests, 100% passing)
+# 4. Run automated test suite (306 tests, 100% passing)
 pytest tests/ -v
 
 # 5. Run the synthetic benchmark suite across all 100 pipeline scenarios (default: offline)
@@ -308,7 +310,14 @@ python main.py
 # 6. Process an individual email JSON payload
 python main.py --input path/to/email.json
 
-# 7. Run egress check & all-in-one verification
+# 7. Human-in-the-Loop Reviewer CLI interface
+python scripts/hitl_cli.py list                    # List pending review items
+python scripts/hitl_cli.py list --json             # JSON output for tooling
+python scripts/hitl_cli.py show <email_id>         # Inspect item with masked text
+python scripts/hitl_cli.py approve <email_id> --by alice [--notes "..."] [--category C] [--team T]
+python scripts/hitl_cli.py reject <email_id> --by bob --notes "Rejection reason"
+
+# 8. Run egress check & all-in-one verification
 ./check.sh all
 ```
 

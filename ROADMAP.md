@@ -19,12 +19,12 @@ Each issue is implemented individually with corresponding unit tests, verified a
 
 ### Phase 2 Implementation Sequence:
 1. **Track 0: Architectural Decisions & Client Alignment:** `P2-00` ✅ (Delivered in `docs/phase2_decisions.md`)
-2. **Track 1: Intelligence Classification Engine:** `P2-01` (Deep Classifier) ➔ `P2-02` (HITL Review Queue)
+2. **Track 1: Intelligence Classification Engine:** `P2-01` ✅ (Deep Classifier) ➔ `P2-02` ✅ (HITL Review Queue)
 3. **Track 2: Downstream Destination Adapters:** `P2-03` (Router & Outbox Ledger) ➔ `P2-04` (GitHub) ➔ `P2-05` (FreeScout) ➔ `P2-06` (CRM) ➔ `P2-07` (Webhook)
 4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` (LangGraph Integration) ➔ `P2-09` (Queue Worker) ➔ `P2-10` (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
 5. **Track 4: Mailbox Ingestion Connector:** `P2-12` (Gmail Pub/Sub Connector)
 
-**Next Immediate Task:** `P2-01` (`feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node with phase 1 guardrails`).
+**Next Immediate Task:** `P2-03` (`feat(dispatch): [P2-03] multi-destination dispatcher router, outbox ledger, and safety rails`).
 
 ---
 
@@ -519,9 +519,9 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 | # | Code | Track | Commit Description | Target Files | Status |
 |:---:|:---:|:---|:---|:---|:---:|
 | **0** | **P2-00** | Track 0 | `docs(decisions): [P2-00] phase 2 architectural decisions, client alignment questionnaire, and destination data policies` | `docs/phase2_decisions.md`, `ROADMAP.md` | ✅ Complete |
-| **1** | **P2-01** | Track 1 | `feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node with phase 1 guardrails` | `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py`, `tests/test_p2_egress.py` | ⏳ Ready |
-| **2** | **P2-02** | Track 1 | `feat(hitl): [P2-02] human-in-the-loop review queue, state gating, and reviewer cli interface` | `nodes/hitl_queue.py`, `scripts/hitl_cli.py`, `db/database.py`, `config.yaml`, `tests/test_p2_hitl.py` | ⏳ Pending |
-| **3** | **P2-03** | Track 2 | `feat(dispatch): [P2-03] multi-destination dispatcher router, outbox ledger, and safety rails` | `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `tests/test_p2_dispatcher_router.py` | ⏳ Pending |
+| **1** | **P2-01** | Track 1 | `feat(classifier): [P2-01] deep LLM intent, category, and sentiment classifier node with phase 1 guardrails` | `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py`, `tests/test_p2_egress.py` | ✅ Complete |
+| **2** | **P2-02** | Track 1 | `feat(hitl): [P2-02] human-in-the-loop review queue, state gating, and reviewer cli interface` | `nodes/hitl_queue.py`, `scripts/hitl_cli.py`, `db/database.py`, `config.yaml`, `tests/test_p2_hitl.py` | ✅ Complete |
+| **3** | **P2-03** | Track 2 | `feat(dispatch): [P2-03] multi-destination dispatcher router, outbox ledger, and safety rails` | `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `tests/test_p2_dispatcher_router.py` | ⏳ Ready |
 | **4** | **P2-04** | Track 2 | `feat(adapters): [P2-04] github issues adapter with output hardening and idempotency verification` | `utils/adapters/github_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_github_adapter.py` | ⏳ Pending |
 | **5** | **P2-05** | Track 2 | `feat(adapters): [P2-05] freescout helpdesk adapter with output hardening and thread continuity` | `utils/adapters/freescout_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_freescout_adapter.py` | ⏳ Pending |
 | **6** | **P2-06** | Track 2 | `feat(adapters): [P2-06] crm lead ingestion adapter with output hardening and lead scoring` | `utils/adapters/crm_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_crm_adapter.py` | ⏳ Pending |
@@ -558,6 +558,7 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 * **Done When:** `docs/phase2_decisions.md` is fully drafted and reviewed, capturing all policies and questionnaire items.
 
 #### [P2-01] Deep LLM Intent, Category, and Sentiment Classifier Node with Phase 1 Guardrails
+* **Status:** ✅ Complete
 * **Scope:** `nodes/classifier.py`, `utils/classifier_client.py`, `state.py`, `config.yaml`, `tests/test_p2_classifier.py`, `tests/test_p2_egress.py`
 * **Problem:** Approved emails lack deep semantic classification. Downstream systems cannot distinguish between bug reports, sales inquiries, billing disputes, complaints, and critical infrastructure outages. Furthermore, the classifier must not introduce prompt injection vulnerabilities or bypass Phase 1 security guardrails.
 * **Solution:**
@@ -572,6 +573,7 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
      - `confidence`: `0.0` to `1.0`.
   3. Multi-Tiered Classification Architecture:
      - **Primary Engine:** TypeSafe Jev AI (`jev`) choice-based classifier (`id: "gmail_router"`, options: `["github_issue_create", "freescout", "crm", "webhook_node"]`) calculating exact mathematical probabilities in 70–500ms without text hallucination.
+     - **Architectural Limitation & Configuration:** Jev's four routing choices cannot express the 10-category taxonomy (`Bug Report`, `Feature Request`, `Demo Request`, `Pricing Inquiry`, `Billing Issue`, `Refund Request`, `Security/Account`, `Complaint`, `General Query`, `Other`) nor customer emotion. Therefore, `classification.jev.enabled: false` is configured by default in `config.yaml`, skipping the Jev tier when disabled and delegating deep 10-category taxonomy classification to Groq LLM with local offline heuristic fallback.
      - **Secondary Fallback:** Groq LLM (`groq`, model `openai/gpt-oss-120b`) for generative schema extraction if Jev times out or is unreachable.
      - **Tertiary Fallback:** Local offline heuristic ensemble (`offline_heuristic`), fail-closed to HITL review.
   4. Track Phase 2 classifier engine via dedicated field `state["p2_classifier_used"]` (`"jev"`, `"groq"`, or `"offline_heuristic"`), strictly preserving Phase 1's `state["classifier_used"]` (`"jev"`, `"groq"`, or `"regex"`) without overwriting it.
@@ -584,25 +586,33 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 * **Done When:** Unit tests verify 10-category taxonomy, sentiment/emotion separation, injection pre-filter, fail-closed normalization, bounded input enforcement, and egress isolation.
 
 #### [P2-02] Human-in-the-Loop Review Queue, State Gating, and Reviewer CLI Interface
+* **Status:** ✅ Complete
 * **Scope:** `nodes/hitl_queue.py`, `scripts/hitl_cli.py`, `db/database.py`, `config.yaml`, `tests/test_p2_hitl.py`
-* **Problem:** Automated classification is inherently probabilistic. High-urgency angry customers, low-confidence predictions, security issues, and unmapped inquiries must not be dispatched automatically without human oversight. Operators need an audit-trailed interface to review and re-route items.
+* **Problem:** Automated classification is inherently probabilistic. High-urgency angry customers, low-confidence predictions, security issues, and unmapped inquiries must not be dispatched automatically without human oversight. Operators need an audit-trailed interface to review and re-route items without overwriting Phase 1 triage data.
 * **Solution:**
-  1. Implement `hitl_queue_node` evaluating classification against configurable gating rules:
-     - Divert to `state = 'hitl_pending'` if:
+  1. Strict Phase 1 Isolation & Gating Status Model:
+     - Phase 2 NEVER modifies or overwrites `email_triage.routing_status` or `dispatch_target`. Phase 1 triage decisions (`gatekeeper_approved`) remain immutable.
+     - `hitl_status` values are strictly defined as: `none`, `pending`, `auto_approved` (machine passed), `approved` (human approved), `rejected` (human rejected). Automated passes must never be labelled `approved`.
+     - `hitl_queue_node` returns `hitl_status`, `hitl_reason`, and `p2_status` (`"hitl_pending"`, `"auto_approved"`, or `"persist_failed"`). It does NOT return `routing_status`.
+     - Conditional router `should_route_after_hitl` returns `"continue"` only when `hitl_status IN ('auto_approved', 'approved')` and `p2_status != 'persist_failed'`.
+  2. Multi-Rule Gating Evaluation:
+     - Divert to `hitl_status = 'pending'`, `p2_status = 'hitl_pending'` if:
+       - Threat or prompt-injection pre-filter flagged by classifier (`p2_classifier_used == 'regex_filter'` or `is_threat` or prompt injection pattern), OR
+       - Category in `classification.always_review_categories` (default `["Security/Account"]`), regardless of confidence or customer emotion, OR
+       - Classification is missing, None, or malformed, OR
        - `confidence < classification.hitl_threshold` (default `0.85`), OR
-       - `customer_emotion in ["Frustrated", "Angry"]` AND `priority in ["Critical", "High"]`, OR
-       - `category in ["Security/Account", "Other"]`, OR
-       - Any unknown or unmapped category.
-  2. Offline Classifier Fail-Closed Behavior: When offline heuristic fallback is active (`p2_classifier_used == "offline_heuristic"`), confidence is capped at 0.50–0.65. Consequently, virtually ALL offline-classified emails automatically divert to HITL. Explicitly document that this is deliberate, secure fail-closed behavior.
+       - Category is `Other` or unmapped, OR
+       - `customer_emotion in ["Frustrated", "Angry"]` AND `priority in ["Critical", "High"]`.
   3. Reviewer CLI Tool (`scripts/hitl_cli.py`):
-     - `hitl_cli.py list [--status pending|all]`: Displays pending reviews with `email_id`, sender, urgency, emotion, confidence, age.
-     - `hitl_cli.py show <email_id>`: Displays masked subject, masked body, suggested category, suggested team, classifier reasoning.
-     - `hitl_cli.py approve <email_id> [--notes "..."]`: Approves classification, sets `hitl_status = 'approved'`, transitions `state = 'hitl_resolved'`.
-     - `hitl_cli.py override <email_id> --category <cat> [--priority <prio>] [--destination <dest>] [--notes "..."]`: Overrides category/destination, sets `hitl_status = 'overridden'`, transitions `state = 'hitl_resolved'`.
-     - `hitl_cli.py reject <email_id> [--notes "..."]`: Rejects item, sets `hitl_status = 'rejected'`, transitions `state = 'done'`, terminating without dispatch.
-  4. Audit Trail: All resolutions update `p2_jobs` with `reviewed_by` (operator username/system user), `reviewed_at` (ISO timestamp), and `hitl_notes`.
-  5. Re-entry Path: Jobs marked `state = 'hitl_resolved'` are immediately claimable by the dispatcher/worker, proceeding directly to Node 08 without re-running classification.
-* **Done When:** Gating tests verify confidence threshold, emotion triggers, and offline fallback fail-closed behavior; CLI tests verify list, show, approve, override, and reject workflows with complete audit trail updates in `p2_jobs`.
+     - `hitl_cli.py list [--json] [--limit N]`: Displays pending reviews with `email_id`, `age`, `category`, `priority`, `confidence`, `reason`, `masked_subject`, and `masked_body` (strictly omitting `sender_email` and raw text).
+     - `hitl_cli.py show <email_id>`: Displays full details of a pending review item with masked text and classifier reasoning.
+     - `hitl_cli.py approve <email_id> --by <name> [--notes <text>] [--category <c>] [--team <t>]`: Approves classification, sets `hitl_status = 'approved'`, updates `hitl_notes`, `reviewed_by`, `reviewed_at`, and optional category/team overrides atomically.
+     - `hitl_cli.py reject <email_id> --by <name> --notes <text>`: Rejects item with mandatory notes, sets `hitl_status = 'rejected'` atomically, terminating without dispatch.
+     - Exit codes: `0` success, `2` invalid input or B5 single-line configuration error, `3` not found or not pending.
+  4. Concurrency & State Machine Integrity:
+     - `resolve_hitl_review` updates only `WHERE email_id = ? AND hitl_status = 'pending'`. Concurrent reviews guarantee exactly one winner while others raise `HitlStateError`.
+     - Re-running Phase 2 classification never overwrites a human approval or rejection (`record_phase2_classification` returns `False`).
+* **Done When:** Unit tests verify confidence threshold, emotion triggers, mandatory policy categories, prompt-injection diversion, Phase 1 status isolation, concurrency races, CLI commands, and exit codes.
 
 #### [P2-03] Multi-Destination Dispatcher Router, Outbox Ledger, and Safety Rails
 * **Scope:** `nodes/dispatcher.py`, `utils/adapters/base.py`, `db/database.py`, `config.yaml`, `tests/test_p2_dispatcher_router.py`
@@ -613,12 +623,14 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
      - `check_duplicate(idempotency_key: str, state: TriageState) -> Optional[str]`
      - `validate_config() -> bool`
      - `health_check() -> bool`
-  2. Outbox Pattern Dispatch Ledger (`p2_dispatch_log`):
+  2. Dispatch Intake Gating:
+     - Dispatcher consumes emails only when `hitl_status IN ('auto_approved', 'approved')` and Phase 1 `routing_status == 'gatekeeper_approved'`.
+  3. Outbox Pattern Dispatch Ledger (`p2_dispatch_log`):
      - Before invoking remote API, write row: `state = 'pending'`, `idempotency_key = f"{email_id}:{destination}:{action_type}"`, `attempt_number = 1`.
      - After successful send, update to `state = 'confirmed'` with `remote_id`.
      - On failure before send, update to `state = 'failed'` with `error_message`.
      - **Handling Uncertain Outcomes (`unknown`):** If network timeout or socket disconnect occurs AFTER send request is initiated, update to `state = 'unknown'`. **Blind retries are strictly prohibited.**
-     - The system resolves `'unknown'` by calling `adapter.check_duplicate()`. If confirmed on remote system, marks `'confirmed'`. If unconfirmed or unsupported, diverts to `hitl_pending` for operator verification.
+     - The system resolves `'unknown'` by calling `adapter.check_duplicate()`. If confirmed on remote system, marks `'confirmed'`. If unconfirmed or unsupported, diverts to `hitl_status = 'pending'` for operator verification.
   3. Comprehensive 10-Category Deterministic Routing Matrix:
      - `Bug Report` ➔ GitHub Issues (`github`)
      - `Feature Request` ➔ GitHub Issues (`github`) with `type:feature` label
