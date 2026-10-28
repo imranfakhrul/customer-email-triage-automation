@@ -1,0 +1,12 @@
+{
+  "status": "error",
+  "message": "Property values were invalid",
+  "correlationId": "crm-corr-422-xyz",
+  "category": "VALIDATION_ERROR",
+  "errors": [
+    {
+      "message": "Email is invalid",
+      "in": "properties.email"
+    }
+  ]
+}

@@ -194,8 +194,15 @@ destinations:
     enabled: false
     daily_cap: 500
     use_masked_text_only: false
+    unmask_pii: true
+    target: "https://api.hubapi.com"
     target_env: "CRM_API_ENDPOINT"
     api_key_env: "CRM_API_KEY"
+    allowed_hosts:
+      - "api.hubapi.com"
+      - "api.hubspot.com"
+    request_timeout_seconds: 15.0
+    precheck_duplicates: true
     circuit_breaker:
       failure_threshold: 5
       cooldown_seconds: 900

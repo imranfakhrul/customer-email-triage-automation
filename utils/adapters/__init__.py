@@ -11,6 +11,7 @@ from utils.adapters.base import (
     DispatchPayload,
     DispatchResult,
 )
+from utils.adapters.crm_adapter import CRMAdapter
 from utils.adapters.freescout_adapter import FreeScoutAdapter
 from utils.adapters.github_adapter import GitHubAdapter, create_github_adapter
 
@@ -81,6 +82,7 @@ __all__ = [
     "AdapterTransientError",
     "AdapterUnknownOutcomeError",
     "BaseDestinationAdapter",
+    "CRMAdapter",
     "DispatchPayload",
     "DispatchResult",
     "FreeScoutAdapter",

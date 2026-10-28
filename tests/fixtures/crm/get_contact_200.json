@@ -1,0 +1,16 @@
+{
+  "id": "1059281",
+  "properties": {
+    "createdate": "2026-10-28T07:30:00.000Z",
+    "email": "jane.prospect@enterprise.com",
+    "firstname": "Jane",
+    "lastname": "Prospect",
+    "hs_object_id": "1059281",
+    "lastmodifieddate": "2026-10-28T07:30:00.000Z",
+    "lead_score": "85",
+    "triage_idempotency_key": "idemp_crm_test_001"
+  },
+  "createdAt": "2026-10-28T07:30:00.000Z",
+  "updatedAt": "2026-10-28T07:30:00.000Z",
+  "archived": false
+}

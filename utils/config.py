@@ -86,7 +86,8 @@ _KNOWN_KEYS: Dict[str, List[str]] = {
     ],
     "destinations.crm": [
         "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
-        "target_env", "api_key_env", "unmask_pii", "allowed_unmask_entities",
+        "target", "target_env", "api_key_env", "unmask_pii", "allowed_unmask_entities",
+        "allowed_hosts", "request_timeout_seconds", "precheck_duplicates",
     ],
     "destinations.webhook": [
         "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
@@ -688,6 +689,48 @@ def validate_config(config: Dict[str, Any]) -> None:
                         if ":" in h or "/" in h:
                             raise ConfigError(
                                 f"'destinations.freescout.allowed_hosts' item {h!r} must be a bare hostname (no scheme, port, or path)"
+                            )
+            elif dest_name == "crm":
+                if "target" in dest_cfg:
+                    _require_nonempty_str(dest_cfg["target"], "destinations.crm.target")
+                    target = dest_cfg["target"]
+                    if not target.startswith("https://"):
+                        raise ConfigError("'destinations.crm.target' must start with 'https://'")
+                if "unmask_pii" in dest_cfg:
+                    _require_bool(dest_cfg["unmask_pii"], "destinations.crm.unmask_pii")
+                if "precheck_duplicates" in dest_cfg:
+                    _require_bool(
+                        dest_cfg["precheck_duplicates"],
+                        "destinations.crm.precheck_duplicates",
+                    )
+                if "request_timeout_seconds" in dest_cfg:
+                    timeout = dest_cfg["request_timeout_seconds"]
+                    if (
+                        isinstance(timeout, bool)
+                        or not isinstance(timeout, (int, float))
+                        or timeout <= 0
+                    ):
+                        raise ConfigError(
+                            "'destinations.crm.request_timeout_seconds' must be a number > 0"
+                        )
+                if "allowed_hosts" in dest_cfg:
+                    allowed_hosts = dest_cfg["allowed_hosts"]
+                    if not isinstance(allowed_hosts, list) or not allowed_hosts:
+                        raise ConfigError(
+                            "'destinations.crm.allowed_hosts' must be a non-empty list of strings"
+                        )
+                    for h in allowed_hosts:
+                        if not isinstance(h, str) or not h:
+                            raise ConfigError(
+                                "'destinations.crm.allowed_hosts' items must be non-empty strings"
+                            )
+                        if h != h.lower():
+                            raise ConfigError(
+                                f"'destinations.crm.allowed_hosts' hostname {h!r} must be lowercase"
+                            )
+                        if ":" in h or "/" in h:
+                            raise ConfigError(
+                                f"'destinations.crm.allowed_hosts' item {h!r} must be a bare hostname (no scheme, port, or path)"
                             )
             else:
                 if "target" in dest_cfg:

@@ -1,0 +1,11 @@
+{
+  "status": "error",
+  "message": "Contact already exists. Existing ID: 1059281",
+  "correlationId": "crm-corr-409-abc",
+  "category": "CONFLICT",
+  "context": {
+    "id": [
+      "1059281"
+    ]
+  }
+}
