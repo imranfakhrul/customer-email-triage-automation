@@ -21,10 +21,10 @@ Each issue is implemented individually with corresponding unit tests, verified a
 1. **Track 0: Architectural Decisions & Client Alignment:** `P2-00` ✅ (Delivered in `docs/phase2_decisions.md`)
 2. **Track 1: Intelligence Classification Engine:** `P2-01` ✅ (Deep Classifier) ➔ `P2-02` ✅ (HITL Review Queue)
 3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04a` ✅ (GitHub Formatting & Schema) ➔ `P2-04b` ✅ (GitHub Adapter & Remote Precheck) ➔ `P2-05` ✅ (FreeScout) ➔ `P2-06` ✅ (CRM) ➔ `P2-07` ✅ (Webhook)
-4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` ✅ (LangGraph Integration) ➔ `P2-09` ✅ (Queue Worker) ➔ `P2-10` (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
+4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` ✅ (LangGraph Integration) ➔ `P2-09` ✅ (Queue Worker) ➔ `P2-10` ✅ (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
 5. **Track 4: Mailbox Ingestion Connector:** `P2-12` (Gmail Pub/Sub Connector)
 
-**Next Immediate Task:** `P2-10` (`feat(testing): [P2-10] phase 2 synthetic benchmark dataset, failure-injection suite, and adapter contracts`).
+**Next Immediate Task:** `P2-11` (`docs(phase2): [P2-11] complete phase 2 documentation, architecture diagrams, and operator runbooks`).
 
 ---
 
@@ -530,7 +530,7 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 | **7** | **P2-07** | Track 2 | `feat(adapters): [P2-07] webhook alert adapter with hmac signing and dual formatting` | `utils/adapters/webhook_adapter.py`, `utils/adapters/webhook_format.py`, `docs/contracts/webhook_alert.md`, `tests/fixtures/webhook/*.json`, `config.yaml`, `utils/config.py`, `utils/adapters/__init__.py`, `tests/test_p2_webhook_format.py`, `tests/test_p2_webhook_adapter.py`, `scripts/check_p2_07.py`, `.env.example`, `docs/ARCHITECTURE.md`, `README.md` | ✅ Complete |
 | **8** | **P2-08** | Track 3 | `feat(pipeline): [P2-08] end-to-end langgraph phase 2 graph compilation and dispatch handoff` | `pipeline.py`, `tests/test_p2_pipeline_e2e.py`, `scripts/check_p2_08.py`, `docs/ARCHITECTURE.md`, `README.md` | ✅ Complete |
 | **9** | **P2-09** | Track 3 | `feat(worker): [P2-09] persistent phase 2 queue worker, atomic claiming, and crash recovery` | `scripts/phase2_worker.py`, `db/database.py`, `tools/run_worker.sh`, `tests/test_p2_worker.py` | ✅ Complete |
-| **10** | **P2-10** | Track 3 | `feat(testing): [P2-10] phase 2 synthetic benchmark dataset, failure-injection suite, and adapter contracts` | `data/benchmark_phase2.json`, `main.py`, `tests/test_p2_benchmark.py`, `tests/test_p2_failure_injection.py`, `tests/test_p2_adapter_contracts.py`, `scripts/*_smoke_test.py` | ⏳ Pending |
+| **10** | **P2-10** | Track 3 | `feat(testing): [P2-10] phase 2 synthetic benchmark dataset, failure-injection suite, and adapter contracts` | `data/benchmark_phase2.json`, `main.py`, `tests/test_p2_benchmark.py`, `tests/test_p2_failure_injection.py`, `tests/test_p2_adapter_contracts.py`, `scripts/*_smoke_test.py` | ✅ Complete |
 | **11** | **P2-11** | Track 3 | `docs(phase2): [P2-11] complete phase 2 documentation, architecture diagrams, and operator runbooks` | `README.md`, `ROADMAP.md`, `docs/architecture_phase2.md`, `docs/hitl_runbook.md` | ⏳ Pending |
 | **12** | **P2-12** | Track 4 | `feat(mailbox): [P2-12] gmail pub/sub mailbox connector, auth lifecycle, and original text re-fetch` | `utils/mailbox/gmail_connector.py`, `scripts/renew_mailbox_watch.py`, `config.yaml`, `.env.example`, `tests/test_p2_mailbox_connector.py` | ⏳ Pending |
 
@@ -820,6 +820,7 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 * **Done When:** Concurrency tests verify multi-worker race conditions result in 0 duplicate claims, crashed workers recover within 15 minutes, and dead-letter transitions succeed without touching `email_triage`.
 
 #### [P2-10] Phase 2 Synthetic Benchmark Dataset, Failure-Injection Suite, and Adapter Contracts
+* **Status:** ✅ Complete
 * **Scope:** `data/benchmark_phase2.json`, `main.py`, `tests/test_p2_benchmark.py`, `tests/test_p2_failure_injection.py`, `tests/test_p2_adapter_contracts.py`, `scripts/*_smoke_test.py`
 * **Problem:** Phase 2 requires thorough benchmark validation covering all categories, edge cases, failure scenarios, and contract compliance without making live network calls in CI.
 * **Solution:**
