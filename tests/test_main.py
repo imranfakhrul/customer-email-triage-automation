@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 
 
 class TestMainCliPiiSuppression(unittest.TestCase):
@@ -21,10 +22,11 @@ class TestMainCliPiiSuppression(unittest.TestCase):
         raw_email = "jane.doe@enterprise-triage.org"
         raw_card = "4111 1111 1111 1111"
 
+        nonce = uuid.uuid4().hex[:8]
         email_payload = {
-            "email_id": f"em_cli_test_{os.getpid()}_01",
-            "message_id": "<msg-cli-01@enterprise.org>",
-            "thread_id": f"th-cli-01-{os.getpid()}",
+            "email_id": f"em_cli_test_{nonce}_01",
+            "message_id": f"<msg-cli-{nonce}-01@enterprise.org>",
+            "thread_id": f"th-cli-{nonce}-01",
             "sender_email": f"{raw_name} <{raw_email}>",
             "sender_domain": "enterprise-triage.org",
             "email_subject": f"Inquiry from {raw_name} regarding card {raw_card}",

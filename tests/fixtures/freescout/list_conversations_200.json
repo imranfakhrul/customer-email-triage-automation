@@ -1,0 +1,29 @@
+{
+  "page": 1,
+  "pages": 1,
+  "count": 1,
+  "_embedded": {
+    "conversations": [
+      {
+        "id": 8812,
+        "number": 204,
+        "mailboxId": 1,
+        "type": "email",
+        "status": "active",
+        "subject": "[Triage] How to reset password?",
+        "customer": {
+          "id": 402,
+          "email": "customer@example.com"
+        },
+        "threads": [
+          {
+            "id": 19482,
+            "type": "customer",
+            "body": "<!-- triage-bot:v1\nkey: em_test_1:freescout:create_ticket\nemail_id: em_test_1\nthread_id: th_test_1\n-->\n<p>Please help reset my account password.</p>"
+          }
+        ],
+        "createdAt": "2026-10-28T12:00:00Z"
+      }
+    ]
+  }
+}

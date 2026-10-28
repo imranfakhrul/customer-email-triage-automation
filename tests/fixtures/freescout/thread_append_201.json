@@ -1,0 +1,8 @@
+{
+  "id": 19483,
+  "conversationId": 8812,
+  "type": "customer",
+  "status": "active",
+  "body": "<!-- triage-bot:v1\nkey: em_test_2:freescout:create_ticket\nemail_id: em_test_2\nthread_id: th_test_1\n-->\n<p>Following up on this password issue.</p>",
+  "createdAt": "2026-10-28T12:05:00Z"
+}

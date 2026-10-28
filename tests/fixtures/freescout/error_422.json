@@ -1,0 +1,11 @@
+{
+  "message": "The given data was invalid.",
+  "errors": {
+    "customer.email": [
+      "The customer email field is required."
+    ],
+    "mailboxId": [
+      "The mailbox ID must be an integer."
+    ]
+  }
+}

@@ -178,9 +178,14 @@ destinations:
     enabled: false
     daily_cap: 1000
     use_masked_text_only: false
+    unmask_pii: true
     target: "https://support.mycompany.com"
     api_key_env: "FREESCOUT_API_KEY"
     mailbox_id: 1
+    allowed_hosts:
+      - "support.mycompany.com"
+    request_timeout_seconds: 15.0
+    precheck_duplicates: true
     circuit_breaker:
       failure_threshold: 5
       cooldown_seconds: 900

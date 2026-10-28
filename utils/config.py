@@ -70,24 +70,27 @@ _KNOWN_KEYS: Dict[str, List[str]] = {
     "destinations.item": [
         "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
         "target", "token_env", "api_key_env", "target_env", "labels", "mailbox_id",
+        "unmask_pii", "allowed_unmask_entities", "allowed_hosts", "request_timeout_seconds",
+        "precheck_duplicates",
     ],
     "destinations.github": [
         "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
         "target", "token_env", "labels", "api_base_url", "allowed_hosts",
         "request_timeout_seconds", "duplicate_lookback_hours", "duplicate_max_pages",
-        "precheck_duplicates", "bot_login", "api_version",
+        "precheck_duplicates", "bot_login", "api_version", "unmask_pii",
     ],
     "destinations.freescout": [
         "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
-        "target", "api_key_env", "mailbox_id",
+        "target", "api_key_env", "mailbox_id", "unmask_pii", "allowed_unmask_entities",
+        "allowed_hosts", "request_timeout_seconds", "precheck_duplicates",
     ],
     "destinations.crm": [
         "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
-        "target_env", "api_key_env",
+        "target_env", "api_key_env", "unmask_pii", "allowed_unmask_entities",
     ],
     "destinations.webhook": [
         "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
-        "target_env",
+        "target_env", "unmask_pii",
     ],
     "destinations.circuit_breaker": [
         "failure_threshold", "cooldown_seconds",
@@ -637,6 +640,55 @@ def validate_config(config: Dict[str, Any]) -> None:
                         raise ConfigError(
                             "'destinations.github.api_version' must be a non-empty string or None"
                         )
+            elif dest_name == "freescout":
+                if "target" in dest_cfg:
+                    _require_nonempty_str(dest_cfg["target"], "destinations.freescout.target")
+                    target = dest_cfg["target"]
+                    if not target.startswith("https://"):
+                        raise ConfigError("'destinations.freescout.target' must start with 'https://'")
+                if "mailbox_id" in dest_cfg:
+                    _require_int_gt(
+                        dest_cfg["mailbox_id"],
+                        "destinations.freescout.mailbox_id",
+                        0,
+                        strictly_greater=True,
+                    )
+                if "unmask_pii" in dest_cfg:
+                    _require_bool(dest_cfg["unmask_pii"], "destinations.freescout.unmask_pii")
+                if "precheck_duplicates" in dest_cfg:
+                    _require_bool(
+                        dest_cfg["precheck_duplicates"],
+                        "destinations.freescout.precheck_duplicates",
+                    )
+                if "request_timeout_seconds" in dest_cfg:
+                    timeout = dest_cfg["request_timeout_seconds"]
+                    if (
+                        isinstance(timeout, bool)
+                        or not isinstance(timeout, (int, float))
+                        or timeout <= 0
+                    ):
+                        raise ConfigError(
+                            "'destinations.freescout.request_timeout_seconds' must be a number > 0"
+                        )
+                if "allowed_hosts" in dest_cfg:
+                    allowed_hosts = dest_cfg["allowed_hosts"]
+                    if not isinstance(allowed_hosts, list) or not allowed_hosts:
+                        raise ConfigError(
+                            "'destinations.freescout.allowed_hosts' must be a non-empty list of strings"
+                        )
+                    for h in allowed_hosts:
+                        if not isinstance(h, str) or not h:
+                            raise ConfigError(
+                                "'destinations.freescout.allowed_hosts' items must be non-empty strings"
+                            )
+                        if h != h.lower():
+                            raise ConfigError(
+                                f"'destinations.freescout.allowed_hosts' hostname {h!r} must be lowercase"
+                            )
+                        if ":" in h or "/" in h:
+                            raise ConfigError(
+                                f"'destinations.freescout.allowed_hosts' item {h!r} must be a bare hostname (no scheme, port, or path)"
+                            )
             else:
                 if "target" in dest_cfg:
                     _require_nonempty_str(dest_cfg["target"], f"destinations.{dest_name}.target")
