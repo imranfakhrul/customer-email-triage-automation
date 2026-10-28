@@ -113,7 +113,8 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `api.typesafe.ai`: Called by `utils/jev_client.py` and `utils/classifier_client.py`. Receives masked text, returns mathematical routing choice.
 - `api.groq.com`: Called by `utils/jev_client.py` and `utils/classifier_client.py`. Receives masked text, returns JSON classification.
 - `api.github.com`: Called by GitHub adapter (`utils/adapters/github_adapter.py`). Creates issues and queries duplicate markers using masked text only.
-- Privacy guarantee: Raw customer PII, unmasked bodies, raw subjects, and `token_map` NEVER leave the host.
+- Configured Helpdesk/CRM hosts (e.g. `support.mycompany.com`): Called by authorized destination adapters (`utils/adapters/freescout_adapter.py`, `utils/adapters/crm_adapter.py`) using Universal Selective Unmasking (`unmask_pii: true`) to dispatch contact entities (`PERSON`, `EMAIL`, `PHONE`, `IP_ADDRESS`) and `sender_email`.
+- Privacy guarantee: High-risk secrets (`CREDIT_CARD`, `SSN`, `IBAN`, `API_KEY`), raw unmasked email bodies, and `token_map` NEVER leave the host. AI classification and public issue trackers (GitHub) receive only masked text and sender domain.
 
 ## 8. Module Index
 - `nodes/ingest.py`: Node 01: Ingestion, idempotency locking, and thread verification.
@@ -153,6 +154,6 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 
 ## 11. Known Limitations & Open Items
 - **Jev Choice Routing Mismatch (`ROADMAP.md` P2-01):** Jev's 4 routing options cannot express the 10-category taxonomy; `classification.jev.enabled: false` by default.
-- **Pending Dispatcher & Adapters (`ROADMAP.md` P2-03 to P2-07):** Outbox pattern and external service adapters are not yet implemented.
+- **Pending Adapters (`ROADMAP.md` P2-05 to P2-07):** FreeScout helpdesk, CRM, and webhook alert adapters are in progress (outbox pattern P2-03 and GitHub adapter P2-04 complete).
 - **Pending Worker Daemon (`ROADMAP.md` P2-09):** Standalone polling worker and atomic batch claiming are pending.
 - **Pending Mailbox Connector (`ROADMAP.md` P2-12):** Gmail Pub/Sub webhook integration is pending.
