@@ -532,7 +532,7 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 | **9** | **P2-09** | Track 3 | `feat(worker): [P2-09] persistent phase 2 queue worker, atomic claiming, and crash recovery` | `scripts/phase2_worker.py`, `db/database.py`, `tools/run_worker.sh`, `tests/test_p2_worker.py` | ✅ Complete |
 | **10** | **P2-10** | Track 3 | `feat(testing): [P2-10] phase 2 synthetic benchmark dataset, failure-injection suite, and adapter contracts` | `data/benchmark_phase2.json`, `main.py`, `tests/test_p2_benchmark.py`, `tests/test_p2_failure_injection.py`, `tests/test_p2_adapter_contracts.py`, `scripts/*_smoke_test.py` | ✅ Complete |
 | **11** | **P2-11** | Track 3 | `docs(phase2): [P2-11] complete phase 2 documentation, architecture diagrams, and operator runbooks` | `README.md`, `ROADMAP.md`, `docs/architecture_phase2.md`, `docs/hitl_runbook.md`, `tests/test_p2_documentation.py` | ✅ Complete |
-| **12** | **P2-12** | Track 4 | `feat(mailbox): [P2-12] gmail pub/sub mailbox connector, auth lifecycle, and original text re-fetch` | `utils/mailbox/gmail_connector.py`, `scripts/renew_mailbox_watch.py`, `config.yaml`, `.env.example`, `tests/test_p2_mailbox_connector.py` | ⏳ Pending |
+| **12** | **P2-12** | Track 4 | `feat(mailbox): [P2-12] gmail pub/sub mailbox connector, auth lifecycle, and original text re-fetch` | `utils/mailbox/gmail_connector.py`, `utils/mailbox/base.py`, `scripts/renew_mailbox_watch.py`, `config.yaml`, `.env.example`, `tests/test_p2_mailbox_connector.py` | ✅ Complete |
 
 ---
 
@@ -850,7 +850,8 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 * **Done When:** Documentation accuracy pass verifies that every diagram, command, and configuration option in the documentation matches the code.
 
 #### [P2-12] Gmail Pub/Sub Mailbox Connector, Auth Lifecycle, and Original Text Re-fetch
-* **Scope:** `utils/mailbox/gmail_connector.py`, `scripts/renew_mailbox_watch.py`, `config.yaml`, `.env.example`, `tests/test_p2_mailbox_connector.py`
+* **Status:** ✅ Complete
+* **Scope:** `utils/mailbox/gmail_connector.py`, `utils/mailbox/base.py`, `scripts/renew_mailbox_watch.py`, `config.yaml`, `.env.example`, `tests/test_p2_mailbox_connector.py`
 * **Problem:** Automated triage requires an ingestion bridge to import live emails from enterprise mailboxes without polling delays, pass email authentication metadata, and re-fetch original unmasked text for authorized downstream destinations when configured.
 * **Solution:**
   1. Mailbox Intake Module (`utils/mailbox/gmail_connector.py`):

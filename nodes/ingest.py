@@ -58,6 +58,7 @@ def ingest_node(
     email_body = state.get("email_body") or ""
     raw_body = state.get("raw_body") or email_body
     email_subject = state.get("email_subject") or ""
+    auth_status = state.get("auth_status")
     has_attachments = bool(state.get("has_attachments", False))
 
     # Active Thread Continuity Check (A5: Never trust incoming payload claims; require prior approved history)
@@ -92,6 +93,7 @@ def ingest_node(
             "raw_body": raw_body,
             "has_attachments": has_attachments,
             "is_active_thread": is_active_thread,
+            "auth_status": auth_status,
             "dispatch_status": "done",
             "routing_status": "duplicate_skipped",
             "error_message": None,
@@ -109,6 +111,7 @@ def ingest_node(
             "raw_body": raw_body,
             "has_attachments": has_attachments,
             "is_active_thread": is_active_thread,
+            "auth_status": auth_status,
             "dispatch_status": "processing",
             "routing_status": "in_flight_skipped",
             "error_message": None,
@@ -126,6 +129,7 @@ def ingest_node(
             "raw_body": raw_body,
             "has_attachments": has_attachments,
             "is_active_thread": is_active_thread,
+            "auth_status": auth_status,
             "dispatch_status": "failed",
             "routing_status": "max_retries_exceeded",
             "error_message": record.get("error_message")

@@ -56,6 +56,7 @@ Incoming Email
 - `email_body` (`str`): Ingestion / `nodes/signature_stripper.py`. Cleaned body.
 - `raw_body` (`str`): Ingestion (`nodes/ingest.py`). Preserved original raw body.
 - `has_attachments` (`bool`): Ingestion (`nodes/ingest.py`). Flag for email attachments.
+- `auth_status` (`Optional[str]`): Ingestion (`nodes/ingest.py`) / Mailbox (`utils/mailbox/gmail_connector.py`). SPF/DKIM/DMARC status ('pass', 'fail', 'neutral', 'none').
 - `is_active_thread` (`Optional[bool]`): Ingestion (`nodes/ingest.py`). Verified against approved DB history.
 - `cleaned_body` (`Optional[str]`): Stripper (`nodes/signature_stripper.py`). Body with quotes/signatures removed.
 - `masked_body` (`Optional[str]`): PII Masker (`nodes/pii_masker.py`). Body with redactions.
@@ -108,6 +109,7 @@ Schema validated strictly by `utils/config.py` (`validate_config`, unknown keys 
 - `classification`: Semantic taxonomy settings (`primary`, `fallback`, `hitl_threshold`, `always_review_categories`, `max_subject_chars`, `max_body_chars`, `jev`).
 - `dispatch`: Outbox safety rails (`dry_run`, `kill_switch`, `max_attempts`, `pending_timeout_minutes`, `backoff_base_seconds`, `backoff_max_seconds`).
 - `destinations`: Downstream adapter service configurations (`github`, `freescout`, `crm`, `webhook`).
+- `mailbox`: Enterprise mailbox intake settings (`provider`, `enabled`, `poll_interval_seconds`, `gmail`).
 - Env overrides: `DATABASE_PATH`, `IDEMPOTENCY_STALE_MINUTES`, `MAX_DISPATCH_RETRIES`. Secrets via `*_env` names.
 
 ## 7. External Calls
@@ -118,6 +120,7 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `api.hubapi.com`, `api.hubspot.com`: Called by CRM adapter (`utils/adapters/crm_adapter.py`). Ingests qualified sales leads and contacts using Universal Selective Unmasking (`unmask_pii: true`) with formula injection defanging and lead scoring.
 - Configured Helpdesk hosts (e.g. `support.mycompany.com`): Called by authorized FreeScout adapter (`utils/adapters/freescout_adapter.py`) using Universal Selective Unmasking (`unmask_pii: true`) to dispatch contact entities (`PERSON`, `EMAIL`, `PHONE`, `IP_ADDRESS`) and `sender_email`.
 - Configured Webhook and Alert hosts (e.g. `events.mycompany.internal`, `hooks.slack.com`): Called by Webhook alert adapter (`utils/adapters/webhook_adapter.py`) using cryptographic HMAC-SHA256 signatures (`X-Signature-SHA256`) and ISO timestamp replay defenses (`X-Timestamp-ISO`). Strictly adheres to Channel Privacy Guard (`unmask_pii: false` by default; delivers only masked text and sender domain into incident/alert channels). Dual formatting produces generic incident JSON or Slack Block Kit cards.
+- `gmail.googleapis.com`, `oauth2.googleapis.com`: Called by Gmail connector (`utils/mailbox/gmail_connector.py`) for OAuth 2.0 token refresh, Cloud Pub/Sub watch setup, history sync, and authorized original-text re-fetch.
 - Privacy guarantee: High-risk secrets (`CREDIT_CARD`, `SSN`, `IBAN`, `API_KEY`), raw unmasked email bodies, and `token_map` NEVER leave the host. AI classification, public issue trackers (GitHub), and webhook alert channels receive only masked text and sender domain.
 
 ## 8. Module Index
@@ -138,6 +141,9 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/adapters/github_format.py`: Formatting, output hardening, and anchored marker parser for GitHub issue payloads.
 - `utils/adapters/github_adapter.py`: GitHub Issues adapter with duplicate detection and rate limit classification.
 - `utils/unmasker.py`: Universal selective unmasking and content resolution helper for destination adapters.
+- `utils/mailbox/base.py`: Abstract mailbox connector interface.
+- `utils/mailbox/gmail_connector.py`: Gmail REST API connector with OAuth lifecycle, MIME parsing, and SPF/DKIM/DMARC verification.
+- `scripts/renew_mailbox_watch.py`: Standalone CLI utility for Gmail Cloud Pub/Sub watch setup and automated 7-day renewal.
 - `utils/adapters/freescout_format.py`: Formatting, HTML sanitization, and anchored marker parser for FreeScout ticket payloads.
 - `utils/adapters/freescout_adapter.py`: FreeScout Helpdesk adapter with thread continuity and deduplication pre-check.
 - `utils/adapters/crm_format.py`: Formatting, formula injection defanging, freemail filtering, and lead scoring for CRM lead ingestion.
@@ -172,4 +178,4 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - **Worker Daemon Complete (`ROADMAP.md` P2-09):** Standalone polling worker daemon with single-statement atomic batch claiming, crash recovery (orphaned claims older than 15 min sweep to unclaimed or dead_letter), and graceful SIGINT/SIGTERM shutdown.
 - **Phase 2 Synthetic Benchmark & Failure Injection Suite Complete (`ROADMAP.md` P2-10):** 50 synthetic test scenarios covering all 10 categories, emotional states, priority levels, and edge cases (`data/benchmark_phase2.json`); failure injection suite (`tests/test_p2_failure_injection.py`) validating post-send timeout unknown outcomes and ledger reconciliation, worker crash recovery, formula injection neutralization, and anchored marker security; and adapter contract suite (`tests/test_p2_adapter_contracts.py`) for GitHub, FreeScout, CRM, and Webhook.
 - **Phase 2 Architecture Diagrams and Operator Runbooks Complete (`ROADMAP.md` P2-11):** Comprehensive technical reference (`docs/architecture_phase2.md`) with Mermaid flowcharts, state machine diagrams, and outbox ledger sequence diagrams; and complete triage operator runbook (`docs/hitl_runbook.md`) covering review triggers, CLI commands (`list`, `show`, `approve`, `override`, `reject`), dead-letter queue recovery, and outbox ledger reconciliation.
-- **Pending Mailbox Connector (`ROADMAP.md` P2-12):** Gmail Pub/Sub webhook integration is pending.
+- **Gmail Pub/Sub Mailbox Connector Complete (`ROADMAP.md` P2-12):** Abstract mailbox interface (`utils/mailbox/base.py`), production Gmail connector (`utils/mailbox/gmail_connector.py`) with OAuth 2.0 lifecycle, MIME parsing, SPF/DKIM/DMARC authentication verification (closing the A5 limitation), Pub/Sub watch renewal CLI (`scripts/renew_mailbox_watch.py`), and authorized original-text re-fetch bridge for downstream adapters without persisting raw PII to SQLite.

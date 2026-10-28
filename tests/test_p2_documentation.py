@@ -108,6 +108,7 @@ def test_documented_scripts_exist_and_valid():
         "scripts/phase2_worker.py",
         "scripts/hitl_cli.py",
         "tools/run_worker.sh",
+        "scripts/renew_mailbox_watch.py",
         "scripts/github_smoke_test.py",
         "scripts/freescout_smoke_test.py",
         "scripts/crm_smoke_test.py",

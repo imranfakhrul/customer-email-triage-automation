@@ -97,6 +97,14 @@ _KNOWN_KEYS: Dict[str, List[str]] = {
     "destinations.circuit_breaker": [
         "failure_threshold", "cooldown_seconds",
     ],
+    "mailbox": [
+        "provider", "enabled", "poll_interval_seconds", "gmail",
+    ],
+    "mailbox.gmail": [
+        "user_id", "topic_name", "token_env", "refresh_token_env",
+        "client_id_env", "client_secret_env", "api_base_url", "allowed_hosts",
+        "request_timeout_seconds",
+    ],
 }
 
 
@@ -781,6 +789,35 @@ def validate_config(config: Dict[str, Any]) -> None:
                         raise ConfigError(
                             f"'destinations.{dest_name}.labels' must be a list of strings"
                         )
+
+    # ── mailbox (P2-12) ───────────────────────────────────────────────────────
+    mailbox = config.get("mailbox")
+    if mailbox is not None:
+        if not isinstance(mailbox, dict):
+            raise ConfigError(f"'mailbox' must be a mapping, got {type(mailbox).__name__!r}")
+        _check_unknown_keys(mailbox, "mailbox")
+        if "enabled" in mailbox:
+            _require_bool(mailbox["enabled"], "mailbox.enabled")
+        if "provider" in mailbox:
+            _require_nonempty_str(mailbox["provider"], "mailbox.provider")
+        if "poll_interval_seconds" in mailbox:
+            _require_int_gt(
+                mailbox["poll_interval_seconds"],
+                "mailbox.poll_interval_seconds",
+                0,
+                strictly_greater=True,
+            )
+        gmail = mailbox.get("gmail")
+        if gmail is not None:
+            if not isinstance(gmail, dict):
+                raise ConfigError(f"'mailbox.gmail' must be a mapping, got {type(gmail).__name__!r}")
+            _check_unknown_keys(gmail, "mailbox.gmail")
+            if "allowed_hosts" in gmail:
+                allowed_hosts = gmail["allowed_hosts"]
+                if not isinstance(allowed_hosts, list) or not allowed_hosts:
+                    raise ConfigError(
+                        "'mailbox.gmail.allowed_hosts' must be a non-empty list of strings"
+                    )
 
 
 def _apply_env_overrides(cfg: Dict[str, Any]) -> None:

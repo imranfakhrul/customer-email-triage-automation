@@ -97,6 +97,7 @@ class TriageState(TypedDict):
     raw_body: str
     has_attachments: bool
     is_active_thread: Optional[bool]
+    auth_status: Optional[str]  # 'pass', 'fail', 'neutral', 'none' (P2-12)
 
     # Local Privacy & Masking (Nodes 02, 03 & 10)
     cleaned_body: Optional[str]

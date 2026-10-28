@@ -222,3 +222,21 @@ destinations:
     circuit_breaker:
       failure_threshold: 5
       cooldown_seconds: 900
+
+mailbox:
+  provider: "gmail"
+  enabled: false
+  poll_interval_seconds: 60
+  gmail:
+    user_id: "me"
+    topic_name: "projects/my-company-cloud/topics/gmail-inbox-push"
+    token_env: "GMAIL_ACCESS_TOKEN"
+    refresh_token_env: "GMAIL_REFRESH_TOKEN"
+    client_id_env: "GMAIL_CLIENT_ID"
+    client_secret_env: "GMAIL_CLIENT_SECRET"
+    api_base_url: "https://gmail.googleapis.com"
+    allowed_hosts:
+      - "gmail.googleapis.com"
+      - "oauth2.googleapis.com"
+    request_timeout_seconds: 15.0
+
