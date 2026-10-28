@@ -525,7 +525,8 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 | **3b** | **P2-03b** | Track 2 | `feat(dispatch): [P2-03b] multi-destination dispatcher router node, rate caps, and circuit breakers` | `nodes/dispatcher.py`, `nodes/__init__.py`, `tests/test_p2_dispatcher.py`, `ROADMAP.md`, `docs/ARCHITECTURE.md`, `README.md` | ✅ Complete |
 | **4a** | **P2-04a** | Track 2 | `feat(adapters): [P2-04a] github issues contract, fixtures, formatting, and config schema` | `docs/contracts/github_issues.md`, `tests/fixtures/github/*.json`, `utils/adapters/github_format.py`, `config.yaml`, `utils/config.py`, `.env.example`, `tests/test_p2_github_format.py`, `docs/ARCHITECTURE.md`, `ROADMAP.md`, `README.md` | ✅ Complete |
 | **4b** | **P2-04b** | Track 2 | `feat(adapters): [P2-04b] github issues adapter with deduplication precheck and retry` | `utils/adapters/github_adapter.py`, `utils/adapters/__init__.py`, `tests/test_p2_github_adapter.py`, `docs/ARCHITECTURE.md`, `ROADMAP.md`, `README.md` | ✅ Complete |
-| **5** | **P2-05** | Track 2 | `feat(adapters): [P2-05] freescout helpdesk adapter with output hardening and thread continuity` | `utils/adapters/freescout_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_freescout_adapter.py` | ⏳ Pending |
+| **5a** | **P2-05a** | Track 2 | `feat(adapters): [P2-05a] freescout contract, selective unmasking helper, formatting, and schema` | `utils/unmasker.py`, `docs/contracts/freescout.md`, `tests/fixtures/freescout/*.json`, `utils/adapters/freescout_format.py`, `config.yaml`, `utils/config.py`, `tests/test_p2_unmasker.py`, `tests/test_p2_freescout_format.py` | ⏳ Pending |
+| **5b** | **P2-05b** | Track 2 | `feat(adapters): [P2-05b] freescout adapter with thread continuity and retry policy` | `utils/adapters/freescout_adapter.py`, `utils/adapters/__init__.py`, `tests/test_p2_freescout_adapter.py` | ⏳ Pending |
 | **6** | **P2-06** | Track 2 | `feat(adapters): [P2-06] crm lead ingestion adapter with output hardening and lead scoring` | `utils/adapters/crm_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_crm_adapter.py` | ⏳ Pending |
 | **7** | **P2-07** | Track 2 | `feat(adapters): [P2-07] webhook alert adapter with hmac signing for urgent billing and outage alerts` | `utils/adapters/webhook_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_webhook_adapter.py` | ⏳ Pending |
 | **8** | **P2-08** | Track 3 | `feat(pipeline): [P2-08] end-to-end langgraph phase 2 graph compilation and dispatch handoff` | `pipeline.py`, `tests/test_p2_pipeline_e2e.py` | ⏳ Pending |
@@ -622,7 +623,7 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 * **Problem:** Downstream integrations are varied. Hardcoding dispatch logic without an outbox ledger leads to duplicate dispatches on network timeouts. Missing safety rails risk runaway API billing or alert storms.
 * **Solution:**
   1. Base Adapter Abstract Contract (`BaseDestinationAdapter` in `utils/adapters/base.py`):
-     - Consumes `DispatchPayload` (D7: adapters receive only `DispatchPayload`, never the state; exactly 16 fields, zero PII, no `sender_email`, no `token_map`, stable SHA-256 hash).
+     - Consumes `DispatchPayload` (adapters receive `DispatchPayload`; provides stable SHA-256 hash, clamped text, and optional `customer_email: Optional[str] = None` supporting destination content resolution without breaking zero-PII public destinations).
      - Defines `DispatchResult` (non-empty `remote_id` <= 128 chars).
      - Exceptions: `AdapterError` base; `AdapterTransientError` (safe to retry), `AdapterPermanentError` (rejected), and `AdapterUnknownOutcomeError` (timeout after send, blind retries forbidden).
      - Thread-safe registry (`register_adapter`, `get_adapter`, `reset_adapters`) for canonical services (`github`, `freescout`, `crm`, `webhook`).
@@ -697,53 +698,78 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
   4. Note: Registering the adapter at application/pipeline startup belongs to P2-08/P2-09.
 * **Done When:** Unit tests with mocked HTTP responses verify issue creation, duplicate detection via markers, rate limiting, and failure classifications.
 
-#### [P2-05] FreeScout Helpdesk Adapter with Output Hardening and Thread Continuity
-* **Scope:** `utils/adapters/freescout_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_freescout_adapter.py`
-* **Problem:** Support tickets created in FreeScout must preserve conversation thread continuity across multiple replies while preventing HTML/script injection from customer emails.
+#### [P2-05a] FreeScout Contract, Selective Unmasking Helper, Output Formatting, and Schema
+* **Scope:** `utils/unmasker.py`, `docs/contracts/freescout.md`, `tests/fixtures/freescout/*.json`, `utils/adapters/freescout_format.py`, `config.yaml`, `utils/config.py`, `.env.example`, `tests/test_p2_unmasker.py`, `tests/test_p2_freescout_format.py`
+* **Status:** ⏳ Pending
+* **Problem:** Support tickets created in FreeScout require customer contact information and readable problem descriptions for agents to respond, while high-risk financial/auth secrets must remain masked and untrusted customer text must not inject arbitrary HTML or script payloads.
 * **Solution:**
-  1. Implement `FreeScoutAdapter` interfacing with FreeScout REST API (`POST /api/conversations`).
-  2. Output Hardening:
-     - Customer body wrapped in sanitized HTML/fenced structure with HTML entities escaped (`&`, `<`, `>`, `"`, `'`).
-     - Strip `<script>`, `<iframe>`, `onload` attributes, and external stylesheets.
-  3. System-Owned Correlation Marker:
-     - Store `email_id` in FreeScout custom field or internal note, never in the customer message body.
-  4. Duplicate Detection:
-     - Query FreeScout conversations by `message_id` or custom field before creating a new ticket.
-  5. Thread Continuity:
-     - When `thread_id` matches an existing ticket, append the incoming email as a thread reply rather than creating a duplicate conversation.
-  6. Mailbox Mapping: Route based on configured department mailboxes (`support`, `billing_inquiries`).
-* **Done When:** Unit tests verify HTML sanitization, correlation marker placement in custom fields, thread reply appending, duplicate prevention, and mock API delivery.
+  1. Universal Unmasking Helper (`utils/unmasker.py`):
+     - Implement central function `resolve_dispatch_content(state: TriageState, unmask_pii: bool = False, allowed_entity_types: Optional[Set[str]] = None, mailbox_fetcher: Optional[Callable[[str], Optional[str]]] = None) -> Dict[str, Any]`.
+     - When `unmask_pii=False`: returns strictly `masked_subject`, `masked_body`, and `sender_domain`.
+     - When `unmask_pii=True`: restores allowed entity placeholders (`{"PERSON", "EMAIL", "PHONE", "IP_ADDRESS"}`) via `nodes.pii_masker.unmask_text`, while strictly retaining high-risk secrets (`{"CREDIT_CARD", "SSN", "IBAN", "API_KEY"}`) as masked tokens.
+     - Fallback handling: If `token_map` is absent (such as in standalone Phase 2 worker mode), binds customer email to persisted `sender_email` and supports `mailbox_fetcher(message_id)` before falling back to `masked_body`.
+  2. FreeScout Contract & Fixtures:
+     - Document official FreeScout REST API v1 (`POST /api/conversations`, `GET /api/conversations`, `POST /api/conversations/{id}/threads`) in `docs/contracts/freescout.md`.
+     - Create realistic mock fixtures in `tests/fixtures/freescout/*.json` for 201 Created, 200 List/Search, 401 Unauthorized, 422 Validation Error, and 429 Rate Limit.
+  3. Output Formatting & HTML Hardening (`utils/adapters/freescout_format.py`):
+     - Format FreeScout conversation JSON payload (`mailboxId`, `subject`, `customer: {"email": sender_email}`, `threads: [...]`).
+     - Hardening: wrap customer text in sanitized HTML structures, HTML-escape entities (`&`, `<`, `>`, `"`, `'`), defang script tags, iframes, and inline event handlers (`onload`, `onerror`).
+     - System correlation marker: anchor `<!-- triage-bot:v1 key: ... -->` in thread content for deduplication.
+  4. Config Schema & Customer Type Policy:
+     - Add `destinations.freescout.unmask_pii: true` in `config.yaml` with schema validation in `utils/config.py`.
+     - When `unmask_pii: true` and `sender_email` present, bind customer with `type: "email"` so support agents receive notifications and reply directly to the customer. Fall back to `bot_customer_id` with `type: "phone"` only when `unmask_pii: false` or `sender_email` is missing.
+* **Done When:** Unit tests verify selective unmasking entity filtering, secret retention, HTML sanitization, correlation marker anchoring, and config schema validation.
+
+#### [P2-05b] FreeScout Helpdesk Adapter with Thread Continuity and Retry Policy
+* **Scope:** `utils/adapters/freescout_adapter.py`, `utils/adapters/__init__.py`, `tests/test_p2_freescout_adapter.py`
+* **Status:** ⏳ Pending
+* **Problem:** Live HTTP dispatches to FreeScout must append to existing conversation threads on customer replies, detect duplicate submissions, and classify API errors accurately.
+* **Solution:**
+  1. Implement `FreeScoutAdapter(BaseDestinationAdapter)` interfacing with FreeScout REST API.
+  2. Thread Continuity & Deduplication Pre-Check:
+     - Search conversations for matching correlation marker or `thread_id`.
+     - If matching active ticket exists, append reply via `POST /api/conversations/{id}/threads` instead of creating detached duplicates.
+  3. Authentication, Safe Headers & Exception Mapping:
+     - Header `X-FreeScout-API-Key` loaded securely from environment (`FREESCOUT_API_KEY`).
+     - Transient vs permanent error mapping (429/503 -> `AdapterTransientError`, 400/401/422 -> `AdapterPermanentError`).
+* **Done When:** Unit tests with mocked HTTP responses verify conversation creation, thread reply appending, duplicate prevention, and retry classifications.
 
 #### [P2-06] CRM Lead Ingestion Adapter with Output Hardening and Lead Scoring
 * **Scope:** `utils/adapters/crm_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_crm_adapter.py`
-* **Problem:** Inbound sales demo and pricing requests must be captured as structured leads without allowing formula injection (`=`, `+`, `-`, `@`) or duplicate lead creation.
+* **Status:** ⏳ Pending
+* **Problem:** Inbound sales demo and pricing requests must be captured as structured leads with unmasked contact information for sales follow-up without allowing formula injection (`=`, `+`, `-`, `@`) or duplicate lead creation.
 * **Solution:**
   1. Implement `CRMAdapter` interfacing with CRM webhook / REST API (HubSpot or generic CRM).
-  2. Output Hardening & Formula Injection Protection:
+  2. Selective Contact Unmasking:
+     - Configure `destinations.crm.unmask_pii: true` using `resolve_dispatch_content` to restore customer name, email, and phone while keeping payment/secret tokens masked.
+     - Extract company domain from `sender_email` (filtering out public domains like `gmail.com`, `yahoo.com`).
+  3. Output Hardening & Formula Injection Protection:
      - Sanitize all customer text fields; prefix formula triggers (`=`, `+`, `-`, `@`, `\t`, `\r`) with single quote (`'`) to protect CSV exports and spreadsheets against formula injection.
      - Neutralize HTML and script tags.
-  3. Dynamic Domain & Lead Scoring:
-     - Derive company domain from `sender_email` (filtering out public domains like `gmail.com`, `yahoo.com`).
+  4. Dynamic Domain & Lead Scoring:
      - Calculate lead score (0-100) based on inquiry category (`Demo Request` = 80, `Pricing Inquiry` = 70), urgency (`High` = +20), and company domain presence.
-  4. Deduplication:
+  5. Deduplication:
      - Check CRM for existing lead by `email_id` custom property or sender domain within a 24-hour sliding window before creating contact or deal.
-* **Done When:** Unit tests verify formula injection neutralization, domain extraction, lead score calculation, deal deduplication, and mock CRM ingestion.
+* **Done When:** Unit tests verify contact unmasking, formula injection neutralization, domain extraction, lead score calculation, deal deduplication, and mock CRM ingestion.
 
 #### [P2-07] Webhook Alert Adapter with HMAC Signing for Urgent Billing and Critical Alerts
 * **Scope:** `utils/adapters/webhook_adapter.py`, `config.yaml`, `.env.example`, `tests/test_p2_webhook_adapter.py`
 * **Problem:** Urgent billing disputes (double-charging, payment failures) and critical issues require instantaneous notification to finance or on-call channels with cryptographic authenticity and replay protection.
 * **Solution:**
   1. Implement `WebhookAdapter` delivering cryptographically signed HTTP POST webhooks.
-  2. Trigger Routing (per D5 dual-action alert rules):
+  2. Masked Context Policy:
+     - Enforce `destinations.webhook.unmask_pii: false` by default, delivering structured metadata + masked context (`email_id`, `category`, `priority`, `amount_detected`, `masked_summary`) to prevent PII exposure in shared chat channels.
+     - Configurable `unmask_pii: true` override only for dedicated internal financial endpoints.
+  3. Trigger Routing (per D5 dual-action alert rules):
      - Priority `Critical` on `Bug Report`, `General Query`, or `Complaint` (triggers webhook alert alongside primary GitHub/FreeScout dispatch).
      - Priority `High` or `Critical` on `Billing Issue` or `Refund Request` (triggers webhook alert alongside primary FreeScout ticket dispatch).
      - High-risk security inquiries (`Security/Account` category).
-  3. Cryptographic Authenticity & Security Headers:
+  4. Cryptographic Authenticity & Security Headers:
      - Compute HMAC-SHA256 signature in `X-Signature-SHA256` computed over raw request body using shared secret (`WEBHOOK_SECRET_KEY_ENV`).
      - Include `Idempotency-Key: {email_id}:{destination}:alert` and `X-Correlation-ID: {email_id}` headers.
      - Include timestamp header `X-Timestamp-ISO` to prevent replay attacks beyond 5-minute tolerance.
-  4. Output Hardening: Escape JSON fields to prevent JSON payload injection.
-  5. Retry Policy: Exponential backoff with jitter on 5xx; fail-closed on 4xx.
+  5. Output Hardening: Escape JSON fields to prevent JSON payload injection.
+  6. Retry Policy: Exponential backoff with jitter on 5xx; fail-closed on 4xx.
 * **Done When:** Unit tests verify HMAC signature computation, idempotency header inclusion, replay timestamp validation, JSON payload escaping, and retry backoff.
 
 #### [P2-08] End-to-End LangGraph Phase 2 Graph Compilation and Dispatch Handoff

@@ -38,12 +38,36 @@ Before implementing downstream destination adapters, this document formally reco
 > - `crm` (formerly `Sales`): Sales demo requests and enterprise pricing leads.
 > - `webhook` (formerly `Billing`): Urgent billing disputes and critical outage alerts.
 
-| Destination Key | Target Service | `use_masked_text_only` in `config.yaml` | Permitted Data Egress | Architectural Rationale & Privacy Guarantee |
+| Destination Key | Target Service | `unmask_pii` / `use_masked_text_only` in `config.yaml` | Permitted Data Egress | Architectural Rationale & Privacy Guarantee |
 |:---|:---|:---:|:---|:---|
-| `github` | GitHub Issues (`github`) | `true` | **Masked Text Only** (`masked_subject`, `masked_body`) | Software bug reports are posted to public or team-shared GitHub repositories. Under zero circumstances should customer PII (real email, phone, name) appear in GitHub issues or commit logs. |
-| `freescout` | FreeScout Helpdesk (`freescout`) | `false` | **Mailbox Re-fetched Original Text** (or Masked Fallback) | Support agents need customer contact details and exact problem descriptions to respond. Rather than violating local privacy by storing unmasked data in SQLite, FreeScout adapter re-fetches original text on-demand from the authorized mailbox API (via P2-12) using `message_id`. If mailbox re-fetch is disabled, FreeScout receives masked text. |
-| `crm` | CRM Ingestion (`crm`) | `false` | **Mailbox Re-fetched Contact Info** + Sanitized Company Domain | CRM leads need customer work email and name. The adapter extracts company domain from `sender_email` and re-fetches original customer identity via mailbox API, while sanitizing customer notes against formula injection (`=`, `+`, `-`, `@`). |
-| `webhook` | Webhook Alerts (`webhook`) | `false` (Payload Sanitized) | **Structured Metadata + Masked Context** | High-urgency billing disputes and outage alerts are pushed to notification channels (e.g., Slack, PagerDuty). To prevent PII exposure in shared chat channels, alerts include structured metadata (`email_id`, `category`, `priority`, `amount_detected`, `masked_summary`) signed with HMAC-SHA256, omitting raw customer bodies. |
+| `github` | GitHub Issues (`github`) | `unmask_pii: false`<br>`use_masked_text_only: true` | **Masked Text Only** (`masked_subject`, `masked_body`) | Software bug reports are posted to public or team-shared GitHub repositories. Under zero circumstances should customer PII (real email, phone, name) appear in GitHub issues or commit logs. |
+| `freescout` | FreeScout Helpdesk (`freescout`) | `unmask_pii: true`<br>`use_masked_text_only: false` | **Selectively Unmasked Contact Data + Real Sender Email** | Support agents need customer contact details (`PERSON`, `EMAIL`, `PHONE`, `IP_ADDRESS`) and real `sender_email` (with `type: "email"`) to receive notifications and reply directly to the customer. High-risk secrets (`CREDIT_CARD`, `SSN`, `IBAN`, `API_KEY`) remain permanently masked. Fallback to `bot_customer_id` / `type: "phone"` occurs only when `unmask_pii: false` or `sender_email` is missing. |
+| `crm` | CRM Ingestion (`crm`) | `unmask_pii: true`<br>`use_masked_text_only: false` | **Selectively Unmasked Contact Info + Real Sender Email** | CRM leads need customer work email, phone, and name for sales follow-up. Restores contact info and company domain while sanitizing customer notes against formula injection (`=`, `+`, `-`, `@`). High-risk secrets remain permanently masked. |
+| `webhook` | Webhook Alerts (`webhook`) | `unmask_pii: false`<br>(configurable `true`) | **Structured Metadata + Masked Context** | High-urgency billing disputes and outage alerts are pushed to notification channels (e.g., Slack, PagerDuty). To prevent PII exposure in shared chat channels, alerts default to structured metadata (`email_id`, `category`, `priority`, `amount_detected`, `masked_summary`) signed with HMAC-SHA256, omitting raw customer bodies unless explicitly unmasked for secure finance endpoints. |
+
+---
+
+### 1.3 Universal Selective Unmasking Architecture (`resolve_dispatch_content`)
+
+To support role-based data requirements across downstream services without compromising customer privacy or security invariants, the downstream pipeline incorporates a centralized selective unmasking architecture:
+
+1. **Central Unmasking Helper (`utils/unmasker.py`):**
+   - Implements `resolve_dispatch_content(state: TriageState, unmask_pii: bool = False, allowed_entity_types: Optional[Set[str]] = None, mailbox_fetcher: Optional[Callable[[str], Optional[str]]] = None) -> Dict[str, Any]`.
+   - **`unmask_pii=False` (Strict Masking):** Returns strictly `masked_subject`, `masked_body`, and `sender_domain`. Raw `sender_email` is omitted (`None`), and zero unmasked PII is returned.
+   - **`unmask_pii=True` (Selective Contact Restoration):**
+     - Selectively restores allowed entity placeholders in `masked_subject` and `masked_body` using `state.get("token_map")` via `nodes.pii_masker.unmask_text`.
+     - **Safe Default Allowed Entities:** `{"PERSON", "EMAIL", "PHONE", "IP_ADDRESS"}`.
+     - **Permanently Blocked Secrets:** High-risk secrets (`{"CREDIT_CARD", "SSN", "IBAN", "API_KEY"}`) are strictly retained as masked tokens and never restored, even for FreeScout or CRM.
+     - **Lifecycle & Persistence Fallback:** If `token_map` is empty or absent (such as in standalone Phase 2 worker mode where `token_map` was not persisted to SQLite), the helper provides `customer_email: sender_email` (from SQLite audit metadata), supports an optional `mailbox_fetcher(message_id)` callback (via P2-12 Mailbox Connector), and safely falls back to `masked_body` if raw text cannot be re-fetched.
+
+2. **Destination-Specific Configuration Policy (`config.yaml` & `utils/config.py`):**
+   - `destinations.github.unmask_pii: false` (Engineering only sees masked bug reports).
+   - `destinations.freescout.unmask_pii: true` (Support tickets bind to customer's real `sender_email` with `type: "email"` and unmask contact details; `bot_customer_id` / `type: "phone"` used only when unmasking is disabled).
+   - `destinations.crm.unmask_pii: true` (Sales leads receive real contact email and name with formula injection protection).
+   - `destinations.webhook.unmask_pii: false` (Alerts default to masked context; configurable if delivered to secure internal endpoints).
+
+3. **Egress Test Compatibility (`./check.sh egress`):**
+   - Offline benchmark and test suites enforce that when destinations are disabled or running offline, zero unmasked customer PII ever leaves the host over network sockets. Phase 1 classification egress invariants remain 100% intact.
 
 ---
 
@@ -184,8 +208,9 @@ The following 6 questions require formal confirmation by the client/stakeholder 
 
 ### Question 1: Customer PII Policy for Support & Sales
 * **Question:** Do your internal FreeScout agents and CRM sales representatives require unmasked customer names and email addresses to service requests?
+* **Status:** ✅ **Aligned on Universal Selective Unmasking (`unmask_pii: true`)**
 * **Options:**
-  - `(Recommended) Option A:` Yes, re-fetch original email by `message_id` on-demand via the Mailbox Connector (P2-12) so SQLite remains zero-PII.
+  - `(Approved) Option A:` Universal Selective Unmasking: restore contact & technical context (`{"PERSON", "EMAIL", "PHONE", "IP_ADDRESS"}`) and bind real `sender_email` (with `type: "email"`), while keeping financial and security secrets (`{"CREDIT_CARD", "SSN", "IBAN", "API_KEY"}`) permanently masked. SQLite continues to persist zero raw text.
   - `Option B:` No, operate strictly on masked text (`masked_subject` and `masked_body`) across all destinations for maximum privacy.
 
 ### Question 2: GitHub Repository & Label Taxonomy

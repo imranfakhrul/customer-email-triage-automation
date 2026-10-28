@@ -14,8 +14,10 @@ Plan and status: ROADMAP.md.
 
 ## 3. Hard invariants (never violate; if a task conflicts with one, STOP and report it)
 PRIVACY
-1. Only masked_subject / masked_body and the sender DOMAIN may leave the machine. Never send or log
-   email_subject, email_body, raw_body, cleaned_body, sender_email, token_map or any value inside token_map.
+1. AI classification (Jev/Groq) and public trackers (GitHub) receive only masked_subject / masked_body
+   and sender DOMAIN. Authorized support/CRM adapters (FreeScout, CRM) may dispatch contact entities (PERSON,
+   EMAIL, PHONE, IP_ADDRESS) and sender_email via Universal Selective Unmasking (unmask_pii: true). Secrets
+   (CREDIT_CARD, SSN, IBAN, API_KEY) and token_map NEVER leave the machine unmasked anywhere.
 2. token_map is never persisted, printed or logged. Originals are re-fetched from the mailbox by message_id.
 3. Logs contain ids, statuses, engine names and exception CLASS NAMES only: never exception messages, response
    bodies, URLs with query strings, keys or customer text.
