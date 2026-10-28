@@ -338,6 +338,105 @@ python scripts/hitl_cli.py reject <email_id> --by bob --notes "Rejection reason"
 
 ---
 
+---
+
+## 🔌 Downstream Destination Adapters & Multi-CRM Support
+
+The pipeline features a modular, pluggable adapter architecture (`utils/adapters/`). Downstream destinations consume sanitized, privacy-hardened dispatch payloads (`DispatchPayload`) without coupling pipeline nodes to specific external SaaS APIs.
+
+### Supported Destinations Out-of-the-Box
+1. **GitHub Issues (`github`):** Creates engineering bug reports with deduplication pre-checking and label taxonomy using masked text only.
+2. **FreeScout Helpdesk (`freescout`):** Ingests support tickets with thread continuity and Universal Selective Unmasking (`unmask_pii: true`).
+3. **CRM Lead Ingestion (`crm`):** Ingests sales demo and pricing inquiries (`Demo Request`, `Pricing Inquiry`) with dynamic lead scoring and formula injection protection.
+4. **Webhook Alerts (`webhook`):** Cryptographically signed HMAC-SHA256 notifications for production outages and urgent billing disputes.
+
+---
+
+### Pluggable CRM Integration (HubSpot, Salesforce, Zoho, Pipedrive, Close, Custom)
+
+The CRM integration is **not locked to HubSpot**. While HubSpot REST API v3 is provided as the production-ready reference implementation, any CRM or custom sales intake system can be plugged in seamlessly.
+
+#### Universal Protections (Across All CRMs)
+All CRM intake goes through [`utils/adapters/crm_format.py`](utils/adapters/crm_format.py), ensuring:
+* **Universal Selective Unmasking:** Restores customer contact info (`PERSON`, `EMAIL`, `PHONE`) while keeping high-risk secrets (`CREDIT_CARD`, `SSN`, `IBAN`, `API_KEY`) permanently masked.
+* **Formula / CSV Injection Defanging:** Prepends `'` to strings starting with `=`, `+`, `-`, `@`, `\t` to protect sales reps from arbitrary spreadsheet code execution when exporting leads to Excel, Google Sheets, or CSV.
+* **Domain & Lead Scoring:** Automatically differentiates corporate prospects from freemail domains (`gmail.com`, `yahoo.com`) and computes a deterministic qualification score (0–100).
+
+---
+
+### How to Change and Configure Your CRM
+
+Depending on your architecture, choose one of the following two methods:
+
+#### Method 1: Connecting via Webhook Gateway / Middleware (Zapier, Make, n8n, Custom Gateway)
+If using an internal webhook gateway or middleware that routes leads to Pipedrive, Close, Zoho, or Salesforce:
+
+1. **Update `config.yaml`:**
+   ```yaml
+   destinations:
+     crm:
+       enabled: true
+       target: "https://your-crm-webhook-gateway.company.com/api/v1/leads"
+       api_key_env: "CRM_API_KEY"
+       allowed_hosts:
+         - "your-crm-webhook-gateway.company.com"
+       unmask_pii: true
+       precheck_duplicates: true
+   ```
+2. **Set your API credential in `.env`:**
+   ```bash
+   CRM_API_KEY=your_secret_auth_token_here
+   ```
+3. The gateway will receive standard JSON properties (`email`, `firstname`, `lastname`, `company`, `phone`, `lead_score`, `message`) defanged and scored.
+
+---
+
+#### Method 2: Adding a Native Vendor Adapter (e.g. Salesforce, Pipedrive, Zoho, Close)
+To connect directly to another CRM's native REST API without middleware:
+
+1. **Create your adapter in `utils/adapters/<crm>_adapter.py`** subclassing `BaseDestinationAdapter`:
+   ```python
+   from utils.adapters.base import BaseDestinationAdapter, DispatchPayload, DispatchResult
+
+   class PipedriveAdapter(BaseDestinationAdapter):
+       name = "crm"
+
+       def dispatch(self, payload: DispatchPayload) -> DispatchResult:
+           # Call Pipedrive /v1/persons and /v1/deals API
+           return DispatchResult(remote_id=f"pipedrive:{deal_id}")
+
+       def check_duplicate(self, idempotency_key: str, payload: DispatchPayload) -> str | None:
+           # Check existing person/deal
+           return None
+
+       def validate_config(self) -> bool:
+           return True
+
+       def health_check(self) -> bool:
+           return True
+   ```
+
+2. **Register your new adapter in `utils/adapters/__init__.py`:**
+   ```python
+   from utils.adapters.pipedrive_adapter import PipedriveAdapter
+
+   # Register under the canonical "crm" routing key:
+   register_adapter("crm", PipedriveAdapter())
+   ```
+
+3. **Update host allowlist and target in `config.yaml`:**
+   ```yaml
+   destinations:
+     crm:
+       target: "https://api.pipedrive.com"
+       allowed_hosts:
+         - "api.pipedrive.com"
+   ```
+
+The dispatcher router (`nodes/dispatcher.py`) will automatically route all `Demo Request` and `Pricing Inquiry` emails to your new CRM adapter with full outbox ledger tracking, deduplication, and retry policies.
+
+---
+
 ## 🔒 Security & Privacy Principles
 * **Zero Hardcoded Secrets:** No API keys or tokens are stored in code or configuration files. All credentials use environment variable substitution (`*_env`).
 * **On-Premise Redaction:** PII masking executes locally prior to external AI invocation.
