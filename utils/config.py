@@ -91,7 +91,8 @@ _KNOWN_KEYS: Dict[str, List[str]] = {
     ],
     "destinations.webhook": [
         "enabled", "daily_cap", "use_masked_text_only", "circuit_breaker",
-        "target_env", "unmask_pii",
+        "target", "target_env", "secret_env", "unmask_pii", "allowed_hosts",
+        "request_timeout_seconds",
     ],
     "destinations.circuit_breaker": [
         "failure_threshold", "cooldown_seconds",
@@ -731,6 +732,43 @@ def validate_config(config: Dict[str, Any]) -> None:
                         if ":" in h or "/" in h:
                             raise ConfigError(
                                 f"'destinations.crm.allowed_hosts' item {h!r} must be a bare hostname (no scheme, port, or path)"
+                            )
+            elif dest_name == "webhook":
+                if "target" in dest_cfg:
+                    _require_nonempty_str(dest_cfg["target"], "destinations.webhook.target")
+                    target = dest_cfg["target"]
+                    if not target.startswith("https://"):
+                        raise ConfigError("'destinations.webhook.target' must start with 'https://'")
+                if "unmask_pii" in dest_cfg:
+                    _require_bool(dest_cfg["unmask_pii"], "destinations.webhook.unmask_pii")
+                if "request_timeout_seconds" in dest_cfg:
+                    timeout = dest_cfg["request_timeout_seconds"]
+                    if (
+                        isinstance(timeout, bool)
+                        or not isinstance(timeout, (int, float))
+                        or timeout <= 0
+                    ):
+                        raise ConfigError(
+                            "'destinations.webhook.request_timeout_seconds' must be a number > 0"
+                        )
+                if "allowed_hosts" in dest_cfg:
+                    allowed_hosts = dest_cfg["allowed_hosts"]
+                    if not isinstance(allowed_hosts, list) or not allowed_hosts:
+                        raise ConfigError(
+                            "'destinations.webhook.allowed_hosts' must be a non-empty list of strings"
+                        )
+                    for h in allowed_hosts:
+                        if not isinstance(h, str) or not h:
+                            raise ConfigError(
+                                "'destinations.webhook.allowed_hosts' items must be non-empty strings"
+                            )
+                        if h != h.lower():
+                            raise ConfigError(
+                                f"'destinations.webhook.allowed_hosts' hostname {h!r} must be lowercase"
+                            )
+                        if ":" in h or "/" in h:
+                            raise ConfigError(
+                                f"'destinations.webhook.allowed_hosts' item {h!r} must be a bare hostname (no scheme, port, or path)"
                             )
             else:
                 if "target" in dest_cfg:

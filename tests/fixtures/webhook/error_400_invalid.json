@@ -1,0 +1,4 @@
+{
+  "error": "invalid_payload",
+  "message": "Required field 'event' missing"
+}

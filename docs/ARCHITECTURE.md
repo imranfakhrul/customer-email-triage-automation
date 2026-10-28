@@ -115,7 +115,8 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `api.github.com`: Called by GitHub adapter (`utils/adapters/github_adapter.py`). Creates issues and queries duplicate markers using masked text only.
 - `api.hubapi.com`, `api.hubspot.com`: Called by CRM adapter (`utils/adapters/crm_adapter.py`). Ingests qualified sales leads and contacts using Universal Selective Unmasking (`unmask_pii: true`) with formula injection defanging and lead scoring.
 - Configured Helpdesk hosts (e.g. `support.mycompany.com`): Called by authorized FreeScout adapter (`utils/adapters/freescout_adapter.py`) using Universal Selective Unmasking (`unmask_pii: true`) to dispatch contact entities (`PERSON`, `EMAIL`, `PHONE`, `IP_ADDRESS`) and `sender_email`.
-- Privacy guarantee: High-risk secrets (`CREDIT_CARD`, `SSN`, `IBAN`, `API_KEY`), raw unmasked email bodies, and `token_map` NEVER leave the host. AI classification and public issue trackers (GitHub) receive only masked text and sender domain.
+- Configured Webhook and Alert hosts (e.g. `events.mycompany.internal`, `hooks.slack.com`): Called by Webhook alert adapter (`utils/adapters/webhook_adapter.py`) using cryptographic HMAC-SHA256 signatures (`X-Signature-SHA256`) and ISO timestamp replay defenses (`X-Timestamp-ISO`). Strictly adheres to Channel Privacy Guard (`unmask_pii: false` by default; delivers only masked text and sender domain into incident/alert channels). Dual formatting produces generic incident JSON or Slack Block Kit cards.
+- Privacy guarantee: High-risk secrets (`CREDIT_CARD`, `SSN`, `IBAN`, `API_KEY`), raw unmasked email bodies, and `token_map` NEVER leave the host. AI classification, public issue trackers (GitHub), and webhook alert channels receive only masked text and sender domain.
 
 ## 8. Module Index
 - `nodes/ingest.py`: Node 01: Ingestion, idempotency locking, and thread verification.
@@ -139,6 +140,8 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/adapters/freescout_adapter.py`: FreeScout Helpdesk adapter with thread continuity and deduplication pre-check.
 - `utils/adapters/crm_format.py`: Formatting, formula injection defanging, freemail filtering, and lead scoring for CRM lead ingestion.
 - `utils/adapters/crm_adapter.py`: HubSpot CRM adapter with duplicate pre-checking and 409 conflict collision recovery.
+- `utils/adapters/webhook_format.py`: Formatting, cryptographic HMAC-SHA256 signing, alert classification, and Slack Block Kit payload builder for emergency alerts.
+- `utils/adapters/webhook_adapter.py`: Webhook alert adapter with cryptographic HMAC signing, dual payload formatting, and rate-limiting retry classification.
 - `db/database.py`: SQLite idempotency store, retry tracking, and review resolution.
 - `scripts/hitl_cli.py`: Reviewer CLI tool to list, show, approve, and reject reviews.
 - `scripts/manual_classifier_check.py`: Standalone forced-offline classifier verification check.
@@ -160,6 +163,6 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 
 ## 11. Known Limitations & Open Items
 - **Jev Choice Routing Mismatch (`ROADMAP.md` P2-01):** Jev's 4 routing options cannot express the 10-category taxonomy; `classification.jev.enabled: false` by default.
-- **Pending Adapters (`ROADMAP.md` P2-07):** Webhook alert adapter is in progress (outbox pattern P2-03, GitHub adapter P2-04, FreeScout adapter P2-05, and CRM adapter P2-06 complete).
+- **Track 2 Adapters Complete (`ROADMAP.md` P2-04..P2-07):** All 4 core destination adapters (GitHub issue adapter P2-04, FreeScout helpdesk adapter P2-05, CRM lead ingestion adapter P2-06, and Webhook alert adapter P2-07) are complete. Track 3 (Dispatcher pipeline integration P2-08, Worker daemon P2-09) is next.
 - **Pending Worker Daemon (`ROADMAP.md` P2-09):** Standalone polling worker and atomic batch claiming are pending.
 - **Pending Mailbox Connector (`ROADMAP.md` P2-12):** Gmail Pub/Sub webhook integration is pending.

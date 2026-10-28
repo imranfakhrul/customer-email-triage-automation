@@ -211,7 +211,14 @@ destinations:
     enabled: false
     daily_cap: 200
     use_masked_text_only: false
+    unmask_pii: false
+    target: "https://events.mycompany.internal/triage-alerts"
     target_env: "SLACK_BILLING_WEBHOOK_URL"
+    secret_env: "WEBHOOK_SECRET_KEY"
+    allowed_hosts:
+      - "events.mycompany.internal"
+      - "hooks.slack.com"
+    request_timeout_seconds: 10.0
     circuit_breaker:
       failure_threshold: 5
       cooldown_seconds: 900
