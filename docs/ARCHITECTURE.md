@@ -3,7 +3,7 @@
 ## 1. Purpose & Phases
 LangGraph pipeline automating customer email triage with strict privacy and security invariants.
 - **Phase 1 (Complete):** Ingestion, idempotency, signature stripping, local spaCy PII masking, sensitive-skip, and 3-tier gatekeeper.
-- **Phase 2 (In Progress):** Deep semantic classification, HITL review queue, outbox ledger, multi-destination adapters (`P2-03` to `P2-07`), worker daemon (`P2-09`), benchmark and failure injection (`P2-10`), and Gmail connector (`P2-12`).
+- **Phase 2 (In Progress):** Deep semantic classification, HITL review queue, outbox ledger, multi-destination adapters (`P2-03` to `P2-07`), worker daemon (`P2-09`), benchmark and failure injection (`P2-10`), architecture diagrams and operator runbooks (`P2-11`), and Gmail connector (`P2-12`).
 
 ## 2. Data Flow
 ```
@@ -171,4 +171,5 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - **Track 2 Adapters & Pipeline Integration Complete (`ROADMAP.md` P2-04..P2-08):** All 4 core destination adapters and end-to-end LangGraph pipeline compilation (unified and standalone worker topologies) are complete.
 - **Worker Daemon Complete (`ROADMAP.md` P2-09):** Standalone polling worker daemon with single-statement atomic batch claiming, crash recovery (orphaned claims older than 15 min sweep to unclaimed or dead_letter), and graceful SIGINT/SIGTERM shutdown.
 - **Phase 2 Synthetic Benchmark & Failure Injection Suite Complete (`ROADMAP.md` P2-10):** 50 synthetic test scenarios covering all 10 categories, emotional states, priority levels, and edge cases (`data/benchmark_phase2.json`); failure injection suite (`tests/test_p2_failure_injection.py`) validating post-send timeout unknown outcomes and ledger reconciliation, worker crash recovery, formula injection neutralization, and anchored marker security; and adapter contract suite (`tests/test_p2_adapter_contracts.py`) for GitHub, FreeScout, CRM, and Webhook.
+- **Phase 2 Architecture Diagrams and Operator Runbooks Complete (`ROADMAP.md` P2-11):** Comprehensive technical reference (`docs/architecture_phase2.md`) with Mermaid flowcharts, state machine diagrams, and outbox ledger sequence diagrams; and complete triage operator runbook (`docs/hitl_runbook.md`) covering review triggers, CLI commands (`list`, `show`, `approve`, `override`, `reject`), dead-letter queue recovery, and outbox ledger reconciliation.
 - **Pending Mailbox Connector (`ROADMAP.md` P2-12):** Gmail Pub/Sub webhook integration is pending.

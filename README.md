@@ -2,6 +2,8 @@
 
 A local-first, privacy-preserving automated email triage pipeline built on **LangGraph**. The system intercepts incoming customer inquiries, deduplicates and tracks processing state via an idempotent SQLite store, strips email signatures and thread history, locally sanitizes PII, applies sensitive guardrail diversions, and evaluates inbound traffic using **Jev AI** decision intelligence.
 
+**Phase 2** extends this foundation with deep 10-category semantic classification, emotional escalation detection, Human-in-the-Loop review gating ([docs/hitl_runbook.md](./docs/hitl_runbook.md)), multi-destination dispatching (GitHub Issues, FreeScout Support, HubSpot CRM, Webhooks), and an autonomous background queue worker ([docs/architecture_phase2.md](./docs/architecture_phase2.md)).
+
 For current deliverable tracking and project milestones, refer to the [**Project Roadmap**](./ROADMAP.md).
 
 ---
@@ -91,7 +93,9 @@ Customer-Email-Triage-Automation/
 ├── docker-compose.yml        # Multi-container orchestration
 ├── docs/
 │   ├── ARCHITECTURE.md       # Pipeline architecture, state map, database schema, & config reference
+│   ├── architecture_phase2.md# Phase 2 technical reference, state machine, & diagrams
 │   ├── contracts/            # External API contract specifications
+│   ├── hitl_runbook.md       # Operator runbook for human review queue & reconciliation
 │   └── phase2_decisions.md   # Architectural decisions for Phase 2
 ├── GEMINI.md -> AGENTS.md    # Agent instructions symlink
 ├── main.py                   # Production entry point and CLI benchmark runner
@@ -120,8 +124,9 @@ Customer-Email-Triage-Automation/
 ├── scripts/
 │   ├── hitl_cli.py           # Reviewer CLI interface for HITL queue management
 │   ├── jev_smoke_test.py     # Standalone TypeSafe System One connectivity smoke test
-│   └── manual_classifier_check.py # Offline classifier verification script
-├── tests/                    # Comprehensive unit and integration test suite (584 tests)
+│   ├── manual_classifier_check.py # Offline classifier verification script
+│   └── phase2_worker.py      # Autonomous background queue worker daemon
+├── tests/                    # Comprehensive unit and integration test suite (588 tests)
 │   ├── conftest.py           # Test isolation fixtures & network egress guards
 │   ├── test_a12_container_security.py
 │   ├── test_a14_dependency_pinning.py
@@ -315,24 +320,32 @@ python -m spacy download en_core_web_sm
 # 3. Configure environment
 cp .env.example .env
 
-# 4. Run automated test suite (584 tests, 100% passing)
+# 4. Run automated test suite (588 tests, 100% passing)
 pytest tests/ -v
 
-# 5. Run the synthetic benchmark suite across all 100 pipeline scenarios (default: offline)
+# 5. Run the Phase 1 benchmark suite across all 100 pipeline scenarios (default: offline)
 python main.py
 # (Or use python main.py --live to evaluate with live TypeSafe System One / Jev API)
 
-# 6. Process an individual email JSON payload
+# 6. Run the Phase 2 synthetic benchmark dataset (50 scenarios across all 10 categories)
+python main.py --phase2
+
+# 7. Process an individual email JSON payload
 python main.py --input path/to/email.json
 
-# 7. Human-in-the-Loop Reviewer CLI interface
+# 8. Run the autonomous Phase 2 queue worker daemon
+python scripts/phase2_worker.py --once             # Process one batch of claimed jobs
+bash tools/run_worker.sh                           # Run continuous polling worker daemon
+
+# 9. Human-in-the-Loop Reviewer CLI interface
 python scripts/hitl_cli.py list                    # List pending review items
 python scripts/hitl_cli.py list --json             # JSON output for tooling
 python scripts/hitl_cli.py show <email_id>         # Inspect item with masked text
-python scripts/hitl_cli.py approve <email_id> --by alice [--notes "..."] [--category C] [--team T]
-python scripts/hitl_cli.py reject <email_id> --by bob --notes "Rejection reason"
+python scripts/hitl_cli.py approve <email_id>      # Approve for automated dispatch
+python scripts/hitl_cli.py override <email_id> --category "Bug Report" --destination github
+python scripts/hitl_cli.py reject <email_id> --reason "Irrelevant spam"
 
-# 8. Run egress check & all-in-one verification
+# 10. Run egress check & all-in-one verification
 ./check.sh all
 ```
 

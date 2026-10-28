@@ -531,7 +531,7 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 | **8** | **P2-08** | Track 3 | `feat(pipeline): [P2-08] end-to-end langgraph phase 2 graph compilation and dispatch handoff` | `pipeline.py`, `tests/test_p2_pipeline_e2e.py`, `scripts/check_p2_08.py`, `docs/ARCHITECTURE.md`, `README.md` | ✅ Complete |
 | **9** | **P2-09** | Track 3 | `feat(worker): [P2-09] persistent phase 2 queue worker, atomic claiming, and crash recovery` | `scripts/phase2_worker.py`, `db/database.py`, `tools/run_worker.sh`, `tests/test_p2_worker.py` | ✅ Complete |
 | **10** | **P2-10** | Track 3 | `feat(testing): [P2-10] phase 2 synthetic benchmark dataset, failure-injection suite, and adapter contracts` | `data/benchmark_phase2.json`, `main.py`, `tests/test_p2_benchmark.py`, `tests/test_p2_failure_injection.py`, `tests/test_p2_adapter_contracts.py`, `scripts/*_smoke_test.py` | ✅ Complete |
-| **11** | **P2-11** | Track 3 | `docs(phase2): [P2-11] complete phase 2 documentation, architecture diagrams, and operator runbooks` | `README.md`, `ROADMAP.md`, `docs/architecture_phase2.md`, `docs/hitl_runbook.md` | ⏳ Pending |
+| **11** | **P2-11** | Track 3 | `docs(phase2): [P2-11] complete phase 2 documentation, architecture diagrams, and operator runbooks` | `README.md`, `ROADMAP.md`, `docs/architecture_phase2.md`, `docs/hitl_runbook.md`, `tests/test_p2_documentation.py` | ✅ Complete |
 | **12** | **P2-12** | Track 4 | `feat(mailbox): [P2-12] gmail pub/sub mailbox connector, auth lifecycle, and original text re-fetch` | `utils/mailbox/gmail_connector.py`, `scripts/renew_mailbox_watch.py`, `config.yaml`, `.env.example`, `tests/test_p2_mailbox_connector.py` | ⏳ Pending |
 
 ---
@@ -839,7 +839,8 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 * **Done When:** Benchmark test passes 50/50 scenarios; failure-injection tests pass; contract tests verify all payloads; network egress guard confirms zero unmocked network calls.
 
 #### [P2-11] Complete Phase 2 Documentation, Architecture Diagrams, and Operator Runbooks
-* **Scope:** `README.md`, `ROADMAP.md`, `docs/architecture_phase2.md`, `docs/hitl_runbook.md`
+* **Status:** ✅ Complete
+* **Scope:** `README.md`, `ROADMAP.md`, `docs/architecture_phase2.md`, `docs/hitl_runbook.md`, `tests/test_p2_documentation.py`
 * **Problem:** Operators, developers, and reviewers require comprehensive documentation, state diagrams, and runbooks to manage Phase 2 in production.
 * **Solution:**
   1. Update `README.md` with Phase 2 features, architecture overview, configuration options, and benchmark results.
