@@ -142,6 +142,7 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/adapters/crm_adapter.py`: HubSpot CRM adapter with duplicate pre-checking and 409 conflict collision recovery.
 - `utils/adapters/webhook_format.py`: Formatting, cryptographic HMAC-SHA256 signing, alert classification, and Slack Block Kit payload builder for emergency alerts.
 - `utils/adapters/webhook_adapter.py`: Webhook alert adapter with cryptographic HMAC signing, dual payload formatting, and rate-limiting retry classification.
+- `pipeline.py`: LangGraph StateGraph builder compiling Phase 1, Phase 2 unified, and standalone worker pipeline topologies.
 - `db/database.py`: SQLite idempotency store, retry tracking, and review resolution.
 - `scripts/hitl_cli.py`: Reviewer CLI tool to list, show, approve, and reject reviews.
 - `scripts/manual_classifier_check.py`: Standalone forced-offline classifier verification check.
@@ -163,6 +164,6 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 
 ## 11. Known Limitations & Open Items
 - **Jev Choice Routing Mismatch (`ROADMAP.md` P2-01):** Jev's 4 routing options cannot express the 10-category taxonomy; `classification.jev.enabled: false` by default.
-- **Track 2 Adapters Complete (`ROADMAP.md` P2-04..P2-07):** All 4 core destination adapters (GitHub issue adapter P2-04, FreeScout helpdesk adapter P2-05, CRM lead ingestion adapter P2-06, and Webhook alert adapter P2-07) are complete. Track 3 (Dispatcher pipeline integration P2-08, Worker daemon P2-09) is next.
+- **Track 2 Adapters & Pipeline Integration Complete (`ROADMAP.md` P2-04..P2-08):** All 4 core destination adapters and end-to-end LangGraph pipeline compilation (unified and standalone worker topologies) are complete. Next is Track 3 Milestone P2-09 (Worker Daemon).
 - **Pending Worker Daemon (`ROADMAP.md` P2-09):** Standalone polling worker and atomic batch claiming are pending.
 - **Pending Mailbox Connector (`ROADMAP.md` P2-12):** Gmail Pub/Sub webhook integration is pending.

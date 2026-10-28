@@ -21,10 +21,10 @@ Each issue is implemented individually with corresponding unit tests, verified a
 1. **Track 0: Architectural Decisions & Client Alignment:** `P2-00` ✅ (Delivered in `docs/phase2_decisions.md`)
 2. **Track 1: Intelligence Classification Engine:** `P2-01` ✅ (Deep Classifier) ➔ `P2-02` ✅ (HITL Review Queue)
 3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04a` ✅ (GitHub Formatting & Schema) ➔ `P2-04b` ✅ (GitHub Adapter & Remote Precheck) ➔ `P2-05` ✅ (FreeScout) ➔ `P2-06` ✅ (CRM) ➔ `P2-07` ✅ (Webhook)
-4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` (LangGraph Integration) ➔ `P2-09` (Queue Worker) ➔ `P2-10` (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
+4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` ✅ (LangGraph Integration) ➔ `P2-09` (Queue Worker) ➔ `P2-10` (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
 5. **Track 4: Mailbox Ingestion Connector:** `P2-12` (Gmail Pub/Sub Connector)
 
-**Next Immediate Task:** `P2-08` (`feat(pipeline): [P2-08] end-to-end langgraph phase 2 graph compilation and dispatch handoff`).
+**Next Immediate Task:** `P2-09` (`feat(worker): [P2-09] persistent phase 2 queue worker, atomic claiming, and crash recovery`).
 
 ---
 
@@ -528,7 +528,7 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 | **5** | **P2-05** | Track 2 | `feat(adapters): [P2-05] freescout helpdesk adapter with universal selective unmasking and thread continuity` | `utils/unmasker.py`, `utils/adapters/freescout_adapter.py`, `utils/adapters/freescout_format.py`, `docs/contracts/freescout.md`, `tests/fixtures/freescout/*.json`, `config.yaml`, `utils/config.py`, `utils/adapters/__init__.py`, `tests/test_p2_unmasker.py`, `tests/test_p2_freescout_format.py`, `tests/test_p2_freescout_adapter.py`, `scripts/check_p2_05.py` | ✅ Complete |
 | **6** | **P2-06** | Track 2 | `feat(adapters): [P2-06] crm lead ingestion adapter with output hardening and lead scoring` | `utils/adapters/crm_adapter.py`, `utils/adapters/crm_format.py`, `docs/contracts/crm_hubspot.md`, `tests/fixtures/crm/*.json`, `config.yaml`, `utils/config.py`, `utils/adapters/__init__.py`, `tests/test_p2_crm_format.py`, `tests/test_p2_crm_adapter.py`, `scripts/check_p2_06.py` | ✅ Complete |
 | **7** | **P2-07** | Track 2 | `feat(adapters): [P2-07] webhook alert adapter with hmac signing and dual formatting` | `utils/adapters/webhook_adapter.py`, `utils/adapters/webhook_format.py`, `docs/contracts/webhook_alert.md`, `tests/fixtures/webhook/*.json`, `config.yaml`, `utils/config.py`, `utils/adapters/__init__.py`, `tests/test_p2_webhook_format.py`, `tests/test_p2_webhook_adapter.py`, `scripts/check_p2_07.py`, `.env.example`, `docs/ARCHITECTURE.md`, `README.md` | ✅ Complete |
-| **8** | **P2-08** | Track 3 | `feat(pipeline): [P2-08] end-to-end langgraph phase 2 graph compilation and dispatch handoff` | `pipeline.py`, `tests/test_p2_pipeline_e2e.py` | ⏳ Pending |
+| **8** | **P2-08** | Track 3 | `feat(pipeline): [P2-08] end-to-end langgraph phase 2 graph compilation and dispatch handoff` | `pipeline.py`, `tests/test_p2_pipeline_e2e.py`, `scripts/check_p2_08.py`, `docs/ARCHITECTURE.md`, `README.md` | ✅ Complete |
 | **9** | **P2-09** | Track 3 | `feat(worker): [P2-09] persistent phase 2 queue worker, atomic claiming, and crash recovery` | `scripts/phase2_worker.py`, `db/database.py`, `tools/run_worker.sh`, `tests/test_p2_worker.py` | ⏳ Pending |
 | **10** | **P2-10** | Track 3 | `feat(testing): [P2-10] phase 2 synthetic benchmark dataset, failure-injection suite, and adapter contracts` | `data/benchmark_phase2.json`, `main.py`, `tests/test_p2_benchmark.py`, `tests/test_p2_failure_injection.py`, `tests/test_p2_adapter_contracts.py`, `scripts/*_smoke_test.py` | ⏳ Pending |
 | **11** | **P2-11** | Track 3 | `docs(phase2): [P2-11] complete phase 2 documentation, architecture diagrams, and operator runbooks` | `README.md`, `ROADMAP.md`, `docs/architecture_phase2.md`, `docs/hitl_runbook.md` | ⏳ Pending |

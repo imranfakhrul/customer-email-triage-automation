@@ -17,16 +17,22 @@ from langgraph.graph.state import CompiledStateGraph
 
 from db.database import TriageDatabase
 from nodes import (
+    classifier_node,
+    dispatcher_node,
+    hitl_queue_node,
     ingest_node,
     jev_gatekeeper_node,
     pii_masker_node,
     sensitive_skip_node,
     should_continue_triage,
+    should_route_after_dispatcher,
     should_route_after_gatekeeper,
+    should_route_after_hitl,
     should_route_after_sensitive,
     signature_stripper_node,
 )
 from state import TriageState
+from utils.classifier_client import ClassifierClient
 from utils.config import get_config
 from utils.jev_client import JevClient
 
@@ -82,10 +88,15 @@ def prepare_initial_state(payload: Dict[str, Any]) -> TriageState:
         "customer_tier": payload.get("customer_tier"),
         "sla_target": payload.get("sla_target"),
         "classification": payload.get("classification"),
+        "p2_classifier_used": payload.get("p2_classifier_used"),
+        "p2_status": payload.get("p2_status"),
+        "hitl_status": payload.get("hitl_status"),
+        "hitl_reason": payload.get("hitl_reason"),
         "labels_to_apply": list(payload.get("labels_to_apply") or []),
         "is_starred": bool(payload.get("is_starred", False)),
         "dispatch_target": payload.get("dispatch_target"),
         "dispatch_status": payload.get("dispatch_status", "processing"),
+        "dispatch_results": payload.get("dispatch_results"),
         "retry_count": int(payload.get("retry_count", 0)),
         "error_message": payload.get("error_message"),
         "routing_status": payload.get("routing_status", "processing"),
@@ -97,15 +108,25 @@ def create_triage_pipeline(
     db: Optional[TriageDatabase] = None,
     config: Optional[Dict[str, Any]] = None,
     client: Optional[JevClient] = None,
+    classifier_client: Optional[ClassifierClient] = None,
     offline: bool = False,
+    phase2: bool = False,
 ) -> CompiledStateGraph:
-    """Builds and compiles the LangGraph StateGraph for email triage up to Gatekeeper.
+    """Builds and compiles the LangGraph StateGraph for email triage.
+
+    When phase2 is False (default), compiles Phase 1 pipeline terminating after
+    Gatekeeper (Node 05).
+    When phase2 is True, compiles full unified pipeline:
+    ingest -> signature_stripper -> pii_masker -> sensitive_skip -> jev_gatekeeper
+    -> classifier -> hitl_queue -> dispatcher -> END.
 
     Args:
         db: Optional TriageDatabase instance.
         config: Optional system configuration dict.
         client: Optional JevClient instance.
+        classifier_client: Optional ClassifierClient instance for Phase 2 classification.
         offline: Whether pipeline is running in offline mode.
+        phase2: Whether to wire Phase 2 nodes (Nodes 06-08).
 
     Returns:
         CompiledStateGraph ready to invoke with TriageState.
@@ -119,7 +140,7 @@ def create_triage_pipeline(
     if client is None and config is not None:
         client = JevClient(config=config)
 
-    # 1. Register Nodes with bound dependencies
+    # 1. Register Phase 1 Nodes with bound dependencies
     builder.add_node("ingest", lambda state: ingest_node(state, db=db))
     builder.add_node("signature_stripper", signature_stripper_node)
     builder.add_node(
@@ -162,10 +183,121 @@ def create_triage_pipeline(
         },
     )
 
-    # Gatekeeper decision routing: spam and manual_review terminate; legitimate approved
+    if not phase2:
+        # Phase 1: Gatekeeper decision routing terminates
+        builder.add_conditional_edges(
+            "jev_gatekeeper",
+            should_route_after_gatekeeper,
+            {
+                "continue": END,
+                "end": END,
+            },
+        )
+    else:
+        if classifier_client is None and config is not None:
+            classifier_client = ClassifierClient(config=config)
+
+        # Phase 2: Register Nodes 06-08
+        builder.add_node(
+            "classifier",
+            lambda state: classifier_node(state, client=classifier_client),
+        )
+        builder.add_node(
+            "hitl_queue",
+            lambda state: hitl_queue_node(state, config=config, db=db),
+        )
+        builder.add_node(
+            "dispatcher",
+            lambda state: dispatcher_node(state, db=db, config=config),
+        )
+
+        # Gatekeeper routes to classifier if approved, else ends
+        builder.add_conditional_edges(
+            "jev_gatekeeper",
+            should_route_after_gatekeeper,
+            {
+                "continue": "classifier",
+                "end": END,
+            },
+        )
+
+        # Classifier proceeds directly to HITL queue gating
+        builder.add_edge("classifier", "hitl_queue")
+
+        # HITL queue conditional routing: approved proceeds to dispatcher, pending halts
+        builder.add_conditional_edges(
+            "hitl_queue",
+            should_route_after_hitl,
+            {
+                "continue": "dispatcher",
+                "end": END,
+            },
+        )
+
+        # Dispatcher completes and routes to END
+        builder.add_conditional_edges(
+            "dispatcher",
+            should_route_after_dispatcher,
+            {
+                "continue": END,
+                "end": END,
+            },
+        )
+
+    return builder.compile()
+
+
+def create_phase2_worker_pipeline(
+    db: Optional[TriageDatabase] = None,
+    config: Optional[Dict[str, Any]] = None,
+    classifier_client: Optional[ClassifierClient] = None,
+    offline: bool = False,
+) -> CompiledStateGraph:
+    """Builds and compiles the standalone Phase 2 LangGraph StateGraph for worker processing.
+
+    Starts directly at Node 06 (classifier), consuming pre-approved gatekeeper records
+    without re-running Phase 1 ingestion, signature stripping, or PII masking.
+
+    Args:
+        db: Optional TriageDatabase instance.
+        config: Optional system configuration dict.
+        classifier_client: Optional ClassifierClient instance.
+        offline: Whether pipeline is running in offline mode.
+
+    Returns:
+        CompiledStateGraph starting at 'classifier' and ending after 'dispatcher'.
+    """
+    builder = StateGraph(TriageState)
+
+    if classifier_client is None and config is not None:
+        classifier_client = ClassifierClient(config=config)
+
+    builder.add_node(
+        "classifier",
+        lambda state: classifier_node(state, client=classifier_client),
+    )
+    builder.add_node(
+        "hitl_queue",
+        lambda state: hitl_queue_node(state, config=config, db=db),
+    )
+    builder.add_node(
+        "dispatcher",
+        lambda state: dispatcher_node(state, db=db, config=config),
+    )
+
+    builder.set_entry_point("classifier")
+    builder.add_edge("classifier", "hitl_queue")
     builder.add_conditional_edges(
-        "jev_gatekeeper",
-        should_route_after_gatekeeper,
+        "hitl_queue",
+        should_route_after_hitl,
+        {
+            "continue": "dispatcher",
+            "end": END,
+        },
+    )
+    builder.add_conditional_edges(
+        "dispatcher",
+        should_route_after_dispatcher,
         {
             "continue": END,
             "end": END,
@@ -181,7 +313,9 @@ def run_triage_pipeline(
     db: Optional[TriageDatabase] = None,
     config: Optional[Dict[str, Any]] = None,
     client: Optional[JevClient] = None,
+    classifier_client: Optional[ClassifierClient] = None,
     offline: bool = False,
+    phase2: bool = False,
 ) -> TriageState:
     """Executes an email payload through the triage pipeline and returns final state.
 
@@ -191,7 +325,9 @@ def run_triage_pipeline(
         db: Optional TriageDatabase instance.
         config: Optional configuration dictionary.
         client: Optional JevClient instance.
+        classifier_client: Optional ClassifierClient instance for Phase 2 classification.
         offline: Whether pipeline is running in offline mode.
+        phase2: Whether to execute the full Phase 2 pipeline.
 
     Returns:
         Final TriageState after pipeline completion.
@@ -200,7 +336,12 @@ def run_triage_pipeline(
 
     if pipeline is None:
         pipeline = create_triage_pipeline(
-            db=db, config=config, client=client, offline=offline
+            db=db,
+            config=config,
+            client=client,
+            classifier_client=classifier_client,
+            offline=offline,
+            phase2=phase2,
         )
 
     final_state = pipeline.invoke(initial_state)
