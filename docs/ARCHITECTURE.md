@@ -87,12 +87,14 @@ Incoming Email
 - `routing_status` (`Optional[str]`): Ingestion / Gatekeeper. Phase 1 lifecycle status.
 
 ## 5. Database (`triage.db`)
-Tables: `email_triage` and `p2_dispatch_log`.
+Tables: `email_triage`, `p2_dispatch_log`, and `p2_jobs`.
 - `email_triage` Columns: `email_id` (TEXT PK), `message_id` (TEXT), `thread_id` (TEXT), `sender_email` (TEXT), `status` (TEXT), `retry_count` (INTEGER), `routing_status` (TEXT), `dispatch_target` (TEXT), `error_message` (TEXT), `created_at` (TEXT), `updated_at` (TEXT), `masked_subject` (TEXT), `masked_body` (TEXT), `is_active_thread` (INTEGER), `gatekeeper_decision` (TEXT), `gatekeeper_confidence` (REAL), `classifier_used` (TEXT), `p2_category` (TEXT), `p2_priority` (TEXT), `p2_sentiment` (TEXT), `p2_customer_emotion` (TEXT), `p2_summary` (TEXT), `p2_suggested_team` (TEXT), `p2_confidence` (REAL), `p2_classifier_used` (TEXT), `hitl_status` (TEXT), `hitl_reason` (TEXT), `hitl_notes` (TEXT), `reviewed_by` (TEXT), `reviewed_at` (TEXT).
 - Status CHECK: `CHECK(status IN ('processing', 'done', 'failed'))`.
 - Routing Status values: `processing`, `duplicate_skipped`, `in_flight_skipped`, `max_retries_exceeded`, `stale_recovery`, `retry`, `sensitive_diverted`, `spam_diverted`, `manual_review`, `gatekeeper_approved`, `persist_failed`.
 - `p2_dispatch_log` Columns: `id` (INTEGER PK), `email_id` (TEXT), `destination` (TEXT), `action_type` (TEXT), `idempotency_key` (TEXT), `mode` (TEXT), `state` (TEXT), `attempts` (INTEGER), `remote_id` (TEXT), `reason` (TEXT), `error_class` (TEXT), `payload_sha256` (TEXT), `resolved_by` (TEXT), `created_at` (TEXT), `updated_at` (TEXT).
 - `p2_dispatch_log` Constraints: `UNIQUE(idempotency_key, mode)`, `CHECK(destination IN ('github', 'freescout', 'crm', 'webhook'))`, `CHECK(action_type IN ('create_issue', 'create_ticket', 'create_lead', 'alert'))`, `CHECK(mode IN ('dry_run', 'live'))`, `CHECK(state IN ('pending', 'confirmed', 'failed', 'unknown', 'dead_letter', 'simulated', 'deferred'))`.
+- `p2_jobs` Columns: `id` (INTEGER PK), `email_id` (TEXT UNIQUE FK), `state` (TEXT), `worker_id` (TEXT), `attempts` (INTEGER), `claimed_at` (TEXT), `error_message` (TEXT), `created_at` (TEXT), `updated_at` (TEXT).
+- `p2_jobs` Constraints: `CHECK(state IN ('unclaimed', 'claimed', 'dispatching', 'done', 'failed', 'dead_letter', 'hitl_pending', 'hitl_resolved'))`, `FOREIGN KEY(email_id) REFERENCES email_triage(email_id)`.
 - Phase 1 vs Phase 2: Phase 1 writes `status`, `routing_status`, and gatekeeper columns. Phase 2 writes ONLY `p2_*` columns, `hitl_*`, `reviewed_by`, and `reviewed_at`. Phase 2 NEVER overwrites `routing_status` or `status`.
 - Migration method: `TriageDatabase._init_db()` executes idempotent `ALTER TABLE ADD COLUMN` statements and `CREATE TABLE IF NOT EXISTS` guarded by `PRAGMA table_info`.
 
@@ -144,9 +146,11 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/adapters/webhook_adapter.py`: Webhook alert adapter with cryptographic HMAC signing, dual payload formatting, and rate-limiting retry classification.
 - `pipeline.py`: LangGraph StateGraph builder compiling Phase 1, Phase 2 unified, and standalone worker pipeline topologies.
 - `db/database.py`: SQLite idempotency store, retry tracking, and review resolution.
+- `scripts/phase2_worker.py`: Background worker daemon executing atomic queue intake, batch claiming, and crash recovery.
 - `scripts/hitl_cli.py`: Reviewer CLI tool to list, show, approve, and reject reviews.
 - `scripts/manual_classifier_check.py`: Standalone forced-offline classifier verification check.
 - `scripts/jev_smoke_test.py`: Standalone TypeSafe System One API connectivity smoke test.
+- `tools/run_worker.sh`: Shell launcher wrapper for the Phase 2 background worker daemon.
 - `tools/egress_check.py`: Network egress auditor detecting data leaks.
 - `tools/check_concurrency.py`: Multi-process SQLite lock stress test.
 - `tests/conftest.py`: Test environment isolation fixtures and network egress blocks.
@@ -164,6 +168,7 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 
 ## 11. Known Limitations & Open Items
 - **Jev Choice Routing Mismatch (`ROADMAP.md` P2-01):** Jev's 4 routing options cannot express the 10-category taxonomy; `classification.jev.enabled: false` by default.
-- **Track 2 Adapters & Pipeline Integration Complete (`ROADMAP.md` P2-04..P2-08):** All 4 core destination adapters and end-to-end LangGraph pipeline compilation (unified and standalone worker topologies) are complete. Next is Track 3 Milestone P2-09 (Worker Daemon).
-- **Pending Worker Daemon (`ROADMAP.md` P2-09):** Standalone polling worker and atomic batch claiming are pending.
+- **Track 2 Adapters & Pipeline Integration Complete (`ROADMAP.md` P2-04..P2-08):** All 4 core destination adapters and end-to-end LangGraph pipeline compilation (unified and standalone worker topologies) are complete.
+- **Worker Daemon Complete (`ROADMAP.md` P2-09):** Standalone polling worker daemon with single-statement atomic batch claiming, crash recovery (orphaned claims older than 15 min sweep to unclaimed or dead_letter), and graceful SIGINT/SIGTERM shutdown.
+- **Pending Failure Injection & Synthetic Benchmark (`ROADMAP.md` P2-10):** Phase 2 failure injection and synthetic benchmark suite are pending.
 - **Pending Mailbox Connector (`ROADMAP.md` P2-12):** Gmail Pub/Sub webhook integration is pending.

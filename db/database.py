@@ -30,6 +30,18 @@ class LedgerStateError(Exception):
     pass
 
 
+VALID_P2_JOB_STATES = {
+    "unclaimed",
+    "claimed",
+    "dispatching",
+    "done",
+    "failed",
+    "dead_letter",
+    "hitl_pending",
+    "hitl_resolved",
+}
+
+
 class TriageDatabase:
     """Manages the SQLite database for idempotency, retry tracking, and state persistence."""
 
@@ -162,6 +174,28 @@ class TriageDatabase:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_dispatch_dest_state ON p2_dispatch_log(destination, state, updated_at);"
+            )
+
+            # Phase 2 Persistent Queue Jobs table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS p2_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email_id TEXT NOT NULL UNIQUE,
+                    state TEXT NOT NULL CHECK(state IN ('unclaimed', 'claimed', 'dispatching', 'done', 'failed', 'dead_letter', 'hitl_pending', 'hitl_resolved')),
+                    worker_id TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    claimed_at TEXT,
+                    error_message TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(email_id) REFERENCES email_triage(email_id)
+                );
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_p2_jobs_state ON p2_jobs(state);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_p2_jobs_claimed ON p2_jobs(claimed_at);"
             )
 
     def get_record(self, email_id: str) -> Optional[Dict[str, Any]]:
@@ -894,6 +928,28 @@ class TriageDatabase:
                     f"Email '{email_id}' is not in 'pending' status (current status: '{current_status}')"
                 )
 
+            # Sync p2_jobs state if a queue job exists
+            if clean_decision == "approved":
+                conn.execute(
+                    """
+                    UPDATE p2_jobs
+                    SET state = 'hitl_resolved',
+                        updated_at = ?
+                    WHERE email_id = ? AND state = 'hitl_pending'
+                    """,
+                    (now_iso, email_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE p2_jobs
+                    SET state = 'done',
+                        updated_at = ?
+                    WHERE email_id = ? AND state = 'hitl_pending'
+                    """,
+                    (now_iso, email_id),
+                )
+
         return True
 
     @staticmethod
@@ -1418,8 +1474,191 @@ class TriageDatabase:
 
         return True
 
+    def sync_p2_intake(self) -> int:
+        """Imports eligible gatekeeper_approved Phase 1 records into p2_jobs as unclaimed.
+
+        Returns:
+            Number of new jobs inserted.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO p2_jobs (email_id, state, attempts, created_at, updated_at)
+                SELECT email_id, 'unclaimed', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                FROM email_triage
+                WHERE status = 'done' AND routing_status = 'gatekeeper_approved'
+                  AND email_id NOT IN (SELECT email_id FROM p2_jobs);
+                """
+            )
+            return cursor.rowcount
+
+    def claim_p2_jobs(
+        self, batch_size: int = 10, worker_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Atomically claims a batch of unclaimed or hitl_resolved jobs for a worker.
+
+        Executes a single atomic UPDATE statement with a subquery LIMIT to eliminate
+        SELECT-then-UPDATE race conditions across concurrent workers.
+
+        Args:
+            batch_size: Maximum number of jobs to claim (must be > 0).
+            worker_id: Optional worker identifier.
+
+        Returns:
+            List of dicts representing the claimed jobs joined with email_triage fields.
+        """
+        if batch_size <= 0:
+            return []
+        if worker_id is None:
+            import uuid
+            worker_id = f"worker_{uuid.uuid4().hex[:8]}"
+
+        now = datetime.now(timezone.utc)
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S.%f")
+
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE p2_jobs
+                SET state = 'claimed',
+                    worker_id = ?,
+                    claimed_at = ?,
+                    attempts = attempts + 1,
+                    updated_at = ?
+                WHERE email_id IN (
+                    SELECT email_id FROM p2_jobs
+                    WHERE state IN ('unclaimed', 'hitl_resolved')
+                    ORDER BY created_at ASC
+                    LIMIT ?
+                );
+                """,
+                (worker_id, now_str, now_str, batch_size),
+            )
+            if cursor.rowcount == 0:
+                return []
+
+            fetch_cursor = conn.execute(
+                """
+                SELECT j.id, j.email_id, j.state, j.worker_id, j.attempts,
+                       j.claimed_at, j.error_message, j.created_at, j.updated_at,
+                       t.masked_subject, t.masked_body, t.sender_email,
+                       t.message_id, t.thread_id, t.is_active_thread,
+                       t.gatekeeper_confidence, t.classifier_used
+                FROM p2_jobs j
+                JOIN email_triage t ON j.email_id = t.email_id
+                WHERE j.worker_id = ? AND j.state = 'claimed' AND j.claimed_at = ?
+                ORDER BY j.created_at ASC;
+                """,
+                (worker_id, now_str),
+            )
+            return [dict(row) for row in fetch_cursor.fetchall()]
+
+    def recover_stale_p2_jobs(
+        self, stale_minutes: int = 15, max_retries: int = 3, now: Optional[datetime] = None
+    ) -> int:
+        """Recovers abandoned or crashed worker claims older than stale_minutes.
+
+        Jobs exceeding max_retries transition to 'dead_letter'.
+        Other stale jobs reset to 'unclaimed' with worker_id and claimed_at cleared.
+
+        Args:
+            stale_minutes: Inactivity threshold in minutes (default 15).
+            max_retries: Max attempt count before moving to dead_letter (default 3).
+            now: Optional current datetime (defaults to UTC now).
+
+        Returns:
+            Total number of stale jobs recovered.
+        """
+        if now is None:
+            now = datetime.now(timezone.utc)
+        cutoff = (now - timedelta(minutes=stale_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+        with self.get_connection() as conn:
+            dlq_cur = conn.execute(
+                """
+                UPDATE p2_jobs
+                SET state = 'dead_letter',
+                    error_message = 'Exceeded max retries after worker crash recovery',
+                    updated_at = ?
+                WHERE state IN ('claimed', 'dispatching')
+                  AND datetime(claimed_at) <= datetime(?)
+                  AND attempts >= ?;
+                """,
+                (now_str, cutoff, max_retries),
+            )
+            dlq_count = dlq_cur.rowcount
+
+            reset_cur = conn.execute(
+                """
+                UPDATE p2_jobs
+                SET state = 'unclaimed',
+                    worker_id = NULL,
+                    claimed_at = NULL,
+                    updated_at = ?
+                WHERE state IN ('claimed', 'dispatching')
+                  AND datetime(claimed_at) <= datetime(?)
+                  AND attempts < ?;
+                """,
+                (now_str, cutoff, max_retries),
+            )
+            reset_count = reset_cur.rowcount
+
+            return dlq_count + reset_count
+
+    def finish_p2_job(
+        self, email_id: str, state: str, error_message: Optional[str] = None
+    ) -> None:
+        """Transitions a p2_jobs record to its terminal or intermediate state.
+
+        Args:
+            email_id: Email identifier.
+            state: New state (e.g. 'done', 'failed', 'hitl_pending').
+            error_message: Optional error or diagnostic message.
+
+        Raises:
+            ValueError: If state is not in VALID_P2_JOB_STATES.
+            PersistenceError: If email_id is not found in p2_jobs.
+        """
+        if state not in VALID_P2_JOB_STATES:
+            raise ValueError(
+                f"Invalid p2_jobs state: '{state}'. Must be one of {sorted(VALID_P2_JOB_STATES)}"
+            )
+
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE p2_jobs
+                SET state = ?,
+                    error_message = ?,
+                    updated_at = ?
+                WHERE email_id = ?;
+                """,
+                (state, error_message, now_str, email_id),
+            )
+            if cursor.rowcount == 0:
+                raise PersistenceError(f"Job for email_id '{email_id}' not found in p2_jobs")
+
+    def get_p2_job(self, email_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a p2_jobs record by email_id.
+
+        Args:
+            email_id: Email identifier.
+
+        Returns:
+            Dict representing the p2_jobs record, or None if not found.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM p2_jobs WHERE email_id = ?;", (email_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
     def clear_all(self) -> None:
         """Clears all records in triage tables (used for testing)."""
         with self.get_connection() as conn:
             conn.execute("DELETE FROM p2_dispatch_log;")
+            conn.execute("DELETE FROM p2_jobs;")
             conn.execute("DELETE FROM email_triage;")
