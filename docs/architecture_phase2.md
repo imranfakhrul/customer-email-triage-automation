@@ -8,7 +8,7 @@ For general project architecture and Phase 1 invariants, see [docs/ARCHITECTURE.
 
 ## 1. Executive Summary & Phase Boundaries
 
-Phase 1 provides local ingestion, sanitization, precision PII masking, sensitive topic diversion, and gatekeeper threat filtering. Phase 2 extends the platform into an enterprise-grade automated dispatch pipeline:
+Phase 1 provides local ingestion, sanitization, precision PII masking, sensitive topic diversion, and gatekeeper threat filtering. Phase 2 extends the platform into an automated dispatch and integration pipeline:
 
 1. **Deep Semantic Classification (Node 06):** Classifies approved customer emails into a 10-category taxonomy, calculates urgency priority, and evaluates customer emotional state.
 2. **Human-in-the-Loop (HITL) Queue (Node 07):** Evaluates deterministic policy triggers (security topics, escalated customer anger, low confidence, ambiguous queries) and diverts sensitive emails for human review.

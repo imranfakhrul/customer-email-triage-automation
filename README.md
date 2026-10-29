@@ -108,7 +108,8 @@ Customer-Email-Triage-Automation/
 ├── ROADMAP.md                # 24-point senior review remediation roadmap
 ├── state.py                  # LangGraph TriageState & Pydantic models
 ├── data/
-│   ├── benchmark_emails.json # 100-scenario synthetic benchmark dataset
+│   ├── benchmark_emails.json # 100-scenario Phase 1 synthetic benchmark dataset
+│   ├── benchmark_phase2.json # 50-scenario Phase 2 multi-destination benchmark dataset
 │   ├── sample_email.json     # Sample legitimate email payload
 │   └── sample_email_spam.json# Sample spam email payload
 ├── db/
@@ -120,13 +121,18 @@ Customer-Email-Triage-Automation/
 │   ├── sensitive_skip.py     # Node 04: Sensitive guardrail diversion
 │   ├── jev_gatekeeper.py     # Node 05: Jev AI decision engine
 │   ├── classifier.py         # Node 06: Phase 2 category & priority classifier
-│   └── hitl_queue.py         # Node 07: Phase 2 human-in-the-loop review queue
+│   ├── hitl_queue.py         # Node 07: Phase 2 human-in-the-loop review queue
+│   └── dispatcher.py         # Node 08: Phase 2 outbound routing & adapter execution
 ├── scripts/
+│   ├── crm_smoke_test.py     # Sandbox smoke test for HubSpot CRM adapter
+│   ├── freescout_smoke_test.py # Sandbox smoke test for FreeScout helpdesk adapter
+│   ├── github_smoke_test.py  # Sandbox smoke test for GitHub Issues adapter
 │   ├── hitl_cli.py           # Reviewer CLI interface for HITL queue management
 │   ├── jev_smoke_test.py     # Standalone TypeSafe System One connectivity smoke test
 │   ├── manual_classifier_check.py # Offline classifier verification script
 │   ├── phase2_worker.py      # Autonomous background queue worker daemon
-│   └── renew_mailbox_watch.py# Gmail Cloud Pub/Sub watch setup and 7-day renewal CLI
+│   ├── renew_mailbox_watch.py# Gmail Cloud Pub/Sub watch setup and 7-day renewal CLI
+│   └── webhook_smoke_test.py # Sandbox smoke test for Slack/Generic webhook adapter
 ├── tests/                    # Comprehensive unit and integration test suite (599 tests)
 │   ├── conftest.py           # Test isolation fixtures & network egress guards
 │   ├── test_a12_container_security.py
@@ -143,9 +149,27 @@ Customer-Email-Triage-Automation/
 │   ├── test_jev_gatekeeper.py
 │   ├── test_main.py
 │   ├── test_no_stale_claims.py
+│   ├── test_p2_adapter_contracts.py
+│   ├── test_p2_benchmark.py
 │   ├── test_p2_classifier.py
+│   ├── test_p2_crm_adapter.py
+│   ├── test_p2_crm_format.py
+│   ├── test_p2_dispatch_foundations.py
+│   ├── test_p2_dispatcher.py
+│   ├── test_p2_documentation.py
 │   ├── test_p2_egress.py
+│   ├── test_p2_failure_injection.py
+│   ├── test_p2_freescout_adapter.py
+│   ├── test_p2_freescout_format.py
+│   ├── test_p2_github_adapter.py
+│   ├── test_p2_github_format.py
 │   ├── test_p2_hitl.py
+│   ├── test_p2_mailbox_connector.py
+│   ├── test_p2_pipeline_e2e.py
+│   ├── test_p2_unmasker.py
+│   ├── test_p2_webhook_adapter.py
+│   ├── test_p2_webhook_format.py
+│   ├── test_p2_worker.py
 │   ├── test_pii_masker.py
 │   ├── test_pipeline_e2e.py  # End-to-end integration and benchmark tests
 │   ├── test_readme_metrics.py
@@ -153,12 +177,16 @@ Customer-Email-Triage-Automation/
 │   └── test_signature_stripper.py
 ├── tools/
 │   ├── check_concurrency.py  # Multiprocess / multithread concurrency verification
-│   └── egress_check.py       # Zero-network-leak verification tool
+│   ├── egress_check.py       # Zero-network-leak verification tool
+│   └── run_worker.sh         # Daemon wrapper script with automatic restart
 └── utils/
+    ├── adapters/             # Outbound destination adapters (GitHub, FreeScout, CRM, Webhook)
     ├── classifier_client.py  # Multi-tier classifier client (Jev AI & Groq fallback)
     ├── config.py             # Environment and config loader
     ├── jev_client.py         # Jev AI client with fallback handler
-    └── text_tools.py         # Bounded text scanning & normalization helpers
+    ├── mailbox/              # Gmail connector with Pub/Sub watch and MIME parser
+    ├── text_tools.py         # Bounded text scanning & normalization helpers
+    └── unmasker.py           # Universal Selective Unmasking engine
 ```
 
 ---

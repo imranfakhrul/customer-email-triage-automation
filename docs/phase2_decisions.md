@@ -146,7 +146,7 @@ Phase 2 classification utilizes a multi-tiered decision pipeline optimized for l
 
 ### 5.1 Primary Classifier Engine: TypeSafe Jev AI (`jev`)
 * **Role:** Primary non-generative choice classifier.
-* **Latency:** Sub-second (70ms – 500ms).
+* **Latency:** Low-latency execution (70ms – 500ms).
 * **Execution Logic:** Jev AI does not generate conversational responses or hallucinate text. Instead, it reads the unstructured message state (`masked_subject` + `masked_body`) and calculates exact mathematical probabilities across pre-defined destination actions.
 * **Request Payload Contract:**
   ```json
@@ -234,7 +234,7 @@ The following 6 questions require formal confirmation by the client/stakeholder 
   - `Option C:` Discord / Microsoft Teams webhook.
 
 ### Question 5: Critical Outage Escalation Policy
-* **Question:** When an inbound email reports an active production outage (`priority == 'Critical'`), should it bypass the HITL queue and alert on-call staff immediately?
+* **Question:** When an inbound email reports an active production outage (`priority == 'Critical'`), should it divert past the HITL queue and alert on-call staff immediately?
 * **Options:**
   - `(Recommended) Option A:` Yes, dispatch immediately via Webhook Alert, while concurrently queueing in HITL for operator logging.
   - `Option B:` No, require human operator approval in HITL before firing external webhook alerts.

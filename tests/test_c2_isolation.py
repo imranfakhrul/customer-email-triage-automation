@@ -65,8 +65,22 @@ class TestDeterministicTestIsolation(unittest.TestCase):
             s.close()
 
     def test_ambient_keys_stripped_by_isolation_fixture(self):
-        """External AI keys must be absent by default in tests despite host .env or shell environment."""
-        for key in ["JEV_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]:
+        """External AI and integration keys must be absent by default in tests despite host .env."""
+        keys_to_check = [
+            "JEV_API_KEY",
+            "GROQ_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GITHUB_TOKEN",
+            "FREESCOUT_API_KEY",
+            "CRM_API_KEY",
+            "WEBHOOK_SECRET_KEY",
+            "WEBHOOK_SECRET",
+            "GMAIL_CLIENT_ID",
+            "GMAIL_CLIENT_SECRET",
+            "GMAIL_REFRESH_TOKEN",
+        ]
+        for key in keys_to_check:
             assert os.environ.get(key) is None or os.environ.get(key) == ""
 
     def test_offline_pipeline_with_real_looking_keys_completes_offline(self):
