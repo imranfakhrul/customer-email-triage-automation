@@ -142,7 +142,7 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/adapters/github_adapter.py`: GitHub Issues adapter with duplicate detection and rate limit classification.
 - `utils/unmasker.py`: Universal selective unmasking and content resolution helper for destination adapters (fails closed on missing masked text, re-masks re-fetched bodies to scrub secrets).
 - `utils/mailbox/base.py`: Abstract mailbox connector interface.
-- `utils/mailbox/gmail_connector.py`: Gmail REST API connector with OAuth lifecycle, MIME parsing, and spoof-resistant SPF/DKIM/DMARC verification (topmost mx.google.com enforcement, token parsing).
+- `utils/mailbox/gmail_connector.py`: Gmail REST API connector with OAuth lifecycle, automatic 401 token refresh retry, bounded history pagination (up to 5 pages), MIME parsing, and spoof-resistant SPF/DKIM/DMARC verification (topmost mx.google.com enforcement, token parsing).
 - `scripts/renew_mailbox_watch.py`: Standalone CLI utility for Gmail Cloud Pub/Sub watch setup and automated 7-day renewal.
 - `utils/adapters/freescout_format.py`: Formatting, HTML sanitization, RFC 2606 non-routable fallback domain (`@invalid`), and anchored marker parser for FreeScout ticket payloads.
 - `utils/adapters/freescout_adapter.py`: FreeScout Helpdesk adapter with thread continuity, deduplication pre-check, and zero-fallthrough error handling.

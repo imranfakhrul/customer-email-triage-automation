@@ -319,43 +319,100 @@ class GmailConnector(BaseMailboxConnector):
         }
 
     def fetch_new_messages(
-        self, start_history_id: str | None = None
+        self, start_history_id: str | None = None, max_pages: int = 5
     ) -> list[dict[str, Any]]:
-        """Fetches newly added messages via incremental history sync."""
-        headers = self._get_headers()
+        """Fetches newly added messages via incremental history sync.
+
+        Args:
+            start_history_id: Optional historyId to sync incrementally from.
+            max_pages: Maximum number of pagination pages to retrieve (default: 5).
+
+        Returns:
+            List of newly added Gmail message dicts.
+        """
+        seen_ids: set[str] = set()
+        new_messages: list[dict[str, Any]] = []
 
         if start_history_id:
             url = f"{self._base_url}/gmail/v1/users/{self._user_id}/history"
-            params = {
-                "startHistoryId": start_history_id,
-                "historyTypes": "messageAdded",
-            }
-            resp = self._session.get(url, headers=headers, params=params, timeout=15.0)
-            if resp.status_code != 200:
-                logger.error(f"[GmailConnector] History sync failed: HTTP {resp.status_code}")
-                return []
+            page_token: str | None = None
+            page_count = 0
 
-            data = resp.json()
-            seen_ids: set[str] = set()
-            new_messages: list[dict[str, Any]] = []
+            while page_count < max_pages:
+                params: dict[str, Any] = {
+                    "startHistoryId": start_history_id,
+                    "historyTypes": "messageAdded",
+                }
+                if page_token:
+                    params["pageToken"] = page_token
 
-            for record in data.get("history", []):
-                for item in record.get("messagesAdded", []):
-                    msg = item.get("message", {})
-                    mid = msg.get("id")
-                    if mid and mid not in seen_ids:
-                        seen_ids.add(mid)
-                        new_messages.append(msg)
+                headers = self._get_headers()
+                resp = self._session.get(url, headers=headers, params=params, timeout=15.0)
+
+                if resp.status_code == 401:
+                    # Token expired mid-session; refresh once
+                    self._access_token = ""  # nosec B105
+                    headers = self._get_headers()
+                    resp = self._session.get(url, headers=headers, params=params, timeout=15.0)
+
+                if resp.status_code != 200:
+                    logger.error(f"[GmailConnector] History sync failed: HTTP {resp.status_code}")
+                    break
+
+                data = resp.json()
+                for record in data.get("history", []):
+                    for item in record.get("messagesAdded", []):
+                        msg = item.get("message", {})
+                        mid = msg.get("id")
+                        if mid and mid not in seen_ids:
+                            seen_ids.add(mid)
+                            new_messages.append(msg)
+
+                page_token = data.get("nextPageToken")
+                if not page_token:
+                    break
+                page_count += 1
+
             return new_messages
 
         # Initial bulk fetch
         url = f"{self._base_url}/gmail/v1/users/{self._user_id}/messages"
-        resp = self._session.get(url, headers=headers, params={"maxResults": 20}, timeout=15.0)
-        if resp.status_code != 200:
-            return []
-        data = resp.json()
-        messages_list = data.get("messages", [])
-        return [dict(m) for m in messages_list if isinstance(m, dict)]
+        page_token = None
+        page_count = 0
+
+        while page_count < max_pages:
+            params = {"maxResults": 20}
+            if page_token:
+                params["pageToken"] = page_token
+
+            headers = self._get_headers()
+            resp = self._session.get(url, headers=headers, params=params, timeout=15.0)
+
+            if resp.status_code == 401:
+                # Token expired mid-session; refresh once
+                self._access_token = ""  # nosec B105
+                headers = self._get_headers()
+                resp = self._session.get(url, headers=headers, params=params, timeout=15.0)
+
+            if resp.status_code != 200:
+                logger.error(f"[GmailConnector] Message fetch failed: HTTP {resp.status_code}")
+                break
+
+            data = resp.json()
+            messages_list = data.get("messages", [])
+            for m in messages_list:
+                if isinstance(m, dict):
+                    mid = m.get("id")
+                    if mid and mid not in seen_ids:
+                        seen_ids.add(mid)
+                        new_messages.append(dict(m))
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+            page_count += 1
+
+        return new_messages
 
     def refetch_original_email(self, message_id: str) -> dict[str, Any] | None:
         """Authorized re-fetch of unmasked original email by message ID."""
@@ -389,6 +446,13 @@ class GmailConnector(BaseMailboxConnector):
             "labelIds": label_ids or ["INBOX"],
         }
         resp = self._session.post(url, headers=headers, json=body, timeout=15.0)
+
+        if resp.status_code == 401:
+            # Token expired; refresh once
+            self._access_token = ""  # nosec B105
+            headers = self._get_headers()
+            resp = self._session.post(url, headers=headers, json=body, timeout=15.0)
+
         if resp.status_code != 200:
             logger.error(f"[GmailConnector] setup_watch failed: HTTP {resp.status_code}")
             return {"error": f"HTTP {resp.status_code}"}

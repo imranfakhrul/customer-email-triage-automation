@@ -103,4 +103,5 @@ outbox rows leaving dispatch failures trapped in infinite review loops; auto-inj
 webhook allowed_hosts bypassing allowlists; empty HMAC secrets allowed in webhook validation; worker mutating
 global cached config dictionaries; missing worker CAS check on job finalization allowing concurrent worker
 overwrites; whitespace-only masked bodies bypassing classifier privacy safeguards; circuit breaker half-open
-stampedes bypassing single trial probe.
+stampedes bypassing single trial probe; mailbox history sync dropping incoming messages on expired tokens
+without 401 refresh; unbounded or missing history pagination ignoring nextPageToken.
