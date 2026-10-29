@@ -52,6 +52,10 @@ def main() -> None:
         "priority": "High",
         "sentiment": "Positive",
         "confidence": 0.95,
+        "masked_subject": "Demo Request for Enterprise Suite",
+        "masked_body": (
+            "Hi, I am [PERSON_1]. Please contact me at [PHONE_1] regarding pricing."
+        ),
         "token_map": {"[PERSON_1]": "Jane Prospect", "[PHONE_1]": "+1 555 333 4444"},
     }
 
