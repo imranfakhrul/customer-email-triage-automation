@@ -29,6 +29,7 @@ from utils.adapters.base import (
     BaseDestinationAdapter,
     DispatchPayload,
     DispatchResult,
+    is_connection_setup_error,
 )
 from utils.adapters.webhook_format import (
     build_alert_payload,
@@ -174,10 +175,23 @@ class WebhookAdapter(BaseDestinationAdapter):
                 timeout=timeout,
                 allow_redirects=False,
             )
-        except requests.exceptions.ReadTimeout as exc:
-            raise AdapterUnknownOutcomeError("webhook_network_timeout") from exc
+        except requests.exceptions.SSLError as exc:
+            logger.error(
+                "dispatch_ssl_error email_id=%s reason=webhook_ssl_error", payload.email_id
+            )
+            raise AdapterPermanentError("webhook_ssl_error") from exc
+        except requests.exceptions.ConnectTimeout as exc:
+            logger.warning("dispatch_connect_timeout email_id=%s", payload.email_id)
+            raise AdapterTransientError("webhook_connect_timeout") from exc
         except requests.exceptions.ConnectionError as exc:
-            raise AdapterTransientError("webhook_connection_failed") from exc
+            if is_connection_setup_error(exc):
+                logger.warning("dispatch_connection_failed email_id=%s", payload.email_id)
+                raise AdapterTransientError("webhook_connection_failed") from exc
+            logger.error("dispatch_connection_error email_id=%s", payload.email_id)
+            raise AdapterUnknownOutcomeError("webhook_connection_error") from exc
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ChunkedEncodingError) as exc:
+            logger.error("dispatch_network_timeout email_id=%s", payload.email_id)
+            raise AdapterUnknownOutcomeError("webhook_network_timeout") from exc
         except AdapterError:
             raise
         except requests.RequestException as exc:
@@ -191,8 +205,10 @@ class WebhookAdapter(BaseDestinationAdapter):
 
         if status == 429:
             raise AdapterTransientError("webhook_rate_limited")
-        if status in (502, 503, 504):
+        if status == 503:
             raise AdapterTransientError("webhook_service_unavailable")
+        if 500 <= status < 600:
+            raise AdapterUnknownOutcomeError(f"webhook_server_error_{status}")
         if status in (400, 422):
             raise AdapterPermanentError("webhook_invalid_payload")
         if status in (401, 403):

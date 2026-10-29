@@ -96,4 +96,5 @@ dispatches deferred as adapter_unavailable; mapping deferred and dead-letter dis
 falling back to raw customer text when masked_body is empty; mailbox re-fetch swapping in raw text without
 re-masking high-risk secrets; collapsing auth headers into a dict allowing injected headers to override Google
 MTA; naive substring matching on auth results; synthetic customer addresses constructed on customer
-domains routing agent replies to third-party mailboxes.
+domains routing agent replies to third-party mailboxes; blind-retrying on post-write connection resets
+and ambiguous 5xx errors instead of classifying as unknown outcome.

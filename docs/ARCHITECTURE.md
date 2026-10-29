@@ -136,7 +136,7 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/text_tools.py`: Bounded scanning and ReDoS prevention utilities.
 - `utils/jev_client.py`: TypeSafe System One client with Groq and heuristic fallback.
 - `utils/classifier_client.py`: Multi-tier classifier client with bounded scan and pre-filter.
-- `utils/adapters/base.py`: Abstract destination adapter contract, DispatchPayload, and DispatchResult.
+- `utils/adapters/base.py`: Abstract destination adapter contract, DispatchPayload, DispatchResult, and connection setup error classifier (`is_connection_setup_error`).
 - `utils/adapters/__init__.py`: Thread-safe adapter registry, active adapter discovery (`register_active_adapters`), and exports.
 - `utils/adapters/github_format.py`: Formatting, output hardening, and anchored marker parser for GitHub issue payloads.
 - `utils/adapters/github_adapter.py`: GitHub Issues adapter with duplicate detection and rate limit classification.

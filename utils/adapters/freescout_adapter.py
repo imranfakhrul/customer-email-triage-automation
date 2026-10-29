@@ -27,6 +27,7 @@ from utils.adapters.base import (
     BaseDestinationAdapter,
     DispatchPayload,
     DispatchResult,
+    is_connection_setup_error,
 )
 from utils.adapters.freescout_format import (
     build_conversation_payload,
@@ -331,10 +332,27 @@ class FreeScoutAdapter(BaseDestinationAdapter):
                         f"/api/conversations/{existing_conv_id}/threads",
                         json_data=thread_payload,
                     )
-                except requests.exceptions.ReadTimeout as exc:
-                    raise AdapterUnknownOutcomeError("freescout_network_timeout") from exc
+                except requests.exceptions.SSLError as exc:
+                    logger.error(
+                        "dispatch_ssl_error email_id=%s reason=freescout_ssl_error",
+                        payload.email_id,
+                    )
+                    raise AdapterPermanentError("freescout_ssl_error") from exc
+                except requests.exceptions.ConnectTimeout as exc:
+                    logger.warning("dispatch_connect_timeout email_id=%s", payload.email_id)
+                    raise AdapterTransientError("freescout_connect_timeout") from exc
                 except requests.exceptions.ConnectionError as exc:
-                    raise AdapterTransientError("freescout_connection_failed") from exc
+                    if is_connection_setup_error(exc):
+                        logger.warning("dispatch_connection_failed email_id=%s", payload.email_id)
+                        raise AdapterTransientError("freescout_connection_failed") from exc
+                    logger.error("dispatch_connection_error email_id=%s", payload.email_id)
+                    raise AdapterUnknownOutcomeError("freescout_connection_error") from exc
+                except (
+                    requests.exceptions.ReadTimeout,
+                    requests.exceptions.ChunkedEncodingError,
+                ) as exc:
+                    logger.error("dispatch_network_timeout email_id=%s", payload.email_id)
+                    raise AdapterUnknownOutcomeError("freescout_network_timeout") from exc
                 except AdapterError:
                     raise
                 except requests.RequestException as exc:
@@ -376,10 +394,23 @@ class FreeScoutAdapter(BaseDestinationAdapter):
                 "/api/conversations",
                 json_data=conv_payload,
             )
-        except requests.exceptions.ReadTimeout as exc:
-            raise AdapterUnknownOutcomeError("freescout_network_timeout") from exc
+        except requests.exceptions.SSLError as exc:
+            logger.error(
+                "dispatch_ssl_error email_id=%s reason=freescout_ssl_error", payload.email_id
+            )
+            raise AdapterPermanentError("freescout_ssl_error") from exc
+        except requests.exceptions.ConnectTimeout as exc:
+            logger.warning("dispatch_connect_timeout email_id=%s", payload.email_id)
+            raise AdapterTransientError("freescout_connect_timeout") from exc
         except requests.exceptions.ConnectionError as exc:
-            raise AdapterTransientError("freescout_connection_failed") from exc
+            if is_connection_setup_error(exc):
+                logger.warning("dispatch_connection_failed email_id=%s", payload.email_id)
+                raise AdapterTransientError("freescout_connection_failed") from exc
+            logger.error("dispatch_connection_error email_id=%s", payload.email_id)
+            raise AdapterUnknownOutcomeError("freescout_connection_error") from exc
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ChunkedEncodingError) as exc:
+            logger.error("dispatch_network_timeout email_id=%s", payload.email_id)
+            raise AdapterUnknownOutcomeError("freescout_network_timeout") from exc
         except AdapterError:
             raise
         except requests.RequestException as exc:
@@ -407,6 +438,8 @@ class FreeScoutAdapter(BaseDestinationAdapter):
             raise AdapterTransientError("freescout_rate_limited")
         if status == 503:
             raise AdapterTransientError("freescout_service_unavailable")
+        if 500 <= status < 600:
+            raise AdapterUnknownOutcomeError(f"freescout_server_error_{status}")
         if status == 422:
             raise AdapterPermanentError("freescout_validation_failed")
         if status in (401, 403):

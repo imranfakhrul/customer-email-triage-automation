@@ -256,6 +256,77 @@ class AdapterUnknownOutcomeError(AdapterError):
     pass
 
 
+def is_connection_setup_error(exc: Exception) -> bool:
+    """Inspects exception chain for urllib3 / socket connection setup failures.
+
+    Distinguishes pre-write connection setup failures (e.g. DNS resolution failure,
+    connection refused) which are safe to retry as transient errors, from post-write
+    failures (e.g. connection reset by peer, dropped connection) which must be treated
+    as unknown outcome to prevent duplicate operations on remote systems.
+
+    Args:
+        exc: Exception raised by requests/urllib3/socket.
+
+    Returns:
+        True if the failure occurred strictly during connection setup before bytes were sent.
+    """
+    setup_types: list[type[Exception]] = [ConnectionRefusedError]
+    try:
+        import socket
+
+        setup_types.append(socket.gaierror)
+    except ImportError:
+        pass
+
+    try:
+        import urllib3.exceptions
+
+        setup_types.extend(
+            [
+                urllib3.exceptions.NewConnectionError,
+                urllib3.exceptions.NameResolutionError,
+                urllib3.exceptions.ConnectTimeoutError,
+            ]
+        )
+    except ImportError:
+        pass
+
+    try:
+        import requests.exceptions
+
+        setup_types.append(requests.exceptions.ConnectTimeout)
+    except ImportError:
+        pass
+
+    types_tuple = tuple(setup_types)
+
+    curr: Any = exc
+    visited: set[int] = set()
+    while curr is not None and id(curr) not in visited:
+        visited.add(id(curr))
+        if isinstance(curr, types_tuple):
+            return True
+        reason = getattr(curr, "reason", None)
+        if reason is not None and isinstance(reason, types_tuple):
+            return True
+        if reason is not None and isinstance(reason, Exception):
+            curr = reason
+            continue
+        if hasattr(curr, "args") and curr.args:
+            first = curr.args[0]
+            if isinstance(first, types_tuple):
+                return True
+            first_reason = getattr(first, "reason", None)
+            if first_reason is not None and isinstance(first_reason, types_tuple):
+                return True
+            if isinstance(first, Exception):
+                curr = first
+                continue
+        curr = getattr(curr, "__cause__", None) or getattr(curr, "__context__", None)
+
+    return False
+
+
 # ---------------------------------------------------------------------------
 # 3. Base Destination Adapter Abstract Contract
 # ---------------------------------------------------------------------------

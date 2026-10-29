@@ -31,6 +31,7 @@ from utils.adapters.base import (
     BaseDestinationAdapter,
     DispatchPayload,
     DispatchResult,
+    is_connection_setup_error,
 )
 from utils.adapters.crm_format import build_hubspot_payload
 from utils.config import ConfigError, get_config
@@ -305,10 +306,23 @@ class CRMAdapter(BaseDestinationAdapter):
                 "/crm/v3/objects/contacts",
                 json_data=contact_payload,
             )
-        except requests.exceptions.ReadTimeout as exc:
-            raise AdapterUnknownOutcomeError("crm_network_timeout") from exc
+        except requests.exceptions.SSLError as exc:
+            logger.error(
+                "dispatch_ssl_error email_id=%s reason=crm_ssl_error", payload.email_id
+            )
+            raise AdapterPermanentError("crm_ssl_error") from exc
+        except requests.exceptions.ConnectTimeout as exc:
+            logger.warning("dispatch_connect_timeout email_id=%s", payload.email_id)
+            raise AdapterTransientError("crm_connect_timeout") from exc
         except requests.exceptions.ConnectionError as exc:
-            raise AdapterTransientError("crm_connection_failed") from exc
+            if is_connection_setup_error(exc):
+                logger.warning("dispatch_connection_failed email_id=%s", payload.email_id)
+                raise AdapterTransientError("crm_connection_failed") from exc
+            logger.error("dispatch_connection_error email_id=%s", payload.email_id)
+            raise AdapterUnknownOutcomeError("crm_connection_error") from exc
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ChunkedEncodingError) as exc:
+            logger.error("dispatch_network_timeout email_id=%s", payload.email_id)
+            raise AdapterUnknownOutcomeError("crm_network_timeout") from exc
         except AdapterError:
             raise
         except requests.RequestException as exc:
@@ -351,8 +365,10 @@ class CRMAdapter(BaseDestinationAdapter):
 
         if status == 429:
             raise AdapterTransientError("crm_rate_limited")
-        if status in (502, 503, 504):
+        if status == 503:
             raise AdapterTransientError("crm_service_unavailable")
+        if 500 <= status < 600:
+            raise AdapterUnknownOutcomeError(f"crm_server_error_{status}")
         if status in (400, 422):
             raise AdapterPermanentError("crm_validation_failed")
         if status in (401, 403):

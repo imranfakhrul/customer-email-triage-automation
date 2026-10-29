@@ -28,6 +28,7 @@ from utils.adapters.base import (
     BaseDestinationAdapter,
     DispatchPayload,
     DispatchResult,
+    is_connection_setup_error,
 )
 from utils.adapters.github_format import (
     build_issue_body,
@@ -39,45 +40,8 @@ from utils.config import get_config
 
 logger = logging.getLogger("utils.adapters.github_adapter")
 
-
-def _is_connection_setup_error(exc: Exception) -> bool:
-    """Inspects exception chain for urllib3 connection setup failures."""
-    setup_types: tuple[type[Exception], ...] = ()
-    try:
-        import urllib3.exceptions
-
-        setup_types = (
-            urllib3.exceptions.NewConnectionError,
-            urllib3.exceptions.NameResolutionError,
-        )
-    except ImportError:
-        return False
-
-    curr: Any = exc
-    visited: set[int] = set()
-    while curr is not None and id(curr) not in visited:
-        visited.add(id(curr))
-        if isinstance(curr, setup_types):
-            return True
-        reason = getattr(curr, "reason", None)
-        if reason is not None and isinstance(reason, setup_types):
-            return True
-        if reason is not None and isinstance(reason, Exception):
-            curr = reason
-            continue
-        if hasattr(curr, "args") and curr.args:
-            first = curr.args[0]
-            if isinstance(first, setup_types):
-                return True
-            first_reason = getattr(first, "reason", None)
-            if first_reason is not None and isinstance(first_reason, setup_types):
-                return True
-            if isinstance(first, Exception):
-                curr = first
-                continue
-        curr = getattr(curr, "__cause__", None) or getattr(curr, "__context__", None)
-
-    return False
+# Backward-compatible alias for canonical helper in utils.adapters.base
+_is_connection_setup_error = is_connection_setup_error
 
 
 class GitHubAdapter(BaseDestinationAdapter):

@@ -12,6 +12,7 @@ from utils.adapters.base import (
     BaseDestinationAdapter,
     DispatchPayload,
     DispatchResult,
+    is_connection_setup_error,
 )
 from utils.adapters.crm_adapter import CRMAdapter
 from utils.adapters.freescout_adapter import FreeScoutAdapter
@@ -190,6 +191,7 @@ __all__ = [
     "WebhookAdapter",
     "create_github_adapter",
     "get_adapter",
+    "is_connection_setup_error",
     "register_active_adapters",
     "register_adapter",
     "reset_adapters",

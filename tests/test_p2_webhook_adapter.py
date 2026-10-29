@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import requests
+import urllib3.exceptions
 
 from utils.adapters.base import (
     AdapterPermanentError,
@@ -209,7 +210,9 @@ def test_webhook_dispatch_timeout_unknown_outcome():
 
 def test_webhook_dispatch_connection_failed_transient():
     mock_session = MagicMock()
-    mock_session.request.side_effect = requests.exceptions.ConnectionError("Connection dropped")
+    mock_session.request.side_effect = requests.exceptions.ConnectionError(
+        urllib3.exceptions.NewConnectionError(None, "Connection refused")
+    )
 
     adapter = WebhookAdapter(
         target="https://events.example.com/alerts",
