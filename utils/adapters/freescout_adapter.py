@@ -370,10 +370,20 @@ class FreeScoutAdapter(BaseDestinationAdapter):
                     raise AdapterTransientError("freescout_rate_limited")
                 elif res.status_code == 503:
                     raise AdapterTransientError("freescout_service_unavailable")
-                elif res.status_code == 422:
-                    raise AdapterPermanentError("freescout_validation_failed")
-                elif res.status_code in (401, 403):
-                    raise AdapterPermanentError("freescout_auth_failed")
+                elif 500 <= res.status_code < 600:
+                    raise AdapterUnknownOutcomeError(
+                        f"freescout_server_error_{res.status_code}"
+                    )
+                elif 400 <= res.status_code < 500:
+                    if res.status_code == 422:
+                        raise AdapterPermanentError("freescout_validation_failed")
+                    if res.status_code in (401, 403):
+                        raise AdapterPermanentError("freescout_auth_failed")
+                    raise AdapterPermanentError(f"freescout_http_{res.status_code}")
+                else:
+                    raise AdapterUnknownOutcomeError(
+                        f"freescout_unexpected_status_{res.status_code}"
+                    )
 
         # 2. Create New Conversation
         record = (

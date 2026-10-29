@@ -97,4 +97,5 @@ falling back to raw customer text when masked_body is empty; mailbox re-fetch sw
 re-masking high-risk secrets; collapsing auth headers into a dict allowing injected headers to override Google
 MTA; naive substring matching on auth results; synthetic customer addresses constructed on customer
 domains routing agent replies to third-party mailboxes; blind-retrying on post-write connection resets
-and ambiguous 5xx errors instead of classifying as unknown outcome.
+and ambiguous 5xx errors instead of classifying as unknown outcome; unhandled HTTP errors in thread
+append falling through to create duplicate conversations.

@@ -145,7 +145,7 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/mailbox/gmail_connector.py`: Gmail REST API connector with OAuth lifecycle, MIME parsing, and spoof-resistant SPF/DKIM/DMARC verification (topmost mx.google.com enforcement, token parsing).
 - `scripts/renew_mailbox_watch.py`: Standalone CLI utility for Gmail Cloud Pub/Sub watch setup and automated 7-day renewal.
 - `utils/adapters/freescout_format.py`: Formatting, HTML sanitization, RFC 2606 non-routable fallback domain (`@invalid`), and anchored marker parser for FreeScout ticket payloads.
-- `utils/adapters/freescout_adapter.py`: FreeScout Helpdesk adapter with thread continuity and deduplication pre-check.
+- `utils/adapters/freescout_adapter.py`: FreeScout Helpdesk adapter with thread continuity, deduplication pre-check, and zero-fallthrough error handling.
 - `utils/adapters/crm_format.py`: Formatting, formula injection defanging, freemail filtering, and lead scoring for CRM lead ingestion.
 - `utils/adapters/crm_adapter.py`: HubSpot CRM adapter with duplicate pre-checking and 409 conflict collision recovery.
 - `utils/adapters/webhook_format.py`: Formatting, cryptographic HMAC-SHA256 signing, alert classification, and Slack Block Kit payload builder for emergency alerts.
