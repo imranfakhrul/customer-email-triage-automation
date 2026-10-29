@@ -21,10 +21,11 @@ Each issue is implemented individually with corresponding unit tests, verified a
 1. **Track 0: Architectural Decisions & Client Alignment:** `P2-00` ✅ (Delivered in `docs/phase2_decisions.md`)
 2. **Track 1: Intelligence Classification Engine:** `P2-01` ✅ (Deep Classifier) ➔ `P2-02` ✅ (HITL Review Queue)
 3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04a` ✅ (GitHub Formatting & Schema) ➔ `P2-04b` ✅ (GitHub Adapter & Remote Precheck) ➔ `P2-05` ✅ (FreeScout) ➔ `P2-06` ✅ (CRM) ➔ `P2-07` ✅ (Webhook)
-4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` ✅ (LangGraph Integration) ➔ `P2-09` ✅ (Queue Worker) ➔ `P2-10` ✅ (Benchmark Dataset) ➔ `P2-11` (Operational Docs)
-5. **Track 4: Mailbox Ingestion Connector:** `P2-12` (Gmail Pub/Sub Connector)
+4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` ✅ (LangGraph Integration) ➔ `P2-09` ✅ (Queue Worker) ➔ `P2-10` ✅ (Benchmark Dataset) ➔ `P2-11` ✅ (Operational Docs)
+5. **Track 4: Mailbox Ingestion Connector:** `P2-12` ✅ (Gmail Pub/Sub Connector)
+6. **Track 5: Post-Review Production Remediation (PRR):** 13 Atomic Commits: `PRR-01` ⏳ (Item 1: Stuck Approvals) ➔ `PRR-02` ⏳ (Item 2: Adapter Registration) ➔ `PRR-03` ⏳ (Item 3: Worker States) ➔ `PRR-04` ⏳ (Flow E2E Test) ➔ `PRR-05` ⏳ (Item 5: Unmasker Privacy) ➔ `PRR-06` ⏳ (Item 4: Gmail Spoof Guard) ➔ `PRR-07` ⏳ (Item 6: Fallback Domain) ➔ `PRR-08` ⏳ (Item 8: Post-Write Idempotency) ➔ `PRR-09` ⏳ (Item 9: FreeScout Fallthrough) ➔ `PRR-10` ⏳ (Item 10: HITL Reconcile) ➔ `PRR-11` ⏳ (Item 7: Webhook Allowlist) ➔ `PRR-12` ⏳ (Worker & Classifier Guards) ➔ `PRR-13` ⏳ (Gmail Auth Refresh & Pagination)
 
-**Next Immediate Task:** `P2-11` (`docs(phase2): [P2-11] complete phase 2 documentation, architecture diagrams, and operator runbooks`).
+**Next Immediate Task:** `PRR-01` (`fix(hitl): [PRR-01] pass through human approvals directly to dispatcher without re-gating`).
 
 ---
 
@@ -870,3 +871,131 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
   6. Modularity & Out-of-Scope Statement:
      - Defines abstract `BaseMailboxConnector`. If client environment utilizes Microsoft 365, IMAP, or external webhook push, the connector can be substituted without altering pipeline logic.
 * **Done When:** Unit tests verify OAuth credential handling, Pub/Sub message parsing, history sync, SPF/DKIM header extraction, and original text re-fetch with mock Gmail API.
+
+---
+
+## 🛠️ Phase 2 Post-Review Production Remediation Roadmap (PRR-01 to PRR-13)
+
+This roadmap incorporates the 10 code review findings and lower-priority operational cleanups, organized **1-by-1** in the recommended execution order:
+**1 → 2 → 3 (Flow Fixes) · 5, 4, 6 (Privacy & Security) · 8, 9, 10 (Idempotency) · 7 & Lower-Priority Items (Configuration & Cleanups).**
+
+### Remediation Commit Matrix (1-by-1 Atomic Commits)
+
+| # | Code | Group | Scope & Commit Description | Target Files | Status |
+|:---:|:---:|:---|:---|:---|:---:|
+| **1** | **PRR-01** | Flow (Item 1) | `fix(hitl): [PRR-01] pass through human approvals directly to dispatcher without re-gating` | `nodes/hitl_queue.py`, `scripts/phase2_worker.py`, `tests/test_p2_prr_01_hitl_approval.py` | ⏳ Pending |
+| **2** | **PRR-02** | Flow (Item 2) | `fix(dispatcher): [PRR-02] auto-register active production adapters at startup and on demand` | `utils/adapters/__init__.py`, `nodes/dispatcher.py`, `scripts/phase2_worker.py`, `tests/test_p2_prr_02_adapter_registry.py` | ⏳ Pending |
+| **3** | **PRR-03** | Flow (Item 3) | `fix(worker): [PRR-03] handle deferred and dead-letter dispatches with retryable job states` | `scripts/phase2_worker.py`, `db/database.py`, `tests/test_p2_prr_03_worker_states.py` | ⏳ Pending |
+| **4** | **PRR-04** | Flow (E2E) | `test(e2e): [PRR-04] integration test asserting human approval to worker dispatch to confirmed ledger flow` | `tests/test_p2_prr_04_e2e_approval_flow.py` | ⏳ Pending |
+| **5** | **PRR-05** | Security (Item 5) | `fix(unmasker): [PRR-05] fail closed on missing masked text and re-scrub secrets on mailbox re-fetch` | `utils/unmasker.py`, `tests/test_p2_prr_05_unmasker_secrets.py` | ⏳ Pending |
+| **6** | **PRR-06** | Security (Item 4) | `fix(mailbox): [PRR-06] enforce topmost mx.google.com authentication-results header and token parsing` | `utils/mailbox/gmail_connector.py`, `tests/test_p2_prr_06_gmail_auth.py` | ⏳ Pending |
+| **7** | **PRR-07** | Security (Item 6) | `fix(freescout): [PRR-07] enforce non-routable invalid domain for synthetic customer fallback` | `utils/adapters/freescout_format.py`, `tests/test_p2_prr_07_freescout_domain.py` | ⏳ Pending |
+| **8** | **PRR-08** | Idempotency (Item 8) | `fix(adapters): [PRR-08] split connection setup errors from post-write resets to prevent blind retries` | `utils/adapters/base.py`, `utils/adapters/webhook_adapter.py`, `utils/adapters/freescout_adapter.py`, `utils/adapters/crm_adapter.py`, `tests/test_p2_prr_08_post_write_retry.py` | ⏳ Pending |
+| **9** | **PRR-09** | Idempotency (Item 9) | `fix(freescout): [PRR-09] eliminate thread append unhandled error fallthrough to new conversation` | `utils/adapters/freescout_adapter.py`, `tests/test_p2_prr_09_freescout_fallthrough.py` | ⏳ Pending |
+| **10** | **PRR-10** | Idempotency (Item 10) | `feat(hitl): [PRR-10] add hitl_cli reconcile command to resolve unknown-outcome outbox rows` | `scripts/hitl_cli.py`, `docs/hitl_runbook.md`, `tests/test_p2_prr_10_hitl_reconcile.py` | ⏳ Pending |
+| **11** | **PRR-11** | Config (Item 7) | `fix(webhook): [PRR-11] strictly enforce config host allowlist and require non-empty hmac secret` | `utils/adapters/webhook_adapter.py`, `utils/adapters/webhook_format.py`, `tests/test_p2_prr_11_webhook_allowlist.py` | ⏳ Pending |
+| **12** | **PRR-12** | Cleanups (Worker/Classifier) | `fix(worker): [PRR-12] protect config immutability, worker CAS guard, and classifier empty fail-closed` | `scripts/phase2_worker.py`, `db/database.py`, `nodes/classifier.py`, `nodes/dispatcher.py`, `tests/test_p2_prr_12_operational_guards.py` | ⏳ Pending |
+| **13** | **PRR-13** | Cleanups (Gmail Auth) | `fix(mailbox): [PRR-13] add gmail 401 token refresh retry and history pagination` | `utils/mailbox/gmail_connector.py`, `tests/test_p2_prr_13_gmail_lifecycle.py` | ⏳ Pending |
+
+---
+
+### Detailed Specifications for PRR Commits (PRR-01 through PRR-13)
+
+#### [PRR-01] Human Approval Pass-Through Routing (Item 1)
+* **Status:** ⏳ Pending
+* **Scope:** `nodes/hitl_queue.py`, `scripts/phase2_worker.py`, `tests/test_p2_prr_01_hitl_approval.py`
+* **Problem:** Approved emails in `hitl_resolved` state are currently re-evaluated by `classifier_node` and `hitl_queue_node`. The node re-flags them as `pending`, terminating execution before `dispatcher_node` and resetting the job back to `hitl_pending` in `p2_jobs`.
+* **Solution:**
+  1. In `nodes/hitl_queue.py`, inspect prior approval state: if `hitl_status == 'approved'`, return `hitl_status: "approved"` and pass directly through to `dispatcher_node` without re-evaluating gating conditions or making LLM calls.
+  2. In `scripts/phase2_worker.py`, pass `hitl_status = "approved"` when claiming `hitl_resolved` jobs.
+* **Done When:** Unit tests verify that pre-approved jobs traverse `hitl_queue_node` to `dispatcher_node` without re-entering `hitl_pending`.
+
+#### [PRR-02] Production Destination Adapter Registration (Item 2)
+* **Status:** ⏳ Pending
+* **Scope:** `utils/adapters/__init__.py`, `nodes/dispatcher.py`, `scripts/phase2_worker.py`, `tests/test_p2_prr_02_adapter_registry.py`
+* **Problem:** `_ADAPTER_REGISTRY` is only populated in tests. In production (`dispatch.dry_run: false`), `dispatcher_node` fails to find adapters and defers every action with `adapter_unavailable`.
+* **Solution:**
+  1. Implement `register_default_adapters(config)` in `utils/adapters/__init__.py` registering enabled adapters at startup (`phase2_worker.py`, `main.py`).
+  2. In `nodes/dispatcher.py:resolve_adapter`, add fallback on-demand registration so uninitialized destinations resolve automatically.
+* **Done When:** Tests verify that live dispatches find registered adapters from config without `adapter_unavailable` deferrals.
+
+#### [PRR-03] Worker Job State Mapping for Deferred and Failed Dispatches (Item 3)
+* **Status:** ⏳ Pending
+* **Scope:** `scripts/phase2_worker.py`, `db/database.py`, `tests/test_p2_prr_03_worker_states.py`
+* **Problem:** `phase2_worker.py` maps unhandled statuses to `done` via an `else:` branch, silently dropping emails deferred by daily caps, kill switches, or circuit breakers.
+* **Solution:**
+  1. In `phase2_worker.py`, explicitly map `deferred` to `unclaimed` (retryable on subsequent worker cycles) and `dead_letter` to `dead_letter`.
+  2. Ensure transient failed jobs are reclaimed up to `max_retries`.
+* **Done When:** Tests assert that deferred dispatches remain retryable in `p2_jobs` and are not marked `done`.
+
+#### [PRR-04] End-to-End Approval to Confirmed Outbox Flow (Verification)
+* **Status:** ⏳ Pending
+* **Scope:** `tests/test_p2_prr_04_e2e_approval_flow.py`
+* **Problem:** Need automated test asserting the complete flow: review item creation ➔ `hitl_cli approve` ➔ worker cycle ➔ destination dispatch ➔ `confirmed` outbox ledger row.
+* **Solution:** Implement full integration test running the exact production lifecycle without mocked shortcuts.
+* **Done When:** Test runs approval, executes worker cycle, and asserts `confirmed` outbox row in SQLite.
+
+#### [PRR-05] Unmasker Missing Text Safeguard & Re-Fetch Secret Scrubbing (Item 5)
+* **Status:** ⏳ Pending
+* **Scope:** `utils/unmasker.py`, `tests/test_p2_prr_05_unmasker_secrets.py`
+* **Problem:** `utils/unmasker.py` falls back to raw text fields if `masked_body` is missing. Re-fetching via `mailbox_fetcher` inserts raw unmasked text directly, skipping the secret filter.
+* **Solution:** Enforce Invariant 5: read only `masked_*`; if missing, fail closed immediately. When re-fetching original email via `mailbox_fetcher`, scrub high-risk secrets (`CREDIT_CARD`, `SSN`, `IBAN`, `API_KEY`) before selectively restoring allowed contact entities.
+* **Done When:** Tests assert missing masked text raises error, and re-fetched email bodies retain high-risk secret masks.
+
+#### [PRR-06] Gmail SPF/DKIM/DMARC Header Spoof Defense (Item 4)
+* **Status:** ⏳ Pending
+* **Scope:** `utils/mailbox/gmail_connector.py`, `tests/test_p2_prr_06_gmail_auth.py`
+* **Problem:** Collapsing headers into a dict overwrites Google's authentic header with lower attacker-injected headers. Substring checks match within comments.
+* **Solution:** Inspect headers in transmission order, extracting exclusively the topmost `Authentication-Results` header where `authserv-id` begins with `mx.google.com`. Parse exact key-value tokens with bounded regexes.
+* **Done When:** Tests verify attacker headers injected lower down are ignored, and valid Google auth headers evaluate accurately.
+
+#### [PRR-07] FreeScout Non-Routable Fallback Domain (Item 6)
+* **Status:** ⏳ Pending
+* **Scope:** `utils/adapters/freescout_format.py`, `tests/test_p2_prr_07_freescout_domain.py`
+* **Problem:** When unmasking is disabled or sender email is absent, `freescout_format.py` constructs `triage+{email_id}@{sender_domain}`, creating routable addresses on third-party domains (e.g. `gmail.com`).
+* **Solution:** Fall back strictly to the RFC 2606 reserved non-routable domain `triage+{email_id}@customer.invalid`.
+* **Done When:** Tests verify synthetic addresses always terminate with `@customer.invalid`.
+
+#### [PRR-08] Error Classification: Connection Setup vs Post-Write Resets (Item 8)
+* **Status:** ⏳ Pending
+* **Scope:** `utils/adapters/base.py`, `utils/adapters/webhook_adapter.py`, `utils/adapters/freescout_adapter.py`, `utils/adapters/crm_adapter.py`, `tests/test_p2_prr_08_post_write_retry.py`
+* **Problem:** Catching all `ConnectionError` exceptions and raising `AdapterTransientError` blind-retries requests where bytes were already written to the server.
+* **Solution:** Adopt `is_connection_setup_error` from `utils/adapters/base.py` across all adapters. Only connection-setup failures raise `AdapterTransientError`; post-write connection resets and ambiguous 5xx errors raise `AdapterUnknownOutcomeError`.
+* **Done When:** Tests verify connection resets after request write are classified as unknown outcome, preventing duplicate retries.
+
+#### [PRR-09] FreeScout Thread Append Fallthrough Elimination (Item 9)
+* **Status:** ⏳ Pending
+* **Scope:** `utils/adapters/freescout_adapter.py`, `tests/test_p2_prr_09_freescout_fallthrough.py`
+* **Problem:** In `freescout_adapter.py:append_thread`, unhandled HTTP status codes (500, 502, 504, 400) fall through to `# 2. Create New Conversation`, issuing a second request that creates duplicate tickets.
+* **Solution:** Add an explicit `else:` clause raising `AdapterUnknownOutcomeError` on 5xx or `AdapterPermanentError` on 4xx, preventing fallthrough.
+* **Done When:** Tests verify thread append 500/502 errors never fall through to create new conversations.
+
+#### [PRR-10] Operator CLI Reconciliation for Unknown-Outcome Outbox Rows (Item 10)
+* **Status:** ⏳ Pending
+* **Scope:** `scripts/hitl_cli.py`, `docs/hitl_runbook.md`, `tests/test_p2_prr_10_hitl_reconcile.py`
+* **Problem:** When an outbox ledger row enters `unknown` state, `dispatcher_node` diverts it to HITL. `scripts/hitl_cli.py` has no command to resolve unknown outcomes, causing infinite loops between HITL and dispatcher.
+* **Solution:** Add `reconcile` subcommand to `scripts/hitl_cli.py` (`hitl_cli reconcile <email_id> --destination <dest> --status <confirmed|failed> --by <operator> [--remote-id <id>]`) calling `db.resolve_unknown_dispatch()`. Update `docs/hitl_runbook.md`.
+* **Done When:** CLI tests verify `reconcile` transitions ledger row to `confirmed` or `failed` and allows pipeline to finish.
+
+#### [PRR-11] Webhook Config Host Allowlist Enforcement & Secret Validation (Item 7)
+* **Status:** ⏳ Pending
+* **Scope:** `utils/adapters/webhook_adapter.py`, `utils/adapters/webhook_format.py`, `tests/test_p2_prr_11_webhook_allowlist.py`
+* **Problem:** `webhook_adapter.py` automatically injects `target_host` into `_allowed_hosts`, making allowlisting ineffective. It also allows empty secrets, transmitting empty HMAC signatures.
+* **Solution:** Strictly enforce `allowed_hosts` from configuration without adding `target_host`. Validate that `WEBHOOK_SECRET_KEY` is configured and non-empty in `validate_config()`.
+* **Done When:** Tests verify unlisted webhook hosts are rejected, and empty secret keys fail validation.
+
+#### [PRR-12] Worker Config Isolation, CAS Guard, and Empty Body Fail-Closed (Cleanups)
+* **Status:** ⏳ Pending
+* **Scope:** `scripts/phase2_worker.py`, `db/database.py`, `nodes/classifier.py`, `nodes/dispatcher.py`, `tests/test_p2_prr_12_operational_guards.py`
+* **Problem:** Worker mutates cached config; `finish_p2_job` lacks CAS check; classifier only checks `is None` allowing empty strings.
+* **Solution:** Deepcopy config in `phase2_worker.py`; add `AND (worker_id = ? OR worker_id IS NULL)` to `finish_p2_job`; fail closed in `classifier_node` if `not masked_subject or not masked_body`; enforce single trial probe in circuit breaker.
+* **Done When:** Tests assert worker config isolation, concurrent worker overwrite prevention, and empty body classifier fail-closed.
+
+#### [PRR-13] Gmail Ingestion Auth Refresh & Pagination (Cleanups)
+* **Status:** ⏳ Pending
+* **Scope:** `utils/mailbox/gmail_connector.py`, `tests/test_p2_prr_13_gmail_lifecycle.py`
+* **Problem:** `fetch_new_messages` lacks 401 token refresh retry and ignores `nextPageToken`.
+* **Solution:** On HTTP 401, refresh OAuth token and retry once; iterate on `nextPageToken` up to 5 pages.
+* **Done When:** Tests verify automatic 401 token refresh and multi-page history synchronization.
+
+
