@@ -74,19 +74,17 @@ class WebhookAdapter(BaseDestinationAdapter):
             cfg.get("request_timeout_seconds", request_timeout_seconds)
         )
 
-        # Host allowlist derivation
-        parsed_target = urlparse(self._target)
-        target_host = (parsed_target.hostname or "").lower()
+        # Host allowlist derivation: strictly enforce explicit parameter or config.yaml list
         if allowed_hosts is not None:
             self._allowed_hosts = [h.lower() for h in allowed_hosts]
         else:
             cfg_hosts = cfg.get("allowed_hosts")
-            hosts_set: set[str] = set()
             if cfg_hosts and isinstance(cfg_hosts, list):
-                hosts_set.update(h.lower() for h in cfg_hosts)
-            if target_host:
-                hosts_set.add(target_host)
-            self._allowed_hosts = sorted(hosts_set)
+                self._allowed_hosts = sorted(
+                    {h.lower() for h in cfg_hosts if isinstance(h, str) and h.strip()}
+                )
+            else:
+                self._allowed_hosts = []
 
         self._session = session or requests.Session()
 
@@ -105,7 +103,7 @@ class WebhookAdapter(BaseDestinationAdapter):
         return os.environ.get(self._secret_env, "").strip()
 
     def validate_config(self) -> bool:
-        """Validates that destination target and allowed hosts are correctly configured."""
+        """Validates that destination target, allowed hosts, and signing secrets are configured."""
         if not self._target or not isinstance(self._target, str):
             return False
 
@@ -114,7 +112,11 @@ class WebhookAdapter(BaseDestinationAdapter):
             return False
 
         hostname = (parsed.hostname or "").lower()
-        return bool(hostname and hostname in self._allowed_hosts)
+        if not hostname or hostname not in self._allowed_hosts:
+            return False
+
+        secret = self._get_secret_key()
+        return bool(secret and secret.strip())
 
     def health_check(self) -> bool:
         """Checks configuration readiness for webhook dispatch."""

@@ -145,6 +145,7 @@ def test_webhook_dispatch_429_transient_error():
     adapter = WebhookAdapter(
         target="https://events.example.com/alerts",
         secret_key="sec",
+        allowed_hosts=["events.example.com"],
         session=mock_session,
     )
     with pytest.raises(AdapterTransientError) as exc_info:
@@ -159,6 +160,7 @@ def test_webhook_dispatch_503_transient_error():
     adapter = WebhookAdapter(
         target="https://events.example.com/alerts",
         secret_key="sec",
+        allowed_hosts=["events.example.com"],
         session=mock_session,
     )
     with pytest.raises(AdapterTransientError) as exc_info:
@@ -173,6 +175,7 @@ def test_webhook_dispatch_400_permanent_error():
     adapter = WebhookAdapter(
         target="https://events.example.com/alerts",
         secret_key="sec",
+        allowed_hosts=["events.example.com"],
         session=mock_session,
     )
     with pytest.raises(AdapterPermanentError) as exc_info:
@@ -187,6 +190,7 @@ def test_webhook_dispatch_401_permanent_error():
     adapter = WebhookAdapter(
         target="https://events.example.com/alerts",
         secret_key="sec",
+        allowed_hosts=["events.example.com"],
         session=mock_session,
     )
     with pytest.raises(AdapterPermanentError) as exc_info:
@@ -201,6 +205,7 @@ def test_webhook_dispatch_timeout_unknown_outcome():
     adapter = WebhookAdapter(
         target="https://events.example.com/alerts",
         secret_key="sec",
+        allowed_hosts=["events.example.com"],
         session=mock_session,
     )
     with pytest.raises(AdapterUnknownOutcomeError) as exc_info:
@@ -217,6 +222,7 @@ def test_webhook_dispatch_connection_failed_transient():
     adapter = WebhookAdapter(
         target="https://events.example.com/alerts",
         secret_key="sec",
+        allowed_hosts=["events.example.com"],
         session=mock_session,
     )
     with pytest.raises(AdapterTransientError) as exc_info:

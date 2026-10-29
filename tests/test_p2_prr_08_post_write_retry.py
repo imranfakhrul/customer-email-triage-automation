@@ -101,6 +101,7 @@ class TestWebhookAdapterErrorClassification:
         adapter = WebhookAdapter(
             target="https://events.example.com/alerts",
             secret_key="secret",
+            allowed_hosts=["events.example.com"],
             session=mock_session,
         )
         with pytest.raises(AdapterTransientError) as exc_info:
@@ -115,6 +116,7 @@ class TestWebhookAdapterErrorClassification:
         adapter = WebhookAdapter(
             target="https://events.example.com/alerts",
             secret_key="secret",
+            allowed_hosts=["events.example.com"],
             session=mock_session,
         )
         with pytest.raises(AdapterUnknownOutcomeError) as exc_info:
@@ -127,6 +129,7 @@ class TestWebhookAdapterErrorClassification:
         adapter = WebhookAdapter(
             target="https://events.example.com/alerts",
             secret_key="secret",
+            allowed_hosts=["events.example.com"],
             session=mock_session,
         )
         with pytest.raises(AdapterUnknownOutcomeError):
@@ -138,6 +141,7 @@ class TestWebhookAdapterErrorClassification:
         adapter = WebhookAdapter(
             target="https://events.example.com/alerts",
             secret_key="secret",
+            allowed_hosts=["events.example.com"],
             session=mock_session,
         )
         with pytest.raises(AdapterUnknownOutcomeError):

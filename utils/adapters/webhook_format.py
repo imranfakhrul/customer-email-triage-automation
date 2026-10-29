@@ -29,9 +29,9 @@ def compute_hmac_signature(payload_bytes: bytes, secret: str) -> str:
     Returns:
         String signature 'sha256=<hex>' or empty string if secret is empty.
     """
-    if not secret or not payload_bytes:
+    if not secret or not secret.strip() or not payload_bytes:
         return ""
-    digest = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()
+    digest = hmac.new(secret.strip().encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()
     return f"sha256={digest}"
 
 

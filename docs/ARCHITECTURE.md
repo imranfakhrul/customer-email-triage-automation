@@ -149,7 +149,7 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/adapters/crm_format.py`: Formatting, formula injection defanging, freemail filtering, and lead scoring for CRM lead ingestion.
 - `utils/adapters/crm_adapter.py`: HubSpot CRM adapter with duplicate pre-checking and 409 conflict collision recovery.
 - `utils/adapters/webhook_format.py`: Formatting, cryptographic HMAC-SHA256 signing, alert classification, and Slack Block Kit payload builder for emergency alerts.
-- `utils/adapters/webhook_adapter.py`: Webhook alert adapter with cryptographic HMAC signing, dual payload formatting, and rate-limiting retry classification.
+- `utils/adapters/webhook_adapter.py`: Webhook alert adapter with strict host allowlist enforcement, mandatory HMAC secret validation, dual payload formatting, and rate-limiting retry classification.
 - `pipeline.py`: LangGraph StateGraph builder compiling Phase 1, Phase 2 unified, and standalone worker pipeline topologies.
 - `db/database.py`: SQLite idempotency store, retry tracking, and review resolution.
 - `scripts/phase2_worker.py`: Background worker daemon executing atomic queue intake, batch claiming, and crash recovery.
