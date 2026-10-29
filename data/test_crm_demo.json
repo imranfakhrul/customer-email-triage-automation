@@ -1,0 +1,11 @@
+{
+  "email_id": "em_live_crm_003",
+  "message_id": "<20261029.live.demo003@cyberdyne.com>",
+  "thread_id": "thread_live_crm_003",
+  "sender_email": "sarah.connor@cyberdyne.com",
+  "sender_domain": "cyberdyne.com",
+  "email_subject": "Enterprise Demo Request: Automated triage platform for 500 agents",
+  "email_body": "Hi Sales Team,\n\nWe are looking to adopt your email triage automation platform across our 500 support agents at Cyberdyne Systems.\nCould we please schedule a 30-minute product demo this Friday to discuss enterprise deployment?\n\nContact me at +1 555-0199 or email me back.\n\nBest regards,\nSarah Connor\nDirector of Operations, Cyberdyne Systems",
+  "has_attachments": false,
+  "auth_status": "pass"
+}

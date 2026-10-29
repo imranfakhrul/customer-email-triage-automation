@@ -250,3 +250,50 @@ def test_crm_dispatch_from_record_with_unmask_pii_sends_real_customer_email():
     assert props["lastname"] == "Doe"
     assert props["phone"] == "+1-555-0144"
 
+
+def test_crm_400_property_doesnt_exist_prunes_and_recovers_contact():
+    """Verify that 400 PROPERTY_DOESNT_EXIST prunes unconfigured custom properties and retries."""
+    mock_session = MagicMock()
+    # 1. Pre-check GET returns 404
+    get_res = MagicMock(status_code=404)
+
+    # 2. First POST returns 400 with missing properties
+    err_res = MagicMock(status_code=400)
+    err_res.json.return_value = {
+        "status": "error",
+        "errors": [
+            {
+                "code": "PROPERTY_DOESNT_EXIST",
+                "context": {"propertyName": ["lead_score"]},
+            },
+            {
+                "code": "PROPERTY_DOESNT_EXIST",
+                "context": {"propertyName": ["triage_idempotency_key"]},
+            },
+        ],
+    }
+
+    # 3. Second POST returns 201 Created
+    ok_res = MagicMock(status_code=201)
+    ok_res.json.return_value = {"id": "999888"}
+
+    mock_session.request.side_effect = [get_res, err_res, ok_res]
+
+    adapter = CRMAdapter(
+        target="https://api.hubapi.com",
+        api_key="test-api-key",
+        session=mock_session,
+    )
+    payload = _make_payload()
+    result = adapter.dispatch(payload)
+
+    assert result.remote_id == "crm:999888"
+    assert mock_session.request.call_count == 3
+    # Verify retry POST did not contain the missing properties
+    retry_call = mock_session.request.call_args_list[2]
+    retry_props = (retry_call.kwargs.get("json") or retry_call[1].get("json"))["properties"]
+    assert "lead_score" not in retry_props
+    assert "triage_idempotency_key" not in retry_props
+    assert "email" in retry_props
+
+

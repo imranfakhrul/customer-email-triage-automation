@@ -136,7 +136,7 @@ Customer-Email-Triage-Automation/
 │   └── webhook_smoke_test.py # Sandbox smoke test for Slack/Generic webhook adapter
 ├── test/ -> tests/e2e_pipeline_cases # Direct symlink for test case exploration
 ├── test_cases/ -> tests/e2e_pipeline_cases # Showcase test cases for client demo
-├── tests/                    # Comprehensive unit and integration test suite (701 tests)
+├── tests/                    # Comprehensive unit and integration test suite (702 tests)
 │   ├── conftest.py           # Test isolation fixtures & network egress guards
 │   ├── e2e_pipeline_cases/   # 6 end-to-end showcase test folders with full traces
 │   │   ├── 01_github_issue/  # GitHub bug report case (500 Internal Server Error)
@@ -359,7 +359,7 @@ python -m spacy download en_core_web_sm
 # 3. Configure environment
 cp .env.example .env
 
-# 4. Run automated test suite (701 tests, 100% passing)
+# 4. Run automated test suite (702 tests, 100% passing)
 pytest tests/ -v
 
 # 5. Run the Phase 1 benchmark suite across all 100 pipeline scenarios (default: offline)
@@ -558,6 +558,13 @@ flowchart LR
 * **Selective Unmasking:** The adapter unmasks the real sender email, customer name, phone number, and corporate domain so sales reps have actionable contact details in HubSpot.
 * **Secret Protection:** Credit cards, SSNs, IBANs, and API keys are **permanently masked** and cannot leave the local pipeline.
 * **Spreadsheet Hardening:** All lead properties are defanged against CSV formula injection (`=`, `+`, `-`, `@`) to protect sales reps when exporting data to Excel or Google Sheets.
+
+### 4. Extensible CRM Workflows (Deals, Timeline Notes, Tasks, Company Linking)
+While core Phase 2 establishes the Contact / Lead foundation, the adapter is built to support deeper enterprise CRM workflows based on client requirements:
+* **Pipeline Deals & Opportunities:** Automatically open a new Deal in the sales pipeline (e.g., *"Acme Corp — 200 Seat Enterprise Deal"*) associated with the newly created contact.
+* **Timeline Activity Notes:** Pin the customer's incoming email request and AI summary directly onto the contact's activity timeline via HubSpot Engagements.
+* **Automated Follow-Up Tasks:** Automatically schedule follow-up reminders assigned to sales reps (e.g., *"Follow up with Sarah Connor within 24 hours"*).
+* **Company Record Linking:** Automatically associate the contact with an existing or newly created Company record based on domain authority.
 
 ---
 

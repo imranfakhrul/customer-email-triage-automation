@@ -363,6 +363,47 @@ class CRMAdapter(BaseDestinationAdapter):
                 return DispatchResult(remote_id=remote_id)
             raise AdapterPermanentError("crm_conflict_unresolved")
 
+        # Handle 400 with PROPERTY_DOESNT_EXIST by stripping unconfigured custom properties
+        if status == 400:
+            try:
+                err_data = res.json()
+                errors = err_data.get("errors", []) if isinstance(err_data, dict) else []
+                missing_props = [
+                    err.get("context", {}).get("propertyName", [""])[0]
+                    for err in errors
+                    if isinstance(err, dict)
+                    and err.get("code") == "PROPERTY_DOESNT_EXIST"
+                    and err.get("context", {}).get("propertyName")
+                ]
+                if (
+                    missing_props
+                    and isinstance(contact_payload, dict)
+                    and "properties" in contact_payload
+                ):
+                    for prop in missing_props:
+                        contact_payload["properties"].pop(prop, None)
+                    res = self._request(
+                        "POST",
+                        "/crm/v3/objects/contacts",
+                        json_data=contact_payload,
+                    )
+                    status = res.status_code
+                    if status == 201:
+                        data = res.json() if hasattr(res, "json") else {}
+                        contact_id = data.get("id") if isinstance(data, dict) else None
+                        if not contact_id and "Location" in res.headers:
+                            contact_id = res.headers["Location"].rstrip("/").split("/")[-1]
+                        if contact_id:
+                            remote_id = f"crm:{contact_id}"
+                            logger.info(
+                                "dispatch_created email_id=%s remote_id=%s",
+                                payload.email_id,
+                                remote_id,
+                            )
+                            return DispatchResult(remote_id=remote_id)
+            except (ValueError, KeyError, requests.RequestException, AdapterError) as exc:
+                logger.debug("crm_custom_property_fallback_failed class=%s", type(exc).__name__)
+
         if status == 429:
             raise AdapterTransientError("crm_rate_limited")
         if status == 503:

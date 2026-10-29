@@ -191,7 +191,7 @@ destinations:
       cooldown_seconds: 900
 
   crm:
-    enabled: false
+    enabled: true
     daily_cap: 500
     use_masked_text_only: false
     unmask_pii: true
