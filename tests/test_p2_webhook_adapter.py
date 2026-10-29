@@ -228,3 +228,15 @@ def test_webhook_dispatch_connection_failed_transient():
     with pytest.raises(AdapterTransientError) as exc_info:
         adapter.dispatch(_make_payload())
     assert "webhook_connection_failed" in str(exc_info.value)
+
+
+def test_webhook_adapter_target_env_resolution(monkeypatch):
+    """Assert WebhookAdapter prioritizes target_env environment variable when configured."""
+    monkeypatch.setenv("TEST_WEBHOOK_URL", "https://hooks.slack.com/services/T1/B2/secret")
+    adapter = WebhookAdapter(
+        target_env="TEST_WEBHOOK_URL",
+        secret_key="sec",
+        allowed_hosts=["hooks.slack.com"],
+    )
+    assert adapter._target == "https://hooks.slack.com/services/T1/B2/secret"
+

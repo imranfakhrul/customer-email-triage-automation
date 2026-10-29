@@ -24,6 +24,7 @@ and human/auto-approved emails to external systems (GitHub, FreeScout, CRM, Webh
 import contextlib
 import json
 import logging
+import os
 import secrets
 import sqlite3
 import time
@@ -181,7 +182,11 @@ def dispatcher_node(
 
     # 3. Mode, configuration, and stale pending resolution
     dispatch_cfg = config.get("dispatch", {}) if isinstance(config, dict) else {}
-    dry_run = bool(dispatch_cfg.get("dry_run", True))
+    env_dry_run = os.environ.get("DISPATCH_DRY_RUN")
+    if env_dry_run is not None:
+        dry_run = env_dry_run.strip().lower() not in ("false", "0", "no")
+    else:
+        dry_run = bool(dispatch_cfg.get("dry_run", True))
     mode = "dry_run" if dry_run else "live"
     pending_timeout_minutes = int(dispatch_cfg.get("pending_timeout_minutes", 10))
     max_attempts = int(dispatch_cfg.get("max_attempts", 3))

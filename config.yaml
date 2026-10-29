@@ -147,7 +147,7 @@ classification:
     timeout_seconds: 5.0
 
 dispatch:
-  dry_run: false
+  dry_run: true
   kill_switch: false
   max_attempts: 3
   pending_timeout_minutes: 10

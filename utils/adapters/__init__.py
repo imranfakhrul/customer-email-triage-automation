@@ -1,6 +1,7 @@
 """Thread-safe adapter registry and downstream service exports."""
 
 import logging
+import os
 import threading
 from typing import Any
 
@@ -149,8 +150,14 @@ def register_active_adapters(
                     ),
                 )
             elif name == "webhook":
+                target_env_var = dest_cfg.get("target_env")
+                env_target = (
+                    os.environ.get(target_env_var, "").strip() if target_env_var else ""
+                )
+                target_val = env_target or dest_cfg.get("target")
                 adapter = WebhookAdapter(
-                    target=dest_cfg.get("target"),
+                    target=target_val,
+                    target_env=target_env_var,
                     secret_env=dest_cfg.get("secret_env", "WEBHOOK_SECRET_KEY"),
                     unmask_pii=bool(dest_cfg.get("unmask_pii", False)),
                     allowed_hosts=dest_cfg.get("allowed_hosts"),
