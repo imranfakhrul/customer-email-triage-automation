@@ -75,7 +75,14 @@ def classifier_node(
     masked_subject = state.get("masked_subject")
     masked_body = state.get("masked_body")
 
-    if masked_subject is None or masked_body is None:
+    if (
+        not masked_subject
+        or not isinstance(masked_subject, str)
+        or not masked_subject.strip()
+        or not masked_body
+        or not isinstance(masked_body, str)
+        or not masked_body.strip()
+    ):
         logger.warning(
             f"[Node 06: Classifier] Email '{email_id}' missing masked text privacy safeguard triggered. Failing closed."
         )

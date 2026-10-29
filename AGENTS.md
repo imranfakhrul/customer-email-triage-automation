@@ -100,4 +100,7 @@ domains routing agent replies to third-party mailboxes; blind-retrying on post-w
 and ambiguous 5xx errors instead of classifying as unknown outcome; unhandled HTTP errors in thread
 append falling through to create duplicate conversations; missing CLI reconciliation for unknown-outcome
 outbox rows leaving dispatch failures trapped in infinite review loops; auto-injecting target host into
-webhook allowed_hosts bypassing allowlists; empty HMAC secrets allowed in webhook validation.
+webhook allowed_hosts bypassing allowlists; empty HMAC secrets allowed in webhook validation; worker mutating
+global cached config dictionaries; missing worker CAS check on job finalization allowing concurrent worker
+overwrites; whitespace-only masked bodies bypassing classifier privacy safeguards; circuit breaker half-open
+stampedes bypassing single trial probe.

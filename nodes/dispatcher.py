@@ -484,6 +484,34 @@ def dispatcher_node(
                 })
                 continue
 
+            # Circuit is half-open: enforce single trial probe
+            try:
+                has_probe = db.has_active_circuit_probe(
+                    destination=destination,
+                    since_iso=newest_failure_iso,
+                    exclude_ledger_id=ledger_id,
+                )
+            except (sqlite3.Error, PersistenceError, LedgerStateError):
+                has_probe = False
+
+            if has_probe:
+                try:
+                    db.finish_dispatch(ledger_id, state="deferred", reason="circuit_open")
+                    row["state"] = "deferred"
+                    row["reason"] = "circuit_open"
+                except (sqlite3.Error, PersistenceError, LedgerStateError):
+                    return {"p2_status": "persist_failed", "dispatch_results": dispatch_results}
+                dispatch_results.append({
+                    "destination": destination,
+                    "action_type": action_type,
+                    "mode": "live",
+                    "ledger_state": "deferred",
+                    "reason": "circuit_open",
+                    "attempts": row.get("attempts", 0),
+                    "remote_id": None,
+                })
+                continue
+
         # 7. Live Attempt Loop
         while True:
             try:

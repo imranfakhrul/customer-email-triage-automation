@@ -1455,6 +1455,36 @@ class TriageDatabase:
 
             return count, newest_failure_updated_at
 
+    def has_active_circuit_probe(
+        self,
+        destination: str,
+        since_iso: str,
+        exclude_ledger_id: Optional[int] = None,
+    ) -> bool:
+        """Checks if a trial probe is already in flight after circuit cooldown.
+
+        Args:
+            destination: Downstream service name.
+            since_iso: Timestamp of the newest failure that opened the circuit.
+            exclude_ledger_id: Optional outbox ledger id to exclude (e.g. current row).
+
+        Returns:
+            True if an active probe exists, False otherwise.
+        """
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                """
+                SELECT 1 FROM p2_dispatch_log
+                WHERE destination = ?
+                  AND mode = 'live'
+                  AND (? IS NULL OR id != ?)
+                  AND updated_at > ?
+                LIMIT 1;
+                """,
+                (destination, exclude_ledger_id, exclude_ledger_id, since_iso),
+            )
+            return cur.fetchone() is not None
+
     def divert_to_hitl(self, email_id: str, reason: str) -> bool:
         """Diverts an auto_approved or approved email back to pending HITL review.
 
@@ -1653,6 +1683,7 @@ class TriageDatabase:
         state: str,
         error_message: Optional[str] = None,
         next_attempt_at: Optional[str] = None,
+        worker_id: Optional[str] = None,
     ) -> None:
         """Transitions a p2_jobs record to its terminal or intermediate state.
 
@@ -1661,10 +1692,11 @@ class TriageDatabase:
             state: New state (e.g. 'done', 'failed', 'hitl_pending', 'unclaimed').
             error_message: Optional error or diagnostic message.
             next_attempt_at: Optional ISO timestamp string for scheduled re-attempt.
+            worker_id: Optional worker identifier enforcing compare-and-swap (CAS) ownership.
 
         Raises:
             ValueError: If state is not in VALID_P2_JOB_STATES.
-            PersistenceError: If email_id is not found in p2_jobs.
+            PersistenceError: If email_id is not found in p2_jobs or worker ownership conflict.
         """
         if state not in VALID_P2_JOB_STATES:
             raise ValueError(
@@ -1684,9 +1716,10 @@ class TriageDatabase:
                         next_attempt_at = ?,
                         error_message = ?,
                         updated_at = ?
-                    WHERE email_id = ?;
+                    WHERE email_id = ?
+                      AND (? IS NULL OR worker_id = ? OR worker_id IS NULL);
                     """,
-                    (state, next_attempt_at, error_message, now_str, email_id),
+                    (state, next_attempt_at, error_message, now_str, email_id, worker_id, worker_id),
                 )
             else:
                 cursor = conn.execute(
@@ -1696,12 +1729,15 @@ class TriageDatabase:
                         next_attempt_at = ?,
                         error_message = ?,
                         updated_at = ?
-                    WHERE email_id = ?;
+                    WHERE email_id = ?
+                      AND (? IS NULL OR worker_id = ? OR worker_id IS NULL);
                     """,
-                    (state, next_attempt_at, error_message, now_str, email_id),
+                    (state, next_attempt_at, error_message, now_str, email_id, worker_id, worker_id),
                 )
             if cursor.rowcount == 0:
-                raise PersistenceError(f"Job for email_id '{email_id}' not found in p2_jobs")
+                raise PersistenceError(
+                    f"Job for email_id '{email_id}' not found in p2_jobs or worker ownership conflict"
+                )
 
     def get_p2_job(self, email_id: str) -> Optional[Dict[str, Any]]:
         """Retrieves a p2_jobs record by email_id.

@@ -23,9 +23,9 @@ Each issue is implemented individually with corresponding unit tests, verified a
 3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04a` ✅ (GitHub Formatting & Schema) ➔ `P2-04b` ✅ (GitHub Adapter & Remote Precheck) ➔ `P2-05` ✅ (FreeScout) ➔ `P2-06` ✅ (CRM) ➔ `P2-07` ✅ (Webhook)
 4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` ✅ (LangGraph Integration) ➔ `P2-09` ✅ (Queue Worker) ➔ `P2-10` ✅ (Benchmark Dataset) ➔ `P2-11` ✅ (Operational Docs)
 5. **Track 4: Mailbox Ingestion Connector:** `P2-12` ✅ (Gmail Pub/Sub Connector)
-6. **Track 5: Post-Review Production Remediation (PRR):** 13 Atomic Commits: `PRR-01` ✅ (Item 1: Stuck Approvals) ➔ `PRR-02` ✅ (Item 2: Adapter Registration) ➔ `PRR-03` ✅ (Item 3: Worker States) ➔ `PRR-04` ✅ (Flow E2E Test) ➔ `PRR-05` ✅ (Item 5: Unmasker Privacy) ➔ `PRR-06` ✅ (Item 4: Gmail Spoof Guard) ➔ `PRR-07` ✅ (Item 6: Fallback Domain) ➔ `PRR-08` ✅ (Item 8: Post-Write Idempotency) ➔ `PRR-09` ✅ (Item 9: FreeScout Fallthrough) ➔ `PRR-10` ✅ (Item 10: HITL Reconcile) ➔ `PRR-11` ✅ (Item 7: Webhook Allowlist) ➔ `PRR-12` ⏳ (Worker & Classifier Guards) ➔ `PRR-13` ⏳ (Gmail Auth Refresh & Pagination)
+6. **Track 5: Post-Review Production Remediation (PRR):** 13 Atomic Commits: `PRR-01` ✅ (Item 1: Stuck Approvals) ➔ `PRR-02` ✅ (Item 2: Adapter Registration) ➔ `PRR-03` ✅ (Item 3: Worker States) ➔ `PRR-04` ✅ (Flow E2E Test) ➔ `PRR-05` ✅ (Item 5: Unmasker Privacy) ➔ `PRR-06` ✅ (Item 4: Gmail Spoof Guard) ➔ `PRR-07` ✅ (Item 6: Fallback Domain) ➔ `PRR-08` ✅ (Item 8: Post-Write Idempotency) ➔ `PRR-09` ✅ (Item 9: FreeScout Fallthrough) ➔ `PRR-10` ✅ (Item 10: HITL Reconcile) ➔ `PRR-11` ✅ (Item 7: Webhook Allowlist) ➔ `PRR-12` ✅ (Worker & Classifier Guards) ➔ `PRR-13` ⏳ (Gmail Auth Refresh & Pagination)
 
-**Next Immediate Task:** `PRR-12` (`fix(worker): [PRR-12] protect config immutability, worker CAS guard, and classifier empty fail-closed`).
+**Next Immediate Task:** `PRR-13` (`fix(mailbox): [PRR-13] add gmail 401 token refresh retry and history pagination`).
 
 ---
 
@@ -894,7 +894,7 @@ This roadmap incorporates the 10 code review findings and lower-priority operati
 | **9** | **PRR-09** | Idempotency (Item 9) | `fix(freescout): [PRR-09] eliminate thread append unhandled error fallthrough to new conversation` | `utils/adapters/freescout_adapter.py`, `tests/test_p2_prr_09_freescout_fallthrough.py` | ✅ Complete |
 | **10** | **PRR-10** | Idempotency (Item 10) | `feat(hitl): [PRR-10] add hitl_cli reconcile command to resolve unknown-outcome outbox rows` | `scripts/hitl_cli.py`, `docs/hitl_runbook.md`, `tests/test_p2_prr_10_hitl_reconcile.py` | ✅ Complete |
 | **11** | **PRR-11** | Config (Item 7) | `fix(webhook): [PRR-11] strictly enforce config host allowlist and require non-empty hmac secret` | `utils/adapters/webhook_adapter.py`, `utils/adapters/webhook_format.py`, `tests/test_p2_prr_11_webhook_allowlist.py` | ✅ Complete |
-| **12** | **PRR-12** | Cleanups (Worker/Classifier) | `fix(worker): [PRR-12] protect config immutability, worker CAS guard, and classifier empty fail-closed` | `scripts/phase2_worker.py`, `db/database.py`, `nodes/classifier.py`, `nodes/dispatcher.py`, `tests/test_p2_prr_12_operational_guards.py` | ⏳ Pending |
+| **12** | **PRR-12** | Cleanups (Worker/Classifier) | `fix(worker): [PRR-12] protect config immutability, worker CAS guard, and classifier empty fail-closed` | `scripts/phase2_worker.py`, `db/database.py`, `nodes/classifier.py`, `nodes/dispatcher.py`, `tests/test_p2_prr_12_operational_guards.py` | ✅ Complete |
 | **13** | **PRR-13** | Cleanups (Gmail Auth) | `fix(mailbox): [PRR-13] add gmail 401 token refresh retry and history pagination` | `utils/mailbox/gmail_connector.py`, `tests/test_p2_prr_13_gmail_lifecycle.py` | ⏳ Pending |
 
 ---
@@ -985,7 +985,7 @@ This roadmap incorporates the 10 code review findings and lower-priority operati
 * **Done When:** Tests verify unlisted webhook hosts are rejected, and empty secret keys fail validation.
 
 #### [PRR-12] Worker Config Isolation, CAS Guard, and Empty Body Fail-Closed (Cleanups)
-* **Status:** ⏳ Pending
+* **Status:** ✅ Complete
 * **Scope:** `scripts/phase2_worker.py`, `db/database.py`, `nodes/classifier.py`, `nodes/dispatcher.py`, `tests/test_p2_prr_12_operational_guards.py`
 * **Problem:** Worker mutates cached config; `finish_p2_job` lacks CAS check; classifier only checks `is None` allowing empty strings.
 * **Solution:** Deepcopy config in `phase2_worker.py`; add `AND (worker_id = ? OR worker_id IS NULL)` to `finish_p2_job`; fail closed in `classifier_node` if `not masked_subject or not masked_body`; enforce single trial probe in circuit breaker.

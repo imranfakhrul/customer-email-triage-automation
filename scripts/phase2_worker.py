@@ -16,6 +16,7 @@ Hard Invariants:
 from __future__ import annotations
 
 import argparse
+import copy
 import logging
 import signal
 import sys
@@ -76,7 +77,7 @@ def run_worker_once(
     """
     _setup_logging()
     db_inst = db or TriageDatabase()
-    cfg = config or get_config()
+    cfg = copy.deepcopy(config or get_config())
     wid = worker_id or f"worker_{uuid.uuid4().hex[:8]}"
 
     if dry_run and "dispatch" in cfg:
@@ -213,6 +214,7 @@ def run_worker_once(
                 state=terminal_state,
                 error_message=error_message,
                 next_attempt_at=next_attempt_at,
+                worker_id=wid,
             )
             processed_count += 1
             logger.info("Processed job %s -> state: %s", email_id, terminal_state)
@@ -226,6 +228,7 @@ def run_worker_once(
                 email_id=email_id,
                 state="failed",
                 error_message=exc.__class__.__name__,
+                worker_id=wid,
             )
             processed_count += 1
 
@@ -248,7 +251,7 @@ class Phase2Worker:
         offline: bool = False,
     ) -> None:
         self.db = db or TriageDatabase()
-        self.config = config or get_config()
+        self.config = copy.deepcopy(config or get_config())
         self.worker_id = worker_id or f"worker_{uuid.uuid4().hex[:8]}"
         self.batch_size = batch_size
         self.poll_interval = poll_interval
