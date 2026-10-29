@@ -408,6 +408,37 @@ The pipeline features a modular, pluggable adapter architecture (`utils/adapters
 
 ---
 
+### 🛡️ Connecting Destinations: Automatic Credentials vs Production Safety Guardrail
+
+When integrating external services with the triage pipeline:
+
+1. **For AI Intelligence & Classification (Groq / Jev AI):**
+   * 👉 **Automatic:** The moment you add `GROQ_API_KEY` (or `JEV_API_KEY`) to `.env`, the pipeline automatically uses live AI models (`openai/gpt-oss-20b` and `openai/gpt-oss-120b`). No configuration changes are needed.
+
+2. **For Downstream Destinations (HubSpot CRM, GitHub, FreeScout, Slack, Gmail):**
+   * 👉 **Automatic with a Safety Guardrail:** All credentials (`CRM_API_KEY`, `GITHUB_TOKEN`, `FREESCOUT_API_KEY`, OAuth tokens) come directly from `.env`.
+   * However, by default, the system runs with **`dispatch.dry_run: true`** in [`config.yaml`](config.yaml#L158-L242).
+
+#### Why is this safety guardrail there?
+If you add your live HubSpot CRM API key and immediately run test benchmarks, you do not want 50 synthetic test leads automatically created on your live sales CRM board.
+
+The system protects the client by default:
+1. **In Dry-Run Mode (`dry_run: true`):** It generates the real payload, verifies selective unmasking, hashes the payload (`payload_sha256`), and logs the simulated outbox ledger row without making live SaaS mutations.
+2. **When the client is ready to send live leads to HubSpot or live issues to GitHub:** They simply toggle two quick settings in [`config.yaml`](config.yaml):
+
+#### 📋 What Each Service Needs to Go Live
+
+| Service | What to fill in `.env` | What to toggle in `config.yaml` | Connection Behavior |
+|:---|:---|:---|:---:|
+| **Groq AI / Jev AI** | `GROQ_API_KEY` (or `JEV_API_KEY`) | *None needed.* | **Automatic** |
+| **HubSpot CRM** | `CRM_API_KEY` | `destinations.crm.enabled: true`<br>`dispatch.dry_run: false` | **1 Setting Toggle** *(target is already set to `https://api.hubapi.com`)* |
+| **Slack Webhook Alert** | `SLACK_BILLING_WEBHOOK_URL` | `destinations.webhook.enabled: true`<br>`dispatch.dry_run: false` | **1 Setting Toggle** |
+| **GitHub Issues** | `GITHUB_TOKEN` | `destinations.github.enabled: true`<br>`target: "your-org/your-repo"` | **1 Setting Toggle + Repo Name** |
+| **FreeScout Helpdesk** | `FREESCOUT_API_KEY` | `destinations.freescout.enabled: true`<br>`target: "https://support.yourcompany.com"` | **1 Setting Toggle + Helpdesk URL** |
+| **Gmail Pub/Sub** | `GMAIL_CLIENT_ID`<br>`GMAIL_CLIENT_SECRET`<br>`GMAIL_REFRESH_TOKEN` | `mailbox.enabled: true`<br>`gmail.topic_name: "projects/.../topics/..."` | **1 Setting Toggle + Topic Name** |
+
+---
+
 ### Pluggable CRM Integration (HubSpot, Salesforce, Zoho, Pipedrive, Close, Custom)
 
 The CRM integration is **not locked to HubSpot**. While HubSpot REST API v3 is provided as the production-ready reference implementation, any CRM or custom sales intake system can be plugged in seamlessly.
