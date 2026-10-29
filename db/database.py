@@ -1460,6 +1460,7 @@ class TriageDatabase:
         destination: str,
         since_iso: str,
         exclude_ledger_id: Optional[int] = None,
+        stale_cutoff_iso: Optional[str] = None,
     ) -> bool:
         """Checks if a trial probe is already in flight after circuit cooldown.
 
@@ -1467,9 +1468,10 @@ class TriageDatabase:
             destination: Downstream service name.
             since_iso: Timestamp of the newest failure that opened the circuit.
             exclude_ledger_id: Optional outbox ledger id to exclude (e.g. current row).
+            stale_cutoff_iso: Optional cutoff timestamp before which pending probes are ignored.
 
         Returns:
-            True if an active probe exists, False otherwise.
+            True if an active in-flight probe exists, False otherwise.
         """
         with self.get_connection() as conn:
             cur = conn.execute(
@@ -1477,11 +1479,20 @@ class TriageDatabase:
                 SELECT 1 FROM p2_dispatch_log
                 WHERE destination = ?
                   AND mode = 'live'
+                  AND state = 'pending'
                   AND (? IS NULL OR id != ?)
                   AND updated_at > ?
+                  AND (? IS NULL OR updated_at >= ?)
                 LIMIT 1;
                 """,
-                (destination, exclude_ledger_id, exclude_ledger_id, since_iso),
+                (
+                    destination,
+                    exclude_ledger_id,
+                    exclude_ledger_id,
+                    since_iso,
+                    stale_cutoff_iso,
+                    stale_cutoff_iso,
+                ),
             )
             return cur.fetchone() is not None
 

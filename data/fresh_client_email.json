@@ -1,0 +1,11 @@
+{
+  "email_id": "fresh_demo_email_001",
+  "message_id": "<20261029.fresh.01@acmecorp.com>",
+  "thread_id": "thread_fresh_acme_001",
+  "sender_email": "david.miller@acmecorp.com",
+  "sender_domain": "acmecorp.com",
+  "email_subject": "URGENT: API Authentication failing with HTTP 500 across 250 users",
+  "email_body": "Hello Support Team,\n\nOur production OAuth2 authentication gateway has been failing since 08:30 UTC today. Over 250 users in our New York office are completely locked out, and our server logs show internal 500 error on cluster node 192.168.10.45.\n\nPlease escalate this to engineering immediately. My direct cell is +1 555-0144 or email me at david.miller@acmecorp.com.\n\nBest regards,\nDavid Miller\nHead of Platform Engineering, Acme Corp",
+  "has_attachments": false,
+  "auth_status": "pass"
+}

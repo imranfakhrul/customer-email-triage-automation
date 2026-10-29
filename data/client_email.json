@@ -1,0 +1,11 @@
+{
+  "email_id": "gmail_msg_001",
+  "message_id": "<20261029.1830.prod@enterprise.corp>",
+  "thread_id": "thread_gmail_prod_99",
+  "sender_email": "alex.hunter@enterprise.corp",
+  "sender_domain": "enterprise.corp",
+  "email_subject": "Critical: Postgres database pool exhausted on production node",
+  "email_body": "Hi Support Team,\n\nOur production PostgreSQL database pool is completely exhausted, throwing HTTP 500 errors across all worker nodes since 10:15 UTC. Call me at +1 555-0199 or email me at alex.hunter@enterprise.corp.\n\nThanks,\nAlex Hunter\nVP of Infrastructure",
+  "has_attachments": false,
+  "auth_status": "pass"
+}

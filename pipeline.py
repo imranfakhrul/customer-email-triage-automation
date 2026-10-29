@@ -43,11 +43,20 @@ def prepare_initial_state(payload: Dict[str, Any]) -> TriageState:
     """Normalizes an incoming raw email dictionary into a valid initial TriageState.
 
     Args:
-        payload: Input dictionary containing email metadata and body.
+        payload: Input dictionary containing email metadata and body, or full Gmail API payload.
 
     Returns:
         Fully populated TriageState dictionary ready for LangGraph execution.
     """
+    if (
+        "payload" in payload
+        and isinstance(payload.get("payload"), dict)
+        and "headers" in payload["payload"]
+    ):
+        from utils.mailbox.gmail_connector import parse_gmail_message_payload
+
+        payload = parse_gmail_message_payload(payload)
+
     raw_email_id = payload.get("email_id") or payload.get("message_id")
     email_id = str(raw_email_id) if raw_email_id else f"em_{uuid.uuid4().hex[:12]}"
     message_id = str(payload.get("message_id") or email_id)

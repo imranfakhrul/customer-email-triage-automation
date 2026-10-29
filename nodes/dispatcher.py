@@ -28,7 +28,7 @@ import secrets
 import sqlite3
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from db.database import HitlStateError, LedgerStateError, PersistenceError, TriageDatabase
@@ -484,12 +484,16 @@ def dispatcher_node(
                 })
                 continue
 
-            # Circuit is half-open: enforce single trial probe
+            # Circuit is half-open: enforce single trial probe in flight
+            pending_timeout_min = dispatch_cfg.get("pending_timeout_minutes", 10)
+            stale_cutoff_iso = (current_now - timedelta(minutes=pending_timeout_min)).isoformat()
+
             try:
                 has_probe = db.has_active_circuit_probe(
                     destination=destination,
                     since_iso=newest_failure_iso,
                     exclude_ledger_id=ledger_id,
+                    stale_cutoff_iso=stale_cutoff_iso,
                 )
             except (sqlite3.Error, PersistenceError, LedgerStateError):
                 has_probe = False

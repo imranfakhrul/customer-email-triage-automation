@@ -136,7 +136,7 @@ Customer-Email-Triage-Automation/
 │   └── webhook_smoke_test.py # Sandbox smoke test for Slack/Generic webhook adapter
 ├── test/ -> tests/e2e_pipeline_cases # Direct symlink for test case exploration
 ├── test_cases/ -> tests/e2e_pipeline_cases # Showcase test cases for client demo
-├── tests/                    # Comprehensive unit and integration test suite (700 tests)
+├── tests/                    # Comprehensive unit and integration test suite (701 tests)
 │   ├── conftest.py           # Test isolation fixtures & network egress guards
 │   ├── e2e_pipeline_cases/   # 6 end-to-end showcase test folders with full traces
 │   │   ├── 01_github_issue/  # GitHub bug report case (500 Internal Server Error)
@@ -359,7 +359,7 @@ python -m spacy download en_core_web_sm
 # 3. Configure environment
 cp .env.example .env
 
-# 4. Run automated test suite (700 tests, 100% passing)
+# 4. Run automated test suite (701 tests, 100% passing)
 pytest tests/ -v
 
 # 5. Run the Phase 1 benchmark suite across all 100 pipeline scenarios (default: offline)

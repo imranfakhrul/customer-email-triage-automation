@@ -275,3 +275,57 @@ class TestCircuitBreakerSingleProbe:
         assert res2["p2_status"] == "deferred"
         assert res2["dispatch_results"][0]["reason"] == "circuit_open"
         assert len(fake_adapter.calls) == 0  # No live call was made for Job 2!
+
+    def test_circuit_breaker_recovers_after_cooldown_and_deferral(self, tmp_path):
+        """Verifies that rows deferred during cooldown do not prevent trial probe after cooldown."""
+        db_file = tmp_path / "cb_recovery.db"
+        db = TriageDatabase(db_path=str(db_file))
+
+        now_utc = datetime.now(UTC)
+        cfg = copy.deepcopy(get_config())
+        cfg["dispatch"]["dry_run"] = False
+        cfg["destinations"]["github"]["enabled"] = True
+        cfg["destinations"]["github"]["circuit_breaker"]["failure_threshold"] = 2
+        cfg["destinations"]["github"]["circuit_breaker"]["cooldown_seconds"] = 100
+
+        # Seed 2 failures at T=0
+        recent_failure_time = now_utc.isoformat()
+        for i in range(2):
+            eid = f"em_fail_{i}"
+            insert_test_email(db, eid)
+            r, _ = db.begin_dispatch(eid, "github", "create_issue", "live")
+            db.record_dispatch_attempt(r["id"])
+            db.finish_dispatch(r["id"], "failed", reason="timeout")
+            with db.get_connection() as conn:
+                conn.execute(
+                    "UPDATE p2_dispatch_log SET updated_at = ? WHERE id = ?",
+                    (recent_failure_time, r["id"]),
+                )
+
+        # At T=50s (during cooldown), Email A arrives and is deferred
+        time_50s = now_utc + timedelta(seconds=50)
+        insert_test_email(db, "em_deferred_a")
+        res_a = dispatcher_node(
+            {"email_id": "em_deferred_a"},
+            db=db,
+            config=cfg,
+            adapters={"github": FakeAdapter("github")},
+            now=lambda: time_50s,
+        )
+        assert res_a["p2_status"] == "deferred"
+
+        # At T=150s (PAST cooldown 100s), Email B arrives.
+        # It must NOT be deferred by Email A's row; it must be permitted to probe!
+        time_150s = now_utc + timedelta(seconds=150)
+        fake_adapter = FakeAdapter("github")
+        insert_test_email(db, "em_probe_b")
+        res_b = dispatcher_node(
+            {"email_id": "em_probe_b"},
+            db=db,
+            config=cfg,
+            adapters={"github": fake_adapter},
+            now=lambda: time_150s,
+        )
+        assert res_b["p2_status"] == "dispatched"
+        assert len(fake_adapter.calls) == 1
+        assert res_b["dispatch_results"][0]["ledger_state"] == "confirmed"
