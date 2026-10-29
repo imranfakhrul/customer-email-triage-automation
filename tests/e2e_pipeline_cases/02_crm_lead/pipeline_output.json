@@ -1,0 +1,42 @@
+{
+  "email_id": "case_02_crm_lead",
+  "routing_status": "gatekeeper_approved",
+  "is_active_thread": false,
+  "gatekeeper_decision": "legitimate",
+  "classifier_used": "groq",
+  "is_sensitive": false,
+  "sensitive_reason": null,
+  "is_spam": false,
+  "is_threat": false,
+  "labels_to_apply": [],
+  "dispatch_target": null,
+  "dispatch_status": "done",
+  "pii_entity_counts": {
+    "PERSON": 1
+  },
+  "masked_body_preview": "Hi Sales Team,\n\nMy name is Marcus Vance, VP of Technology at FinTech Global.\nWe are currently evaluating platforms for automated customer inquiry triage across our 350-seat compliance and risk operati",
+  "p2_classifier_used": "groq",
+  "classification": {
+    "category": "Demo Request",
+    "priority": "High",
+    "sentiment": "Positive",
+    "customer_emotion": "Calm",
+    "summary": "VP requests a private product demo and discusses enterprise pricing and compliance terms.",
+    "suggested_team": "Sales",
+    "confidence": 0.98
+  },
+  "hitl_status": "auto_approved",
+  "hitl_reason": null,
+  "p2_status": "simulated",
+  "dispatch_results": [
+    {
+      "destination": "crm",
+      "action_type": "create_lead",
+      "mode": "dry_run",
+      "ledger_state": "simulated",
+      "reason": null,
+      "attempts": 0,
+      "remote_id": null
+    }
+  ]
+}

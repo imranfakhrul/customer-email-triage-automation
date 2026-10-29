@@ -1,0 +1,6 @@
+{
+  "email_id": "case_03_freescout_ticket",
+  "sender_email": "elena.rostova@retailhub.de",
+  "email_subject": "How to configure Slack webhook notifications for low-priority alerts?",
+  "email_body": "Hello Support Team,\n\nI am currently setting up our team's notification preferences in our account settings.\nWe would like to know if it's possible to route low-priority alerts to our '#support-general' Slack channel instead of sending immediate SMS notifications to on-call staff.\nCould you please share the documentation or steps to configure this channel webhook routing?\n\nThank you for your help,\nElena Rostova\nCustomer Operations Specialist\nRetailHub GmbH\nPhone: +49 30 1234567"
+}

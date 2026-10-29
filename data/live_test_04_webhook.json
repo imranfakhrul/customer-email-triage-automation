@@ -1,0 +1,6 @@
+{
+  "email_id": "live_test_04_webhook",
+  "sender_email": "cfo.billing@nexuslogistics.com",
+  "email_subject": "Urgent: Duplicate charge of $4,850 on our corporate invoice",
+  "email_body": "Hello Billing Support,\n\nOur finance department discovered that invoice INV-2026-8819 for $4,850.00 was charged twice to our corporate account on October 28th.\nOur account shows two identical pending transactions within 4 minutes of each other.\nPlease reverse the duplicate transaction immediately and issue an updated billing receipt.\n\nSincerely,\nDavid Miller\nFinance Director, Nexus Logistics\nContact: +1 312-555-9012"
+}

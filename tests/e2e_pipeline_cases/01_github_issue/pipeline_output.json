@@ -1,0 +1,42 @@
+{
+  "email_id": "case_01_github_issue",
+  "routing_status": "gatekeeper_approved",
+  "is_active_thread": false,
+  "gatekeeper_decision": "legitimate",
+  "classifier_used": "groq",
+  "is_sensitive": false,
+  "sensitive_reason": null,
+  "is_spam": false,
+  "is_threat": false,
+  "labels_to_apply": [],
+  "dispatch_target": null,
+  "dispatch_status": "done",
+  "pii_entity_counts": {
+    "PERSON": 1
+  },
+  "masked_body_preview": "Hello Engineering Team,\n\nWe are experiencing intermittent HTTP 500 Internal Server Errors in our production payment webhook ingress service since 06:30 UTC today.\nThe stack trace points to a NullPoint",
+  "p2_classifier_used": "groq",
+  "classification": {
+    "category": "Bug Report",
+    "priority": "High",
+    "sentiment": "Neutral",
+    "customer_emotion": "Calm",
+    "summary": "Production payment webhook service is intermittently returning HTTP 500 errors due to a NullPointerException in WebhookHandler.java.",
+    "suggested_team": "Engineering",
+    "confidence": 0.97
+  },
+  "hitl_status": "auto_approved",
+  "hitl_reason": null,
+  "p2_status": "simulated",
+  "dispatch_results": [
+    {
+      "destination": "github",
+      "action_type": "create_issue",
+      "mode": "dry_run",
+      "ledger_state": "simulated",
+      "reason": null,
+      "attempts": 0,
+      "remote_id": null
+    }
+  ]
+}

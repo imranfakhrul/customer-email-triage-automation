@@ -1,0 +1,61 @@
+{
+  "email_id": "case_02_crm_lead",
+  "message_id": "case_02_crm_lead",
+  "thread_id": "case_02_crm_lead",
+  "sender_email": "marcus.vance@fintechglobal.com",
+  "sender_domain": "fintechglobal.com",
+  "email_subject": "Enterprise Demo Request for 350-Seat Security Automation",
+  "email_body": "Hi Sales Team,\n\nMy name is Marcus Vance, VP of Technology at FinTech Global.\nWe are currently evaluating platforms for automated customer inquiry triage across our 350-seat compliance and risk operations.\nWe would like to schedule a private product demonstration and discuss annual enterprise volume pricing, custom SLA guarantees, and SOC2 compliance terms.\n\nAre you available for a 45-minute discovery call next Tuesday at 15:00 EST?",
+  "raw_body": "Hi Sales Team,\n\nMy name is Marcus Vance, VP of Technology at FinTech Global.\nWe are currently evaluating platforms for automated customer inquiry triage across our 350-seat compliance and risk operations.\nWe would like to schedule a private product demonstration and discuss annual enterprise volume pricing, custom SLA guarantees, and SOC2 compliance terms.\n\nAre you available for a 45-minute discovery call next Tuesday at 15:00 EST?\n\nWarm regards,\nMarcus Vance\nVP of Technology | FinTech Global\nPhone: +1 212-555-0194\nEmail: marcus.vance@fintechglobal.com",
+  "has_attachments": false,
+  "is_active_thread": false,
+  "auth_status": null,
+  "cleaned_body": "Hi Sales Team,\n\nMy name is Marcus Vance, VP of Technology at FinTech Global.\nWe are currently evaluating platforms for automated customer inquiry triage across our 350-seat compliance and risk operations.\nWe would like to schedule a private product demonstration and discuss annual enterprise volume pricing, custom SLA guarantees, and SOC2 compliance terms.\n\nAre you available for a 45-minute discovery call next Tuesday at 15:00 EST?",
+  "masked_body": "Hi Sales Team,\n\nMy name is Marcus Vance, VP of Technology at FinTech Global.\nWe are currently evaluating platforms for automated customer inquiry triage across our 350-seat compliance and risk operations.\nWe would like to schedule a private product demonstration and discuss annual enterprise volume pricing, custom SLA guarantees, and SOC2 compliance terms.\n\nAre you available for a 45-minute discovery call next Tuesday at 15:00 EST?",
+  "masked_subject": "Enterprise [PERSON_1_a975] for 350-Seat Security Automation",
+  "spacy_failed": false,
+  "is_sensitive": false,
+  "sensitive_reason": null,
+  "is_spam": false,
+  "gatekeeper_decision": "legitimate",
+  "gatekeeper_confidence": 0.95,
+  "is_threat": false,
+  "threat_details": null,
+  "classifier_used": "groq",
+  "customer_tier": null,
+  "sla_target": null,
+  "classification": {
+    "category": "Demo Request",
+    "priority": "High",
+    "sentiment": "Positive",
+    "customer_emotion": "Calm",
+    "summary": "VP requests a private product demo and discusses enterprise pricing and compliance terms.",
+    "suggested_team": "Sales",
+    "confidence": 0.98
+  },
+  "p2_classifier_used": "groq",
+  "p2_status": "simulated",
+  "hitl_status": "auto_approved",
+  "hitl_reason": null,
+  "labels_to_apply": [],
+  "is_starred": false,
+  "dispatch_target": null,
+  "dispatch_status": "done",
+  "dispatch_results": [
+    {
+      "destination": "crm",
+      "action_type": "create_lead",
+      "mode": "dry_run",
+      "ledger_state": "simulated",
+      "reason": null,
+      "attempts": 0,
+      "remote_id": null
+    }
+  ],
+  "retry_count": 0,
+  "error_message": null,
+  "routing_status": "gatekeeper_approved",
+  "pii_entity_counts": {
+    "PERSON": 1
+  }
+}

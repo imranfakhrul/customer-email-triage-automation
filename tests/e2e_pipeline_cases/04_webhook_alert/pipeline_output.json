@@ -1,0 +1,32 @@
+{
+  "email_id": "case_04_webhook_alert",
+  "routing_status": "gatekeeper_approved",
+  "is_active_thread": false,
+  "gatekeeper_decision": "legitimate",
+  "classifier_used": "groq",
+  "is_sensitive": false,
+  "sensitive_reason": null,
+  "is_spam": false,
+  "is_threat": false,
+  "labels_to_apply": [],
+  "dispatch_target": null,
+  "dispatch_status": "done",
+  "pii_entity_counts": {
+    "PERSON": 1
+  },
+  "masked_body_preview": "Hello [PERSON_1_944d],\n\nOur finance department discovered that invoice INV-2026-8819 for $4,850.00 was charged twice to our corporate account on October 28th.\nOur account shows two identical pending t",
+  "p2_classifier_used": "groq",
+  "classification": {
+    "category": "Billing Issue",
+    "priority": "High",
+    "sentiment": "Negative",
+    "customer_emotion": "Frustrated",
+    "summary": "Customer reports a duplicate $4,850 charge on invoice INV-2026-8819 and requests reversal and corrected receipt.",
+    "suggested_team": "Billing",
+    "confidence": 0.99
+  },
+  "hitl_status": "pending",
+  "hitl_reason": "Escalated customer emotion (Frustrated) with High priority",
+  "p2_status": "hitl_pending",
+  "dispatch_results": null
+}

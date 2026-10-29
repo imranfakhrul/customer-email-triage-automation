@@ -1,0 +1,43 @@
+{
+  "email_id": "case_03_freescout_ticket",
+  "routing_status": "gatekeeper_approved",
+  "is_active_thread": false,
+  "gatekeeper_decision": "legitimate",
+  "classifier_used": "groq",
+  "is_sensitive": false,
+  "sensitive_reason": null,
+  "is_spam": false,
+  "is_threat": false,
+  "labels_to_apply": [],
+  "dispatch_target": null,
+  "dispatch_status": "done",
+  "pii_entity_counts": {
+    "PERSON": 1,
+    "PHONE": 1
+  },
+  "masked_body_preview": "Hello Support Team,\n\nI am currently setting up our team's notification preferences in our account settings.\nWe would like to know if it's possible to route low-priority alerts to our '#support-general",
+  "p2_classifier_used": "groq",
+  "classification": {
+    "category": "General Query",
+    "priority": "Medium",
+    "sentiment": "Neutral",
+    "customer_emotion": "Calm",
+    "summary": "Customer asks for documentation or steps to route low\u2011priority alerts to a Slack channel via webhook instead of SMS.",
+    "suggested_team": "Support",
+    "confidence": 0.96
+  },
+  "hitl_status": "auto_approved",
+  "hitl_reason": null,
+  "p2_status": "simulated",
+  "dispatch_results": [
+    {
+      "destination": "freescout",
+      "action_type": "create_ticket",
+      "mode": "dry_run",
+      "ledger_state": "simulated",
+      "reason": null,
+      "attempts": 0,
+      "remote_id": null
+    }
+  ]
+}

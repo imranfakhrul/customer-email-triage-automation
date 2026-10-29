@@ -1,0 +1,62 @@
+{
+  "email_id": "case_03_freescout_ticket",
+  "message_id": "case_03_freescout_ticket",
+  "thread_id": "case_03_freescout_ticket",
+  "sender_email": "elena.rostova@retailhub.de",
+  "sender_domain": "retailhub.de",
+  "email_subject": "How to configure Slack webhook notifications for low-priority alerts?",
+  "email_body": "Hello Support Team,\n\nI am currently setting up our team's notification preferences in our account settings.\nWe would like to know if it's possible to route low-priority alerts to our '#support-general' Slack channel instead of sending immediate SMS notifications to on-call staff.\nCould you please share the documentation or steps to configure this channel webhook routing?\n\nThank you for your help,\nElena Rostova\nCustomer Operations Specialist\nRetailHub GmbH\nPhone: +49 30 1234567",
+  "raw_body": "Hello Support Team,\n\nI am currently setting up our team's notification preferences in our account settings.\nWe would like to know if it's possible to route low-priority alerts to our '#support-general' Slack channel instead of sending immediate SMS notifications to on-call staff.\nCould you please share the documentation or steps to configure this channel webhook routing?\n\nThank you for your help,\nElena Rostova\nCustomer Operations Specialist\nRetailHub GmbH\nPhone: +49 30 1234567",
+  "has_attachments": false,
+  "is_active_thread": false,
+  "auth_status": null,
+  "cleaned_body": "Hello Support Team,\n\nI am currently setting up our team's notification preferences in our account settings.\nWe would like to know if it's possible to route low-priority alerts to our '#support-general' Slack channel instead of sending immediate SMS notifications to on-call staff.\nCould you please share the documentation or steps to configure this channel webhook routing?\n\nThank you for your help,\nElena Rostova\nCustomer Operations Specialist\nRetailHub GmbH\nPhone: +49 30 1234567",
+  "masked_body": "Hello Support Team,\n\nI am currently setting up our team's notification preferences in our account settings.\nWe would like to know if it's possible to route low-priority alerts to our '#support-general' Slack channel instead of sending immediate SMS notifications to on-call staff.\nCould you please share the documentation or steps to configure this channel webhook routing?\n\nThank you for your help,\n[PERSON_1_fca1]Customer Operations Specialist\nRetailHub GmbH\nPhone: [PHONE_1_fca1]",
+  "masked_subject": "How to configure Slack webhook notifications for low-priority alerts?",
+  "spacy_failed": false,
+  "is_sensitive": false,
+  "sensitive_reason": null,
+  "is_spam": false,
+  "gatekeeper_decision": "legitimate",
+  "gatekeeper_confidence": 0.95,
+  "is_threat": false,
+  "threat_details": null,
+  "classifier_used": "groq",
+  "customer_tier": null,
+  "sla_target": null,
+  "classification": {
+    "category": "General Query",
+    "priority": "Medium",
+    "sentiment": "Neutral",
+    "customer_emotion": "Calm",
+    "summary": "Customer asks for documentation or steps to route low\u2011priority alerts to a Slack channel via webhook instead of SMS.",
+    "suggested_team": "Support",
+    "confidence": 0.96
+  },
+  "p2_classifier_used": "groq",
+  "p2_status": "simulated",
+  "hitl_status": "auto_approved",
+  "hitl_reason": null,
+  "labels_to_apply": [],
+  "is_starred": false,
+  "dispatch_target": null,
+  "dispatch_status": "done",
+  "dispatch_results": [
+    {
+      "destination": "freescout",
+      "action_type": "create_ticket",
+      "mode": "dry_run",
+      "ledger_state": "simulated",
+      "reason": null,
+      "attempts": 0,
+      "remote_id": null
+    }
+  ],
+  "retry_count": 0,
+  "error_message": null,
+  "routing_status": "gatekeeper_approved",
+  "pii_entity_counts": {
+    "PERSON": 1,
+    "PHONE": 1
+  }
+}

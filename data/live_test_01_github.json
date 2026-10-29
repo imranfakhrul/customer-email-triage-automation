@@ -1,0 +1,6 @@
+{
+  "email_id": "live_test_01_github",
+  "sender_email": "sarah.jenkins@megacorp.io",
+  "email_subject": "500 Internal Server Error in payment webhook ingress service",
+  "email_body": "Hello Engineering Team,\n\nWe are experiencing intermittent HTTP 500 Internal Server Errors in our production payment webhook ingress service since 06:30 UTC today.\nThe stack trace points to a NullPointerException in WebhookHandler.java line 142 during Redis session lookup.\nAround 12% of incoming webhooks are failing with connection pool exhaustion:\njava.lang.NullPointerException: Cannot invoke \"SessionPool.getConnection()\" because \"this.pool\" is null.\n\nCould you please investigate and push a patch to the hotfix branch?\n\nBest regards,\nSarah Jenkins\nInfrastructure Operations Lead\nPhone: +1 415-555-8291\nMegaCorp Technologies"
+}
