@@ -124,6 +124,7 @@ Customer-Email-Triage-Automation/
 │   ├── hitl_queue.py         # Node 07: Phase 2 human-in-the-loop review queue
 │   └── dispatcher.py         # Node 08: Phase 2 outbound routing & adapter execution
 ├── scripts/
+│   ├── build_e2e_case_artifacts.py # Generates live e2e test cases & markdown audit reports
 │   ├── crm_smoke_test.py     # Sandbox smoke test for HubSpot CRM adapter
 │   ├── freescout_smoke_test.py # Sandbox smoke test for FreeScout helpdesk adapter
 │   ├── github_smoke_test.py  # Sandbox smoke test for GitHub Issues adapter
@@ -133,8 +134,17 @@ Customer-Email-Triage-Automation/
 │   ├── phase2_worker.py      # Autonomous background queue worker daemon
 │   ├── renew_mailbox_watch.py# Gmail Cloud Pub/Sub watch setup and 7-day renewal CLI
 │   └── webhook_smoke_test.py # Sandbox smoke test for Slack/Generic webhook adapter
+├── test/ -> tests/e2e_pipeline_cases # Direct symlink for test case exploration
+├── test_cases/ -> tests/e2e_pipeline_cases # Showcase test cases for client demo
 ├── tests/                    # Comprehensive unit and integration test suite (602 tests)
 │   ├── conftest.py           # Test isolation fixtures & network egress guards
+│   ├── e2e_pipeline_cases/   # 6 end-to-end showcase test folders with full traces
+│   │   ├── 01_github_issue/  # GitHub bug report case (500 Internal Server Error)
+│   │   ├── 02_crm_lead/      # HubSpot CRM sales lead case (350-seat demo)
+│   │   ├── 03_freescout_ticket/ # FreeScout helpdesk support ticket case
+│   │   ├── 04_webhook_alert/ # Urgent duplicate invoice charge & HITL review case
+│   │   ├── 05_malware_threat/# Adversarial DAN prompt injection jailbreak case
+│   │   └── 06_security_vulnerability/ # Security session token leak disclosure case
 │   ├── test_a12_container_security.py
 │   ├── test_a14_dependency_pinning.py
 │   ├── test_architecture_doc.py
@@ -480,6 +490,126 @@ To connect directly to another CRM's native REST API without middleware:
    ```
 
 The dispatcher router (`nodes/dispatcher.py`) will automatically route all `Demo Request` and `Pricing Inquiry` emails to your new CRM adapter with full outbox ledger tracking, deduplication, and retry policies.
+
+---
+
+## 📬 Real-Time Gmail to CRM Ingestion Architecture
+
+This system automates the ingestion of real customer emails from Google Workspace/Gmail directly into HubSpot CRM (or Salesforce, Pipedrive, Zoho) while maintaining strict local privacy guardrails.
+
+### End-to-End Ingestion Flow
+
+```mermaid
+flowchart LR
+    A["Inbound Gmail Message"] --> B["Google Cloud Pub/Sub Topic"]
+    B --> C["FastAPI Webhook Listener<br/><code>/api/v1/webhooks/gmail</code>"]
+    C --> D["GmailConnector<br/><code>refetch_original_email()</code>"]
+    D --> E["Local spaCy NER Redaction<br/>(0% Raw PII to LLM)"]
+    E --> F["Gatekeeper & Classifier<br/>(Groq / Jev AI)"]
+    F --> G{"HITL Review Queue"}
+    G -->|"Auto-Approved"| H["CRM Adapter<br/>(Selective Unmasking)"]
+    G -->|"Review Triggered"| I["Operator Admin Queue"]
+    I -->|"Approved by Human"| H
+    H --> J["HubSpot / Salesforce<br/>(Contact & Lead Created)"]
+```
+
+### 1. Gmail Pub/Sub Watch & Push Notification
+* **Automated 7-Day Watch:** The [`scripts/renew_mailbox_watch.py`](file:///mnt/D48444128443F610/Customer-Email-Triage-Automation/scripts/renew_mailbox_watch.py) utility calls the Gmail API `users.watch()` endpoint to register a Cloud Pub/Sub topic.
+* **Scheduled Renewal:** Run `python scripts/renew_mailbox_watch.py --renew` as a weekly cron job (`0 0 */5 * *`) to keep mailbox push events continuously active.
+* **Real-Time Push Listener:** When an email arrives, Google Cloud Pub/Sub delivers an HTTP POST request to your `/api/v1/webhooks/gmail` webhook receiver with the mailbox history ID.
+
+### 2. Message Retrieval & Privacy Redaction
+* **MIME Header Extraction:** [`GmailConnector.refetch_original_email()`](file:///mnt/D48444128443F610/Customer-Email-Triage-Automation/utils/mailbox/gmail_connector.py) retrieves the RFC 822 MIME message, parses SPF/DKIM/DMARC authentication results, and decodes the message body.
+* **Local Redaction:** Before any external AI call, [`pii_masker.py`](file:///mnt/D48444128443F610/Customer-Email-Triage-Automation/nodes/pii_masker.py) redacts names, phones, credit cards, and addresses locally on CPU.
+
+### 3. CRM Lead Creation with Selective Unmasking
+* **Target Intent:** Inquiries categorized as `Demo Request` or `Pricing Inquiry` are routed to the CRM adapter ([`utils/adapters/crm_adapter.py`](file:///mnt/D48444128443F610/Customer-Email-Triage-Automation/utils/adapters/crm_adapter.py)).
+* **Selective Unmasking:** The adapter unmasks the real sender email, customer name, phone number, and corporate domain so sales reps have actionable contact details in HubSpot.
+* **Secret Protection:** Credit cards, SSNs, IBANs, and API keys are **permanently masked** and cannot leave the local pipeline.
+* **Spreadsheet Hardening:** All lead properties are defanged against CSV formula injection (`=`, `+`, `-`, `@`) to protect sales reps when exporting data to Excel or Google Sheets.
+
+---
+
+## 🖥️ Operator Admin Panel Architecture (Design & Recommendations)
+
+For production deployment, an operator admin panel enables customer support leads, sales managers, and compliance officers to supervise automated triage, review quarantined tickets, and monitor mailbox health.
+
+### Recommended Technology Stack
+* **Framework:** **FastAPI + HTMX & Tailwind CSS (Jinja2 templates)**
+  * **Why We Recommend This:** Runs within the exact same Python virtual environment and container runtime. Requires zero `node_modules` or complex frontend build tooling. Directly queries the SQLite database (`WAL` mode) with low read latency and streams live state updates over HTML.
+
+### Core Operator Modules
+1. **Live Email Stream & Triage Feed:**
+   * Real-time table of inbound emails with status badges (`processing`, `gatekeeper_approved`, `done`, `manual_review`).
+   * Clean preview of masked text with redacted entity count badges (`PERSON: 2`, `PHONE: 1`).
+   * Engine tracking indicator showing whether Jev AI, Groq LLM, or Heuristics processed the decision.
+2. **Interactive Human-in-the-Loop (HITL) Queue:**
+   * Web UI replacing [`scripts/hitl_cli.py`](file:///mnt/D48444128443F610/Customer-Email-Triage-Automation/scripts/hitl_cli.py).
+   * Visual gating reason indicators (e.g., *Confidence 0.62 below 0.85 threshold*, *Customer Emotion: Frustrated*, *Mandatory Security/Account Policy*).
+   * One-click action buttons: `[Approve to CRM]`, `[Route to FreeScout]`, `[Override Category]`, and `[Quarantine as Threat]`.
+3. **CRM Lead & Outbox Ledger Monitor:**
+   * Full visibility into the outbox ledger (`p2_dispatch_log`) showing remote IDs (`crm:1059281`, `github:8821`), retry attempts, and SHA-256 payload audit hashes.
+   * Visual circuit breaker indicators for outbound SaaS endpoints.
+4. **Mailbox & Token Health Dashboard:**
+   * Gmail OAuth access token expiration countdown timer with one-click re-authorization.
+   * Pub/Sub watch status monitor with expiration alerts.
+5. **Access-Controlled Audit Log:**
+   * Immutable logging tracking every time a human reviewer inspects an unmasked ticket, maintaining strict compliance.
+
+---
+
+## 📦 Client Delivery & Quickstart Playbook
+
+To demonstrate or deploy this project to the client, follow this simple 5-step walkthrough:
+
+### Step 1: Configure Environment (`.env`)
+```bash
+cp .env.example .env
+# Fill in your GROQ_API_KEY (and optional JEV_API_KEY, GITHUB_TOKEN, FREESCOUT_API_KEY, CRM_API_KEY)
+```
+
+### Step 2: Run Full Automated Verification Suite
+Verify all unit tests, benchmark scenarios, and privacy egress checks pass:
+```bash
+./check.sh all
+```
+
+### Step 3: Test Real-World Showcase Cases
+The project includes 6 pre-built real-world test cases in [`test_cases/`](file:///mnt/D48444128443F610/Customer-Email-Triage-Automation/test_cases/):
+
+```bash
+# 1. GitHub Bug Report (500 Error -> Auto-Approved -> GitHub Issue)
+./venv/bin/python main.py --input test_cases/01_github_issue/email.json --phase2 --live
+
+# 2. HubSpot CRM Sales Lead (350-Seat Demo -> Auto-Approved -> CRM Lead)
+./venv/bin/python main.py --input test_cases/02_crm_lead/email.json --phase2 --live
+
+# 3. FreeScout Support Ticket (Notification Help -> Auto-Approved -> FreeScout Ticket)
+./venv/bin/python main.py --input test_cases/03_freescout_ticket/email.json --phase2 --live
+
+# 4. Urgent Billing Dispute (Duplicate Charge -> HITL Queue Gating)
+./venv/bin/python main.py --input test_cases/04_webhook_alert/email.json --phase2 --live
+
+# 5. Malware & Jailbreak Defense (DAN Override -> Quarantined Pre-LLM)
+./venv/bin/python main.py --input test_cases/05_malware_threat/email.json --phase2 --live
+
+# 6. Security Vulnerability (Token Leak -> Mandatory Security HITL Gating)
+./venv/bin/python main.py --input test_cases/06_security_vulnerability/email.json --phase2 --live
+```
+
+### Step 4: Resolve Human-in-the-Loop Tickets via CLI
+Review and resolve any quarantined or escalated items:
+```bash
+./venv/bin/python scripts/hitl_cli.py list
+./venv/bin/python scripts/hitl_cli.py show case_04_webhook_alert
+./venv/bin/python scripts/hitl_cli.py approve case_04_webhook_alert --by ops_lead --notes "Approved for billing dispatch"
+```
+
+### Step 5: Start Autonomous Queue Worker
+To run the continuous background triage daemon:
+```bash
+bash tools/run_worker.sh
+```
 
 ---
 
