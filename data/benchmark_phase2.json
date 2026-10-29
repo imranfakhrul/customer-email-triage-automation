@@ -457,6 +457,7 @@
       "category": "Billing Issue",
       "priority": "Critical",
       "destination": "freescout",
+      "secondary_destination": "webhook",
       "hitl_status": "auto_approved",
       "p2_status": "done"
     }
@@ -479,6 +480,7 @@
       "category": "Billing Issue",
       "priority": "Critical",
       "destination": "freescout",
+      "secondary_destination": "webhook",
       "hitl_status": "auto_approved",
       "p2_status": "done"
     }
@@ -501,6 +503,7 @@
       "category": "Refund Request",
       "priority": "High",
       "destination": "freescout",
+      "secondary_destination": "webhook",
       "hitl_status": "auto_approved",
       "p2_status": "done"
     }
@@ -523,6 +526,7 @@
       "category": "Refund Request",
       "priority": "High",
       "destination": "freescout",
+      "secondary_destination": "webhook",
       "hitl_status": "auto_approved",
       "p2_status": "done"
     }
@@ -545,6 +549,7 @@
       "category": "Billing Issue",
       "priority": "Critical",
       "destination": "freescout",
+      "secondary_destination": "webhook",
       "hitl_status": "auto_approved",
       "p2_status": "done"
     }

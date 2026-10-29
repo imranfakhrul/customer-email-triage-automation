@@ -315,8 +315,13 @@ class FreeScoutAdapter(BaseDestinationAdapter):
                 return DispatchResult(remote_id=dup_id)
 
             if existing_conv_id:
+                record = (
+                    payload.to_dict(include_pii=self._unmask_pii)
+                    if isinstance(payload, DispatchPayload)
+                    else asdict(payload)
+                )
                 thread_payload = build_thread_reply_payload(
-                    asdict(payload),
+                    record,
                     idempotency_key=payload.idempotency_key,
                     unmask_pii=self._unmask_pii,
                 )
@@ -353,8 +358,13 @@ class FreeScoutAdapter(BaseDestinationAdapter):
                     raise AdapterPermanentError("freescout_auth_failed")
 
         # 2. Create New Conversation
+        record = (
+            payload.to_dict(include_pii=self._unmask_pii)
+            if isinstance(payload, DispatchPayload)
+            else asdict(payload)
+        )
         conv_payload = build_conversation_payload(
-            asdict(payload),
+            record,
             mailbox_id=self._mailbox_id,
             idempotency_key=payload.idempotency_key,
             unmask_pii=self._unmask_pii,

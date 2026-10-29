@@ -232,3 +232,55 @@ def test_freescout_timeout_raises_unknown_outcome_error():
         with pytest.raises(AdapterUnknownOutcomeError) as exc_info:
             adapter.dispatch(payload)
         assert "freescout_network_timeout" in str(exc_info.value)
+
+
+@patch.dict("os.environ", {"FREESCOUT_API_KEY": "test-key"})
+def test_freescout_dispatch_from_record_with_unmask_pii_sends_real_customer_email():
+    """Verify that DispatchPayload.from_record passes sender_email to FreeScout."""
+    adapter = FreeScoutAdapter(
+        target="https://support.example.com",
+        mailbox_id=1,
+        unmask_pii=True,
+    )
+    record = {
+        "email_id": "em_fs_unmask_01",
+        "message_id": "<msg_unmask_01@example.com>",
+        "thread_id": "th_fs_unmask_01",
+        "sender_email": "buyer@shop.com",
+        "masked_subject": "Order assistance for [PERSON_1_1111]",
+        "masked_body": "Hello, my phone is [PHONE_1_1111]. Thanks, [PERSON_1_1111]",
+        "token_map": {
+            "[PERSON_1_1111]": "Alice Smith",
+            "[PHONE_1_1111]": "+1-555-0199",
+            "[CREDIT_CARD_1_1111]": "4111111111111111",
+        },
+        "category": "General Query",
+        "priority": "Medium",
+    }
+    payload = DispatchPayload.from_record(
+        record,
+        action_type="create_ticket",
+        idempotency_key="em_fs_unmask_01:freescout:create_ticket",
+    )
+
+    with patch.object(adapter, "_request") as mock_req:
+        resp_list = MagicMock()
+        resp_list.status_code = 200
+        resp_list.json.return_value = {"_embedded": {"conversations": []}}
+
+        resp_post = MagicMock()
+        resp_post.status_code = 201
+        resp_post.json.return_value = {"id": 12345}
+
+        mock_req.side_effect = [resp_list, resp_post]
+
+        result = adapter.dispatch(payload)
+        assert result.remote_id == "freescout:12345"
+
+        post_call = mock_req.call_args_list[1]
+        sent_json = post_call.kwargs.get("json_data") or post_call[1].get("json_data")
+        assert sent_json["customer"]["email"] == "buyer@shop.com"
+        assert "Alice Smith" in sent_json["threads"][0]["text"]
+        assert "+1-555-0199" in sent_json["threads"][0]["text"]
+        assert "4111111111111111" not in sent_json["threads"][0]["text"]
+

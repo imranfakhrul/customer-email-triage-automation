@@ -156,6 +156,7 @@ def ingest_node(
         "raw_body": raw_body,
         "has_attachments": has_attachments,
         "is_active_thread": is_active_thread,
+        "auth_status": auth_status,
         "dispatch_status": "processing",
         "retry_count": retry_count,
         "routing_status": routing_status,

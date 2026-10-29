@@ -199,3 +199,54 @@ def test_crm_timeout_raises_unknown_outcome_error():
     with pytest.raises(AdapterUnknownOutcomeError) as exc_info:
         adapter.dispatch(_make_payload())
     assert "crm_network_timeout" in str(exc_info.value)
+
+
+def test_crm_dispatch_from_record_with_unmask_pii_sends_real_customer_email():
+    """Verify that DispatchPayload.from_record passes sender_email to CRM."""
+    mock_session = MagicMock()
+    search_res = MagicMock(status_code=200)
+    search_res.json.return_value = {"total": 0, "results": []}
+
+    post_res = MagicMock(status_code=201)
+    post_res.json.return_value = {"id": "1059281"}
+
+    mock_session.request.side_effect = [search_res, post_res]
+
+    adapter = CRMAdapter(
+        target="https://api.hubapi.com",
+        api_key="test-api-key",
+        session=mock_session,
+        unmask_pii=True,
+    )
+    record = {
+        "email_id": "em_crm_unmask_01",
+        "message_id": "<msg_unmask_01@enterprise.com>",
+        "thread_id": "th_crm_unmask_01",
+        "sender_email": "jane@acmecorp.com",
+        "masked_subject": "Enterprise Demo Request for [PERSON_1_2222]",
+        "masked_body": "Hi, I am [PERSON_1_2222]. Please call [PHONE_1_2222].",
+        "token_map": {
+            "[PERSON_1_2222]": "Jane Doe",
+            "[PHONE_1_2222]": "+1-555-0144",
+            "[CREDIT_CARD_1_2222]": "4111111111111111",
+        },
+        "category": "Demo Request",
+        "priority": "High",
+    }
+    payload = DispatchPayload.from_record(
+        record,
+        action_type="create_lead",
+        idempotency_key="em_crm_unmask_01:crm:create_lead",
+    )
+
+    result = adapter.dispatch(payload)
+    assert result.remote_id == "crm:1059281"
+
+    post_call = mock_session.request.call_args_list[1]
+    sent_json = post_call.kwargs.get("json") or post_call[1].get("json")
+    props = sent_json["properties"]
+    assert props["email"] == "jane@acmecorp.com"
+    assert props["firstname"] == "Jane"
+    assert props["lastname"] == "Doe"
+    assert props["phone"] == "+1-555-0144"
+

@@ -159,6 +159,12 @@ def dispatcher_node(
     ):
         return {"p2_status": "not_eligible", "dispatch_results": []}
 
+    # Merge in-memory state fields (e.g. token_map for in-memory pipeline dispatch)
+    if state.get("token_map") and "token_map" not in record:
+        record["token_map"] = state.get("token_map")
+    if state.get("sender_email") and not record.get("sender_email"):
+        record["sender_email"] = state.get("sender_email")
+
     # 2. Determine actions
     category = str(record["p2_category"])
     priority = str(record.get("p2_priority") or "Medium")

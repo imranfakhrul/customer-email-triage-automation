@@ -72,6 +72,7 @@ def prepare_initial_state(payload: Dict[str, Any]) -> TriageState:
         "raw_body": raw_body,
         "has_attachments": bool(payload.get("has_attachments", False)),
         "is_active_thread": None,
+        "auth_status": payload.get("auth_status"),
         "cleaned_body": payload.get("cleaned_body"),
         "masked_body": payload.get("masked_body"),
         "masked_subject": payload.get("masked_subject"),

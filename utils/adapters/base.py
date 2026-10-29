@@ -10,12 +10,13 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # 1. Dispatch Data Models
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class DispatchPayload:
     """Privacy-hardened data payload for downstream destination adapters.
 
-    Guarantees that zero unmasked customer PII (sender_email, token_map, raw text)
-    can ever reach external destination adapters.
+    Guarantees that unauthorized destinations receive only masked text and sender domain.
+    Authorized support/CRM destinations may access sender_email and token_map for
+    Universal Selective Unmasking when unmask_pii is enabled.
     """
 
     email_id: str
@@ -34,6 +35,56 @@ class DispatchPayload:
     p2_classifier_used: str
     action_type: str
     idempotency_key: str
+
+    def __init__(
+        self,
+        email_id: str,
+        message_id: str,
+        thread_id: str,
+        category: str,
+        priority: str,
+        sentiment: str,
+        customer_emotion: str,
+        summary: str,
+        suggested_team: str,
+        confidence: float,
+        masked_subject: str,
+        masked_body: str,
+        sender_domain: str,
+        p2_classifier_used: str,
+        action_type: str,
+        idempotency_key: str,
+        sender_email: str | None = None,
+        token_map: dict[str, str] | None = None,
+    ) -> None:
+        object.__setattr__(self, "email_id", email_id)
+        object.__setattr__(self, "message_id", message_id)
+        object.__setattr__(self, "thread_id", thread_id)
+        object.__setattr__(self, "category", category)
+        object.__setattr__(self, "priority", priority)
+        object.__setattr__(self, "sentiment", sentiment)
+        object.__setattr__(self, "customer_emotion", customer_emotion)
+        object.__setattr__(self, "summary", summary)
+        object.__setattr__(self, "suggested_team", suggested_team)
+        object.__setattr__(self, "confidence", confidence)
+        object.__setattr__(self, "masked_subject", masked_subject)
+        object.__setattr__(self, "masked_body", masked_body)
+        object.__setattr__(self, "sender_domain", sender_domain)
+        object.__setattr__(self, "p2_classifier_used", p2_classifier_used)
+        object.__setattr__(self, "action_type", action_type)
+        object.__setattr__(self, "idempotency_key", idempotency_key)
+        object.__setattr__(self, "_sender_email", sender_email)
+        object.__setattr__(self, "_token_map", token_map)
+
+    @property
+    def sender_email(self) -> str | None:
+        """Original sender email (accessible for authorized destinations with unmask_pii)."""
+        return getattr(self, "_sender_email", None)
+
+    @property
+    def token_map(self) -> dict[str, str] | None:
+        """In-memory redaction token map (accessible for authorized destinations)."""
+        return getattr(self, "_token_map", None)
 
     @classmethod
     def from_record(
@@ -98,6 +149,13 @@ class DispatchPayload:
             record.get("p2_classifier_used") or record.get("classifier_used") or ""
         )
 
+        sender_email_val = str(record.get("sender_email") or "").strip() or None
+        token_map_val = (
+            dict(record["token_map"])
+            if isinstance(record.get("token_map"), dict) and record["token_map"]
+            else None
+        )
+
         return cls(
             email_id=str(record.get("email_id") or ""),
             message_id=str(record.get("message_id") or ""),
@@ -115,15 +173,27 @@ class DispatchPayload:
             p2_classifier_used=str(p2_classifier_used),
             action_type=str(action_type),
             idempotency_key=str(idempotency_key),
+            sender_email=sender_email_val,
+            token_map=token_map_val,
         )
 
-    def to_dict(self) -> dict[str, Any]:
-        """Converts payload to a standard dictionary representation."""
-        return asdict(self)
+    def to_dict(self, include_pii: bool = False) -> dict[str, Any]:
+        """Converts payload to a standard dictionary representation.
+
+        By default, returns strictly the 16 non-PII fields. If include_pii=True,
+        includes sender_email and token_map for authorized downstream unmasking.
+        """
+        d = asdict(self)
+        if include_pii:
+            if self.sender_email:
+                d["sender_email"] = self.sender_email
+            if self.token_map:
+                d["token_map"] = self.token_map
+        return d
 
     def sha256(self) -> str:
         """Returns stable SHA-256 hexadecimal digest of canonical UTF-8 JSON representation."""
-        payload_json = json.dumps(self.to_dict(), sort_keys=True)
+        payload_json = json.dumps(self.to_dict(include_pii=False), sort_keys=True)
         return hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
 
 

@@ -373,6 +373,14 @@ def run_phase2_benchmark_suite(
             failed_reasons.append(
                 f"destination: exp {expected.get('destination')} != act {actual_dest}"
             )
+        if expected.get("secondary_destination"):
+            exp_sec = expected.get("secondary_destination")
+            act_sec = disp[1]["destination"] if len(disp) > 1 else None
+            if act_sec != exp_sec:
+                case_passed = False
+                failed_reasons.append(
+                    f"secondary_destination: exp {exp_sec} != act {act_sec}"
+                )
 
         if not case_passed:
             all_passed = False
@@ -386,7 +394,12 @@ def run_phase2_benchmark_suite(
 
         cat_str = str(actual_cat or "-")[:16]
         prio_str = str(actual_prio or "-")[:8]
-        dest_str = str(actual_dest or "-")[:9]
+        dest_display = (
+            f"{disp[0]['destination']}+{disp[1]['destination']}"
+            if len(disp) > 1
+            else str(actual_dest or "-")
+        )
+        dest_str = dest_display[:9]
         hitl_str = str(actual_hitl or "-")[:13]
         p2_str = str(actual_p2 or "-")[:12]
 
@@ -438,12 +451,15 @@ def count_pii_entities(token_map: Optional[Dict[str, str]]) -> Dict[str, int]:
     return dict(sorted(counts.items()))
 
 
-def process_single_email(json_path: str, offline: bool = False) -> None:
+def process_single_email(
+    json_path: str, offline: bool = False, phase2: bool = False
+) -> None:
     """Processes a single email JSON file through the triage pipeline and prints output.
 
     Args:
         json_path: Path to the JSON payload file.
         offline: Whether to force offline deterministic mode.
+        phase2: Whether to run the full Phase 2 pipeline.
     """
     if not os.path.exists(json_path):
         print(f"[-] Input file does not exist: {json_path}", file=sys.stderr)
@@ -464,13 +480,20 @@ def process_single_email(json_path: str, offline: bool = False) -> None:
             if offline
             else None
         )
-        pipeline = create_triage_pipeline(db=db, client=client, offline=offline)
+        pipeline = create_triage_pipeline(
+            db=db, client=client, offline=offline, phase2=phase2
+        )
         result = run_triage_pipeline(
-            payload, pipeline=pipeline, db=db, client=client, offline=offline
+            payload,
+            pipeline=pipeline,
+            db=db,
+            client=client,
+            offline=offline,
+            phase2=phase2,
         )
 
         print("\n--- Pipeline Triage Result ---")
-        output_summary = {
+        output_summary: dict[str, Any] = {
             "email_id": result.get("email_id"),
             "routing_status": result.get("routing_status"),
             "is_active_thread": bool(result.get("is_active_thread", False)),
@@ -486,6 +509,21 @@ def process_single_email(json_path: str, offline: bool = False) -> None:
             "pii_entity_counts": count_pii_entities(result.get("token_map")),
             "masked_body_preview": (result.get("masked_body") or "")[:200],
         }
+        if phase2:
+            cl = result.get("classification")
+            cl_dict = None
+            if cl is not None and hasattr(cl, "model_dump"):
+                cl_dict = cl.model_dump()
+            elif isinstance(cl, dict):
+                cl_dict = cl
+
+            output_summary["p2_classifier_used"] = result.get("p2_classifier_used")
+            output_summary["classification"] = cl_dict
+            output_summary["hitl_status"] = result.get("hitl_status")
+            output_summary["hitl_reason"] = result.get("hitl_reason")
+            output_summary["p2_status"] = result.get("p2_status")
+            output_summary["dispatch_results"] = result.get("dispatch_results")
+
         print(json.dumps(output_summary, indent=2))
     except Exception as exc:
         # Crucial: Never echo payload contents, token_map, or sensitive values on error
@@ -560,7 +598,7 @@ def main() -> None:
     prepare_runtime(offline=is_offline)
 
     if args.input:
-        process_single_email(args.input, offline=is_offline)
+        process_single_email(args.input, offline=is_offline, phase2=args.phase2)
     elif args.phase2:
         success = run_phase2_benchmark_suite(
             benchmark_path=args.dataset,

@@ -216,8 +216,13 @@ class CRMAdapter(BaseDestinationAdapter):
         Returns:
             remote_id string e.g. 'crm:1059281' if found, else None.
         """
+        record = (
+            payload.to_dict(include_pii=self._unmask_pii)
+            if isinstance(payload, DispatchPayload)
+            else asdict(payload)
+        )
         contact_payload = build_hubspot_payload(
-            asdict(payload),
+            record,
             idempotency_key=idempotency_key,
             unmask_pii=self._unmask_pii,
         )
@@ -259,8 +264,13 @@ class CRMAdapter(BaseDestinationAdapter):
             raise AdapterPermanentError("crm_not_configured")
 
         # 1. Build Ingestion Payload
+        record = (
+            payload.to_dict(include_pii=self._unmask_pii)
+            if isinstance(payload, DispatchPayload)
+            else asdict(payload)
+        )
         contact_payload = build_hubspot_payload(
-            asdict(payload),
+            record,
             idempotency_key=payload.idempotency_key,
             unmask_pii=self._unmask_pii,
         )

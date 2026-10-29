@@ -133,7 +133,7 @@ Customer-Email-Triage-Automation/
 │   ├── phase2_worker.py      # Autonomous background queue worker daemon
 │   ├── renew_mailbox_watch.py# Gmail Cloud Pub/Sub watch setup and 7-day renewal CLI
 │   └── webhook_smoke_test.py # Sandbox smoke test for Slack/Generic webhook adapter
-├── tests/                    # Comprehensive unit and integration test suite (599 tests)
+├── tests/                    # Comprehensive unit and integration test suite (602 tests)
 │   ├── conftest.py           # Test isolation fixtures & network egress guards
 │   ├── test_a12_container_security.py
 │   ├── test_a14_dependency_pinning.py
@@ -349,7 +349,7 @@ python -m spacy download en_core_web_sm
 # 3. Configure environment
 cp .env.example .env
 
-# 4. Run automated test suite (599 tests, 100% passing)
+# 4. Run automated test suite (602 tests, 100% passing)
 pytest tests/ -v
 
 # 5. Run the Phase 1 benchmark suite across all 100 pipeline scenarios (default: offline)

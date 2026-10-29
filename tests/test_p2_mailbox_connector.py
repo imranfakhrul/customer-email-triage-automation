@@ -150,6 +150,29 @@ class TestMimeDecodingAndAuthHeaders:
         assert auth["dkim"] == "none"
         assert auth["dmarc"] == "none"
 
+    def test_pipeline_prepare_and_ingest_preserves_auth_status(self):
+        """Verify that prepare_initial_state and ingest_node preserve auth_status."""
+        from nodes.ingest import ingest_node
+        from pipeline import prepare_initial_state
+
+        raw_payload = {
+            "email_id": "em_auth_pres_01",
+            "message_id": "<auth01@acme.com>",
+            "sender_email": "alice@acme.com",
+            "email_subject": "Auth Status Pipeline Test",
+            "email_body": "Checking auth preservation.",
+            "auth_status": "pass",
+        }
+
+        # 1. Test prepare_initial_state
+        initial = prepare_initial_state(raw_payload)
+        assert initial.get("auth_status") == "pass"
+
+        # 2. Test ingest_node
+        ingested = ingest_node(initial, db=None)
+        assert ingested.get("auth_status") == "pass"
+
+
 
 class TestGmailConnectorLifecycleAndAPI:
     """Tests for OAuth lifecycle, history sync, and original text re-fetch."""

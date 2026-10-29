@@ -825,7 +825,7 @@ To guarantee strict architectural isolation and zero regressions, Phase 1 has a 
 * **Problem:** Phase 2 requires thorough benchmark validation covering all categories, edge cases, failure scenarios, and contract compliance without making live network calls in CI.
 * **Solution:**
   1. Synthetic Benchmark Dataset (`data/benchmark_phase2.json`):
-     - 50 diverse email scenarios evenly covering all 10 categories, emotional states (`Frustrated`, `Angry`, `Calm`), priority levels, and edge cases.
+     - 50 diverse email scenarios evenly covering all 10 categories, emotional states (`Frustrated`, `Angry`, `Calm`), priority levels, edge cases, and dual-dispatch assertions (verifying primary FreeScout ticket creation alongside secondary Webhook alert dispatch on High/Critical billing issues `p2_bench_021`–`p2_bench_025`).
   2. Failure-Injection Test Suite (`tests/test_p2_failure_injection.py`):
      - **Timeout after successful send:** Remote API receives payload, but client times out. Asserts ledger state is marked `'unknown'`, blind retry is avoided, and remote check confirms creation.
      - **Concurrent worker claims:** Multiple threads/processes claiming the same queue simultaneously. Asserts zero dual claims.
