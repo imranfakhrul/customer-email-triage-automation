@@ -208,7 +208,7 @@ destinations:
       cooldown_seconds: 900
 
   webhook:
-    enabled: false
+    enabled: true
     daily_cap: 200
     use_masked_text_only: false
     unmask_pii: false

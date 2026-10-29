@@ -1,0 +1,11 @@
+{
+  "email_id": "em_live_slack_001",
+  "message_id": "<20261029.live.billing001@customer.com>",
+  "thread_id": "thread_live_billing_001",
+  "sender_email": "finance@customer.com",
+  "sender_domain": "customer.com",
+  "email_subject": "Billing Notice: Duplicate invoice payment charged for invoice #INV-9821",
+  "email_body": "Hello Billing Team,\n\nWe noticed an unexpected duplicate transaction on our monthly invoice #INV-9821. It appears our account was charged twice for $4,500 on October 28th.\nCould you please investigate and issue a credit memo or refund for the duplicate payment?\n\nThank you,\nFinance Department, Customer Corp",
+  "has_attachments": false,
+  "auth_status": "pass"
+}
