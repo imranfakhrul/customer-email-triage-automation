@@ -57,12 +57,28 @@ def _clean_html_text(html_text: str) -> str:
     return " ".join(clean.split())
 
 
+def _is_trusted_gmail_auth_header(value: str) -> bool:
+    """Verifies that the Authentication-Results header originates from Google (mx.google.com).
+
+    In RFC 8601, the header begins with authserv-id. Gmail's inbound MTA writes 'mx.google.com'.
+    Ensures that domain suffixes like 'mx.google.com.attacker.com' or other MTAs are rejected.
+    """
+    val = value.strip().lower()
+    if not val.startswith("mx.google.com"):
+        return False
+    if len(val) == len("mx.google.com"):
+        return True
+    return val[len("mx.google.com")] in (";", " ", "\t", "\r", "\n")
+
+
 def extract_email_auth_results(
     headers: list[dict[str, Any]] | dict[str, Any],
 ) -> dict[str, str]:
     """Evaluates cryptographic SPF, DKIM, and DMARC authentication headers.
 
     Extracts Authentication-Results (RFC 8601) and Received-SPF (RFC 7208).
+    Enforces that only the topmost (first) Authentication-Results header with
+    authserv-id 'mx.google.com' is trusted, and parses exact method=result tokens.
 
     Args:
         headers: List of header dicts (`[{'name': ..., 'value': ...}]`) or dict.
@@ -70,45 +86,81 @@ def extract_email_auth_results(
     Returns:
         Dictionary with keys 'auth_status', 'spf', 'dkim', 'dmarc'.
     """
-    header_map: dict[str, str] = {}
+    auth_results = ""
+    received_spf = ""
+
     if isinstance(headers, list):
         for h in headers:
-            name = str(h.get("name", "")).lower()
-            val = str(h.get("value", ""))
-            header_map[name] = val
+            if not isinstance(h, dict):
+                continue
+            name = str(h.get("name", "")).strip().lower()
+            val = str(h.get("value", "")).strip()
+            # PRR-06: Use ONLY the topmost (first) Authentication-Results header
+            # whose authserv-id is mx.google.com. Never allow lower headers to overwrite it.
+            if name == "authentication-results" and not auth_results:
+                if _is_trusted_gmail_auth_header(val):
+                    auth_results = val.lower()
+            elif name == "received-spf" and not received_spf:
+                received_spf = val.lower()
     elif isinstance(headers, dict):
         for k, v in headers.items():
-            header_map[str(k).lower()] = str(v)
-
-    auth_results = header_map.get("authentication-results", "").lower()
-    received_spf = header_map.get("received-spf", "").lower()
+            name = str(k).strip().lower()
+            val = str(v).strip()
+            if name == "authentication-results" and not auth_results:
+                if _is_trusted_gmail_auth_header(val):
+                    auth_results = val.lower()
+            elif name == "received-spf" and not received_spf:
+                received_spf = val.lower()
 
     # Default to none
     spf_val = "none"
     dkim_val = "none"
     dmarc_val = "none"
 
-    # Evaluate DKIM
-    if "dkim=pass" in auth_results:
-        dkim_val = "pass"
-    elif "dkim=fail" in auth_results:
-        dkim_val = "fail"
+    # PRR-06: Parse RFC 8601 method=result tokens using bounded token boundaries
+    # rather than naive substring matching.
+    if auth_results:
+        # DKIM token evaluation
+        dkim_tokens = re.findall(r"(?:^|[\s;])dkim=([a-z0-9_-]+)", auth_results)
+        if "fail" in dkim_tokens:
+            dkim_val = "fail"
+        elif "pass" in dkim_tokens:
+            dkim_val = "pass"
+        elif dkim_tokens:
+            dkim_val = dkim_tokens[0]
 
-    # Evaluate SPF
-    if "spf=pass" in auth_results or received_spf.startswith("pass"):
-        spf_val = "pass"
-    elif "spf=fail" in auth_results or received_spf.startswith("fail"):
-        spf_val = "fail"
-    elif "spf=softfail" in auth_results or received_spf.startswith("softfail"):
-        spf_val = "softfail"
-    elif "spf=neutral" in auth_results or received_spf.startswith("neutral"):
-        spf_val = "neutral"
+        # DMARC token evaluation
+        dmarc_tokens = re.findall(r"(?:^|[\s;])dmarc=([a-z0-9_-]+)", auth_results)
+        if "fail" in dmarc_tokens:
+            dmarc_val = "fail"
+        elif "pass" in dmarc_tokens:
+            dmarc_val = "pass"
+        elif dmarc_tokens:
+            dmarc_val = dmarc_tokens[0]
 
-    # Evaluate DMARC
-    if "dmarc=pass" in auth_results:
-        dmarc_val = "pass"
-    elif "dmarc=fail" in auth_results:
-        dmarc_val = "fail"
+        # SPF token evaluation from Authentication-Results
+        spf_tokens = re.findall(r"(?:^|[\s;])spf=([a-z0-9_-]+)", auth_results)
+        if "fail" in spf_tokens:
+            spf_val = "fail"
+        elif "pass" in spf_tokens:
+            spf_val = "pass"
+        elif "softfail" in spf_tokens:
+            spf_val = "softfail"
+        elif "neutral" in spf_tokens:
+            spf_val = "neutral"
+        elif spf_tokens:
+            spf_val = spf_tokens[0]
+
+    # Evaluate Received-SPF fallback if SPF was not resolved via Authentication-Results
+    if spf_val == "none" and received_spf:
+        if received_spf.startswith("pass"):
+            spf_val = "pass"
+        elif received_spf.startswith("fail"):
+            spf_val = "fail"
+        elif received_spf.startswith("softfail"):
+            spf_val = "softfail"
+        elif received_spf.startswith("neutral"):
+            spf_val = "neutral"
 
     # Compute aggregate auth_status
     if dkim_val == "fail" or spf_val == "fail" or dmarc_val == "fail":

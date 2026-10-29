@@ -94,4 +94,5 @@ needed .env; Phase 2 overwriting Phase 1 status values; unbounded regex gaps; re
 in worker pipeline; redundant LLM calls on already-classified jobs; unregistered adapters leaving production
 dispatches deferred as adapter_unavailable; mapping deferred and dead-letter dispatches to done; unmasker
 falling back to raw customer text when masked_body is empty; mailbox re-fetch swapping in raw text without
-re-masking high-risk secrets.
+re-masking high-risk secrets; collapsing auth headers into a dict allowing injected headers to override Google
+MTA; naive substring matching on auth results.
