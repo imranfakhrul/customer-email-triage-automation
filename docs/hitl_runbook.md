@@ -142,14 +142,34 @@ If the queue worker drops connection or times out immediately after transmitting
    - **GitHub:** Search issues in `owner/repo` for the idempotency marker.
    - **FreeScout:** Search conversations for customer email and subject.
    - **CRM:** Search contacts/leads by sender email.
-3. Update Ledger based on findings:
+3. Update Ledger using `hitl_cli reconcile` (Recommended):
    - **If the remote entity was created:**
      ```bash
-     sqlite3 data/triage.db "UPDATE p2_dispatch_log SET state = 'confirmed', outcome = 'reconciled_existing' WHERE email_id = '<email_id>';"
+     ./venv/bin/python scripts/hitl_cli.py reconcile <email_id> \
+       --destination <github|freescout|crm|webhook> \
+       --status confirmed \
+       --by "operator_name" \
+       --remote-id "<remote_entity_id_or_url>"
+     ```
+     This automatically updates the outbox ledger state to `confirmed`, sets `remote_id`, and unblocks any pending HITL review so the background worker completes the job.
+
+   - **If the remote entity was NOT created:**
+     ```bash
+     ./venv/bin/python scripts/hitl_cli.py reconcile <email_id> \
+       --destination <github|freescout|crm|webhook> \
+       --status failed \
+       --by "operator_name"
+     ```
+     This marks the dispatch ledger entry as `failed` (`reason='operator_not_sent'`) and unblocks the HITL review.
+
+4. Manual Database Fallback (if CLI is unavailable):
+   - **If the remote entity was created:**
+     ```bash
+     sqlite3 data/triage.db "UPDATE p2_dispatch_log SET state = 'confirmed', remote_id = '<remote_id>', resolved_by = '<operator>' WHERE email_id = '<email_id>' AND state = 'unknown';"
      sqlite3 data/triage.db "UPDATE p2_jobs SET state = 'done' WHERE email_id = '<email_id>';"
      ```
    - **If the remote entity was NOT created:**
      ```bash
-     sqlite3 data/triage.db "UPDATE p2_dispatch_log SET state = 'failed', outcome = 'timeout_confirmed_uncreated' WHERE email_id = '<email_id>';"
+     sqlite3 data/triage.db "UPDATE p2_dispatch_log SET state = 'failed', error_message = 'operator_not_sent', resolved_by = '<operator>' WHERE email_id = '<email_id>' AND state = 'unknown';"
      sqlite3 data/triage.db "UPDATE p2_jobs SET state = 'unclaimed' WHERE email_id = '<email_id>';"
      ```

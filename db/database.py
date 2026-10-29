@@ -1263,8 +1263,10 @@ class TriageDatabase:
             PersistenceError: If row does not exist.
             LedgerStateError: If row is not currently in 'unknown' state.
         """
-        if outcome not in ("confirmed", "not_sent"):
-            raise ValueError(f"Invalid outcome '{outcome}'. Must be 'confirmed' or 'not_sent'")
+        if outcome not in ("confirmed", "not_sent", "failed"):
+            raise ValueError(
+                f"Invalid outcome '{outcome}'. Must be 'confirmed', 'not_sent', or 'failed'"
+            )
 
         if (
             not isinstance(resolved_by, str)

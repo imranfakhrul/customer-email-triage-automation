@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 """Reviewer CLI interface for Human-in-the-Loop (HITL) Queue Management.
 
-Provides an audit-trailed terminal interface to list, inspect, approve, or reject
-emails diverted to the HITL review queue.
+Provides an audit-trailed terminal interface to list, inspect, approve, reject, or reconcile
+emails diverted to the HITL review queue or unknown dispatch outbox states.
 
 Usage:
     hitl_cli.py list [--json] [--limit N]
     hitl_cli.py show EMAIL_ID
     hitl_cli.py approve EMAIL_ID --by NAME [--notes TEXT] [--category C] [--team T]
     hitl_cli.py reject EMAIL_ID --by NAME --notes TEXT
+    hitl_cli.py reconcile EMAIL_ID --destination DEST --status STATUS --by NAME [--remote-id ID]
 
 Exit codes:
     0: Success
     2: Invalid input or configuration error
-    3: Email not found or not in pending review status
+    3: Email not found, not in pending review, or ledger row not found/invalid state
 """
 
 import argparse
+import contextlib
 from datetime import datetime, timezone
 import json
 import os
@@ -29,7 +31,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 try:
-    from db.database import HitlStateError, PersistenceError, TriageDatabase
+    from db.database import HitlStateError, LedgerStateError, PersistenceError, TriageDatabase
     from utils.config import ConfigError
 except Exception as exc:
     sys.stderr.write(f"Configuration error: {exc}\n")
@@ -226,6 +228,77 @@ def cmd_reject(args: argparse.Namespace) -> None:
     sys.exit(0)
 
 
+def cmd_reconcile(args: argparse.Namespace) -> None:
+    if not args.by or not args.by.strip():
+        sys.stderr.write("Error: --by NAME is required and cannot be empty.\n")
+        sys.exit(2)
+
+    clean_status = str(args.status).strip().lower()
+    if clean_status not in ("confirmed", "failed"):
+        sys.stderr.write("Error: --status must be either 'confirmed' or 'failed'.\n")
+        sys.exit(2)
+
+    if clean_status == "confirmed" and (not args.remote_id or not args.remote_id.strip()):
+        sys.stderr.write("Error: --remote-id is required when --status is 'confirmed'.\n")
+        sys.exit(2)
+
+    db = get_db_instance()
+    logs = db.get_dispatch_log(args.email_id)
+    target_row = None
+    for row in logs:
+        if row["destination"] == args.destination and row["state"] == "unknown":
+            target_row = row
+            break
+
+    if target_row is None:
+        sys.stderr.write(
+            f"Error: No 'unknown' outcome dispatch log was found for email '{args.email_id}' "
+            f"and destination '{args.destination}' (not found or already resolved).\n"
+        )
+        sys.exit(3)
+
+    outcome = "confirmed" if clean_status == "confirmed" else "not_sent"
+    remote_id = args.remote_id.strip() if (args.remote_id and clean_status == "confirmed") else None
+
+    try:
+        db.resolve_unknown_dispatch(
+            ledger_id=target_row["id"],
+            outcome=outcome,
+            resolved_by=args.by.strip(),
+            remote_id=remote_id,
+        )
+    except ValueError as ve:
+        sys.stderr.write(f"Invalid input: {ve}\n")
+        sys.exit(2)
+    except (PersistenceError, LedgerStateError) as le:
+        sys.stderr.write(f"Ledger state error: {le}\n")
+        sys.exit(3)
+    except Exception as exc:
+        sys.stderr.write(f"Unexpected error: {type(exc).__name__}\n")
+        sys.exit(2)
+
+    # Automatically unblock pending HITL review if email was diverted due to unknown dispatch
+    record = db.get_record(args.email_id)
+    if record and record.get("hitl_status") == "pending":
+        with contextlib.suppress(Exception):
+            notes = (
+                f"Reconciled {args.destination} as {clean_status}"
+                + (f" ({remote_id})" if remote_id else "")
+            )
+            db.resolve_hitl_review(
+                email_id=args.email_id,
+                decision="approved",
+                reviewed_by=args.by.strip(),
+                notes=notes,
+            )
+
+    print(
+        f"Successfully reconciled dispatch #{target_row['id']} for email '{args.email_id}' "
+        f"to destination '{args.destination}' as '{clean_status}'."
+    )
+    sys.exit(0)
+
+
 def main():
     parser = HitlArgumentParser(
         prog="hitl_cli.py",
@@ -258,6 +331,31 @@ def main():
     p_rej.add_argument("--by", required=True, help="Operator username/identity.")
     p_rej.add_argument("--notes", required=True, help="Mandatory rejection notes.")
 
+    # reconcile
+    p_rec = subparsers.add_parser(
+        "reconcile",
+        help="Reconcile an unknown-outcome outbox ledger row.",
+    )
+    p_rec.add_argument("email_id", help="Email identifier to reconcile.")
+    p_rec.add_argument(
+        "--destination",
+        required=True,
+        choices=["github", "freescout", "crm", "webhook"],
+        help="Target destination name.",
+    )
+    p_rec.add_argument(
+        "--status",
+        required=True,
+        choices=["confirmed", "failed"],
+        help="Reconciliation outcome: 'confirmed' or 'failed'.",
+    )
+    p_rec.add_argument("--by", required=True, help="Operator username/identity.")
+    p_rec.add_argument(
+        "--remote-id",
+        default=None,
+        help="Remote identifier (required when --status is 'confirmed').",
+    )
+
     args = parser.parse_args()
 
     if args.command == "list":
@@ -268,6 +366,8 @@ def main():
         cmd_approve(args)
     elif args.command == "reject":
         cmd_reject(args)
+    elif args.command == "reconcile":
+        cmd_reconcile(args)
 
 
 if __name__ == "__main__":

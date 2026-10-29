@@ -98,4 +98,5 @@ re-masking high-risk secrets; collapsing auth headers into a dict allowing injec
 MTA; naive substring matching on auth results; synthetic customer addresses constructed on customer
 domains routing agent replies to third-party mailboxes; blind-retrying on post-write connection resets
 and ambiguous 5xx errors instead of classifying as unknown outcome; unhandled HTTP errors in thread
-append falling through to create duplicate conversations.
+append falling through to create duplicate conversations; missing CLI reconciliation for unknown-outcome
+outbox rows leaving dispatch failures trapped in infinite review loops.
