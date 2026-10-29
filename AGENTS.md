@@ -92,4 +92,4 @@ guessed API formats; fail-open defaults; swallowed config errors; subject/sender
 write reported as success; SELECT-then-UPDATE races; README numbers that did not match reality; tests that
 needed .env; Phase 2 overwriting Phase 1 status values; unbounded regex gaps; re-gating human-approved emails
 in worker pipeline; redundant LLM calls on already-classified jobs; unregistered adapters leaving production
-dispatches deferred as adapter_unavailable.
+dispatches deferred as adapter_unavailable; mapping deferred and dead-letter dispatches to done.

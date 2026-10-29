@@ -21,6 +21,7 @@ import signal
 import sys
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -164,19 +165,54 @@ def run_worker_once(
             p2_status = final_state.get("p2_status")
             hitl_status = final_state.get("hitl_status")
 
+            next_attempt_at: str | None = None
+            error_message = final_state.get("error_message")
+
             if p2_status == "hitl_pending" or hitl_status == "pending":
                 terminal_state = "hitl_pending"
+                if not error_message:
+                    error_message = "Requires HITL review"
             elif p2_status in ("dispatched", "simulated", "auto_approved"):
                 terminal_state = "done"
+            elif p2_status == "dead_letter":
+                terminal_state = "dead_letter"
+                if not error_message:
+                    error_message = "Exceeded max dispatch attempts (dead-lettered)"
             elif p2_status in ("failed", "persist_failed"):
                 terminal_state = "failed"
+                if not error_message:
+                    error_message = "Permanent dispatch failure"
+            elif p2_status == "deferred":
+                # PRR-03: Map deferred to retryable state ('unclaimed') with next_attempt_at backoff
+                terminal_state = "unclaimed"
+                dispatch_results = final_state.get("dispatch_results") or []
+                reasons = [r.get("reason") for r in dispatch_results if r.get("reason")]
+                primary_reason = reasons[0] if reasons else "deferred"
+
+                # Calculate cooldown delay
+                if primary_reason == "circuit_breaker":
+                    delay_seconds = 900.0
+                elif primary_reason == "daily_cap":
+                    delay_seconds = 3600.0
+                else:
+                    # Exponential backoff based on attempts count
+                    attempts_count = int(job.get("attempts") or 1)
+                    backoff_base = float(cfg.get("dispatch", {}).get("backoff_base_seconds", 1.0))
+                    backoff_max = float(cfg.get("dispatch", {}).get("backoff_max_seconds", 60.0))
+                    delay_seconds = min(backoff_max, backoff_base * (2 ** min(attempts_count, 6)))
+
+                next_dt = datetime.now(UTC) + timedelta(seconds=delay_seconds)
+                next_attempt_at = next_dt.strftime("%Y-%m-%d %H:%M:%S")
+                error_message = f"Deferred: {primary_reason}"
             else:
-                terminal_state = "done"
+                terminal_state = "failed"
+                error_message = f"Unhandled p2_status: {p2_status}"
 
             db_inst.finish_p2_job(
                 email_id=email_id,
                 state=terminal_state,
-                error_message=final_state.get("error_message"),
+                error_message=error_message,
+                next_attempt_at=next_attempt_at,
             )
             processed_count += 1
             logger.info("Processed job %s -> state: %s", email_id, terminal_state)

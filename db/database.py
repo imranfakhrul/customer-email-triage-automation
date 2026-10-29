@@ -186,16 +186,26 @@ class TriageDatabase:
                     attempts INTEGER NOT NULL DEFAULT 0,
                     claimed_at TEXT,
                     error_message TEXT,
+                    next_attempt_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(email_id) REFERENCES email_triage(email_id)
                 );
             """)
+            # Migration for p2_jobs: add next_attempt_at if missing
+            p2_cursor = conn.execute("PRAGMA table_info(p2_jobs);")
+            p2_existing_columns = {row["name"] for row in p2_cursor.fetchall()}
+            if "next_attempt_at" not in p2_existing_columns:
+                conn.execute("ALTER TABLE p2_jobs ADD COLUMN next_attempt_at TEXT;")
+
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_p2_jobs_state ON p2_jobs(state);"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_p2_jobs_claimed ON p2_jobs(claimed_at);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_p2_jobs_next_attempt ON p2_jobs(next_attempt_at);"
             )
 
     def get_record(self, email_id: str) -> Optional[Dict[str, Any]]:
@@ -1510,16 +1520,21 @@ class TriageDatabase:
             return cursor.rowcount
 
     def claim_p2_jobs(
-        self, batch_size: int = 10, worker_id: Optional[str] = None
+        self,
+        batch_size: int = 10,
+        worker_id: Optional[str] = None,
+        now: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
         """Atomically claims a batch of unclaimed or hitl_resolved jobs for a worker.
 
         Executes a single atomic UPDATE statement with a subquery LIMIT to eliminate
-        SELECT-then-UPDATE race conditions across concurrent workers.
+        SELECT-then-UPDATE race conditions across concurrent workers. Respects next_attempt_at
+        filtering to skip jobs in cooldown.
 
         Args:
             batch_size: Maximum number of jobs to claim (must be > 0).
             worker_id: Optional worker identifier.
+            now: Optional current datetime (defaults to UTC now).
 
         Returns:
             List of dicts representing the claimed jobs joined with email_triage fields.
@@ -1530,8 +1545,10 @@ class TriageDatabase:
             import uuid
             worker_id = f"worker_{uuid.uuid4().hex[:8]}"
 
-        now = datetime.now(timezone.utc)
+        if now is None:
+            now = datetime.now(timezone.utc)
         now_str = now.strftime("%Y-%m-%d %H:%M:%S.%f")
+        now_query_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
         with self.get_connection() as conn:
             cursor = conn.execute(
@@ -1541,15 +1558,17 @@ class TriageDatabase:
                     worker_id = ?,
                     claimed_at = ?,
                     attempts = attempts + 1,
+                    next_attempt_at = NULL,
                     updated_at = ?
                 WHERE email_id IN (
                     SELECT email_id FROM p2_jobs
                     WHERE state IN ('unclaimed', 'hitl_resolved')
+                      AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime(?))
                     ORDER BY created_at ASC
                     LIMIT ?
                 );
                 """,
-                (worker_id, now_str, now_str, batch_size),
+                (worker_id, now_str, now_str, now_query_str, batch_size),
             )
             if cursor.rowcount == 0:
                 return []
@@ -1627,14 +1646,19 @@ class TriageDatabase:
             return dlq_count + reset_count
 
     def finish_p2_job(
-        self, email_id: str, state: str, error_message: Optional[str] = None
+        self,
+        email_id: str,
+        state: str,
+        error_message: Optional[str] = None,
+        next_attempt_at: Optional[str] = None,
     ) -> None:
         """Transitions a p2_jobs record to its terminal or intermediate state.
 
         Args:
             email_id: Email identifier.
-            state: New state (e.g. 'done', 'failed', 'hitl_pending').
+            state: New state (e.g. 'done', 'failed', 'hitl_pending', 'unclaimed').
             error_message: Optional error or diagnostic message.
+            next_attempt_at: Optional ISO timestamp string for scheduled re-attempt.
 
         Raises:
             ValueError: If state is not in VALID_P2_JOB_STATES.
@@ -1647,16 +1671,33 @@ class TriageDatabase:
 
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         with self.get_connection() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE p2_jobs
-                SET state = ?,
-                    error_message = ?,
-                    updated_at = ?
-                WHERE email_id = ?;
-                """,
-                (state, error_message, now_str, email_id),
-            )
+            if state == "unclaimed":
+                # Clear active worker ownership to allow clean reclaiming after cooldown
+                cursor = conn.execute(
+                    """
+                    UPDATE p2_jobs
+                    SET state = ?,
+                        worker_id = NULL,
+                        claimed_at = NULL,
+                        next_attempt_at = ?,
+                        error_message = ?,
+                        updated_at = ?
+                    WHERE email_id = ?;
+                    """,
+                    (state, next_attempt_at, error_message, now_str, email_id),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    UPDATE p2_jobs
+                    SET state = ?,
+                        next_attempt_at = ?,
+                        error_message = ?,
+                        updated_at = ?
+                    WHERE email_id = ?;
+                    """,
+                    (state, next_attempt_at, error_message, now_str, email_id),
+                )
             if cursor.rowcount == 0:
                 raise PersistenceError(f"Job for email_id '{email_id}' not found in p2_jobs")
 
