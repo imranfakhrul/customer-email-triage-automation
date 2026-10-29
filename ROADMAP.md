@@ -23,9 +23,9 @@ Each issue is implemented individually with corresponding unit tests, verified a
 3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04a` ✅ (GitHub Formatting & Schema) ➔ `P2-04b` ✅ (GitHub Adapter & Remote Precheck) ➔ `P2-05` ✅ (FreeScout) ➔ `P2-06` ✅ (CRM) ➔ `P2-07` ✅ (Webhook)
 4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` ✅ (LangGraph Integration) ➔ `P2-09` ✅ (Queue Worker) ➔ `P2-10` ✅ (Benchmark Dataset) ➔ `P2-11` ✅ (Operational Docs)
 5. **Track 4: Mailbox Ingestion Connector:** `P2-12` ✅ (Gmail Pub/Sub Connector)
-6. **Track 5: Post-Review Production Remediation (PRR):** 13 Atomic Commits: `PRR-01` ✅ (Item 1: Stuck Approvals) ➔ `PRR-02` ⏳ (Item 2: Adapter Registration) ➔ `PRR-03` ⏳ (Item 3: Worker States) ➔ `PRR-04` ⏳ (Flow E2E Test) ➔ `PRR-05` ⏳ (Item 5: Unmasker Privacy) ➔ `PRR-06` ⏳ (Item 4: Gmail Spoof Guard) ➔ `PRR-07` ⏳ (Item 6: Fallback Domain) ➔ `PRR-08` ⏳ (Item 8: Post-Write Idempotency) ➔ `PRR-09` ⏳ (Item 9: FreeScout Fallthrough) ➔ `PRR-10` ⏳ (Item 10: HITL Reconcile) ➔ `PRR-11` ⏳ (Item 7: Webhook Allowlist) ➔ `PRR-12` ⏳ (Worker & Classifier Guards) ➔ `PRR-13` ⏳ (Gmail Auth Refresh & Pagination)
+6. **Track 5: Post-Review Production Remediation (PRR):** 13 Atomic Commits: `PRR-01` ✅ (Item 1: Stuck Approvals) ➔ `PRR-02` ✅ (Item 2: Adapter Registration) ➔ `PRR-03` ⏳ (Item 3: Worker States) ➔ `PRR-04` ⏳ (Flow E2E Test) ➔ `PRR-05` ⏳ (Item 5: Unmasker Privacy) ➔ `PRR-06` ⏳ (Item 4: Gmail Spoof Guard) ➔ `PRR-07` ⏳ (Item 6: Fallback Domain) ➔ `PRR-08` ⏳ (Item 8: Post-Write Idempotency) ➔ `PRR-09` ⏳ (Item 9: FreeScout Fallthrough) ➔ `PRR-10` ⏳ (Item 10: HITL Reconcile) ➔ `PRR-11` ⏳ (Item 7: Webhook Allowlist) ➔ `PRR-12` ⏳ (Worker & Classifier Guards) ➔ `PRR-13` ⏳ (Gmail Auth Refresh & Pagination)
 
-**Next Immediate Task:** `PRR-02` (`fix(dispatcher): [PRR-02] auto-register active production adapters at startup and on demand`).
+**Next Immediate Task:** `PRR-03` (`fix(worker): [PRR-03] handle deferred and dead-letter dispatches with retryable job states`).
 
 ---
 
@@ -884,7 +884,7 @@ This roadmap incorporates the 10 code review findings and lower-priority operati
 | # | Code | Group | Scope & Commit Description | Target Files | Status |
 |:---:|:---:|:---|:---|:---|:---:|
 | **1** | **PRR-01** | Flow (Item 1) | `fix(hitl): [PRR-01] pass through human approvals directly to dispatcher without re-gating` | `nodes/hitl_queue.py`, `scripts/phase2_worker.py`, `tests/test_p2_prr_01_hitl_approval.py` | ✅ Complete |
-| **2** | **PRR-02** | Flow (Item 2) | `fix(dispatcher): [PRR-02] auto-register active production adapters at startup and on demand` | `utils/adapters/__init__.py`, `nodes/dispatcher.py`, `scripts/phase2_worker.py`, `tests/test_p2_prr_02_adapter_registry.py` | ⏳ Pending |
+| **2** | **PRR-02** | Flow (Item 2) | `fix(dispatcher): [PRR-02] auto-register active production adapters at startup and on demand` | `utils/adapters/__init__.py`, `nodes/dispatcher.py`, `scripts/phase2_worker.py`, `tests/test_p2_prr_02_adapter_registry.py` | ✅ Complete |
 | **3** | **PRR-03** | Flow (Item 3) | `fix(worker): [PRR-03] handle deferred and dead-letter dispatches with retryable job states` | `scripts/phase2_worker.py`, `db/database.py`, `tests/test_p2_prr_03_worker_states.py` | ⏳ Pending |
 | **4** | **PRR-04** | Flow (E2E) | `test(e2e): [PRR-04] integration test asserting human approval to worker dispatch to confirmed ledger flow` | `tests/test_p2_prr_04_e2e_approval_flow.py` | ⏳ Pending |
 | **5** | **PRR-05** | Security (Item 5) | `fix(unmasker): [PRR-05] fail closed on missing masked text and re-scrub secrets on mailbox re-fetch` | `utils/unmasker.py`, `tests/test_p2_prr_05_unmasker_secrets.py` | ⏳ Pending |
@@ -911,7 +911,7 @@ This roadmap incorporates the 10 code review findings and lower-priority operati
 * **Done When:** Unit tests verify that pre-approved jobs traverse `hitl_queue_node` to `dispatcher_node` without re-entering `hitl_pending`.
 
 #### [PRR-02] Production Destination Adapter Registration (Item 2)
-* **Status:** ⏳ Pending
+* **Status:** ✅ Complete
 * **Scope:** `utils/adapters/__init__.py`, `nodes/dispatcher.py`, `scripts/phase2_worker.py`, `tests/test_p2_prr_02_adapter_registry.py`
 * **Problem:** `_ADAPTER_REGISTRY` is only populated in tests. In production (`dispatch.dry_run: false`), `dispatcher_node` fails to find adapters and defers every action with `adapter_unavailable`.
 * **Solution:**

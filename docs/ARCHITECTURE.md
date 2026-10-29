@@ -44,7 +44,7 @@ Incoming Email
 | `nodes/jev_gatekeeper.py` | `jev_gatekeeper_node` | `masked_subject`, `masked_body`, `email_subject`, `cleaned_body`, `email_body`, `email_id`, `is_active_thread`, `labels_to_apply` | `gatekeeper_decision`, `is_spam`, `gatekeeper_confidence`, `is_threat`, `threat_details`, `classifier_used`, `labels_to_apply`, `routing_status`, `dispatch_target`, `dispatch_status`, `is_active_thread`, `is_starred`, `error_message` | HTTPS to Jev/Groq; SQLite update | `should_route_after_gatekeeper`: `continue` (approved) or `end` (spam/manual review/persist failed) |
 | `nodes/classifier.py` | `classifier_node` | `email_id`, `masked_subject`, `masked_body` | `classification`, `p2_classifier_used` | HTTPS to Groq/Jev (if enabled) | Linear: proceeds to `nodes/hitl_queue.py` |
 | `nodes/hitl_queue.py` | `hitl_queue_node` | `email_id`, `classification`, `p2_classifier_used`, `is_threat`, `hitl_status` | `hitl_status`, `hitl_reason`, `p2_status`, `dispatch_status`, `error_message` | SQLite Phase 2 update | `should_route_after_hitl`: `continue` (auto_approved/approved) or `end` (pending/persist failed); human-approved jobs pass through without re-gating |
-| `nodes/dispatcher.py` | `dispatcher_node` | `email_id` | `p2_status`, `dispatch_results` | SQLite ledger claims (`p2_dispatch_log`), HTTPS adapter calls | `should_route_after_dispatcher`: `end` (terminal node) |
+| `nodes/dispatcher.py` | `dispatcher_node` | `email_id` | `p2_status`, `dispatch_results` | SQLite ledger claims (`p2_dispatch_log`), HTTPS adapter calls | `should_route_after_dispatcher`: `end` (terminal node); auto-registers enabled adapters on-demand |
 
 ## 4. State Contract (`TriageState`)
 - `email_id` (`str`): Ingestion (`nodes/ingest.py`). Canonical message identifier.
@@ -137,7 +137,7 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/jev_client.py`: TypeSafe System One client with Groq and heuristic fallback.
 - `utils/classifier_client.py`: Multi-tier classifier client with bounded scan and pre-filter.
 - `utils/adapters/base.py`: Abstract destination adapter contract, DispatchPayload, and DispatchResult.
-- `utils/adapters/__init__.py`: Thread-safe adapter registry and exports.
+- `utils/adapters/__init__.py`: Thread-safe adapter registry, active adapter discovery (`register_active_adapters`), and exports.
 - `utils/adapters/github_format.py`: Formatting, output hardening, and anchored marker parser for GitHub issue payloads.
 - `utils/adapters/github_adapter.py`: GitHub Issues adapter with duplicate detection and rate limit classification.
 - `utils/unmasker.py`: Universal selective unmasking and content resolution helper for destination adapters.

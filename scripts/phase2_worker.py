@@ -32,6 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from db.database import TriageDatabase  # noqa: E402
 from pipeline import create_phase2_worker_pipeline  # noqa: E402
 from state import EmailClassification, TriageState  # noqa: E402
+from utils.adapters import register_active_adapters  # noqa: E402
 from utils.config import get_config  # noqa: E402
 
 logger = logging.getLogger("phase2_worker")
@@ -81,6 +82,9 @@ def run_worker_once(
         cfg["dispatch"]["dry_run"] = True
     if offline and "classification" in cfg:
         cfg["classification"]["primary"] = "offline_heuristic"
+
+    # PRR-02: Register active destination adapters from config
+    register_active_adapters(cfg)
 
     # 1. Stale claim crash recovery
     stale_mins = int(cfg.get("system", {}).get("idempotency_stale_minutes", 15))
@@ -222,6 +226,9 @@ class Phase2Worker:
             self.config["classification"]["primary"] = "offline_heuristic"
         if self.dry_run and "dispatch" in self.config:
             self.config["dispatch"]["dry_run"] = True
+
+        # PRR-02: Register active destination adapters from config
+        register_active_adapters(self.config)
 
     def stop(self) -> None:
         """Signals the worker loop to stop gracefully."""

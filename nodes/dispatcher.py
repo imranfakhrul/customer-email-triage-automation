@@ -33,7 +33,7 @@ from typing import Any
 
 from db.database import HitlStateError, LedgerStateError, PersistenceError, TriageDatabase
 from state import TriageState
-from utils.adapters import BaseDestinationAdapter, get_adapter
+from utils.adapters import BaseDestinationAdapter, get_adapter, register_active_adapters
 from utils.adapters.base import (
     AdapterError,
     AdapterPermanentError,
@@ -191,10 +191,15 @@ def dispatcher_node(
     diverted_to_hitl = False
 
     def resolve_adapter(dest_name: str) -> BaseDestinationAdapter | None:
-        if adapters is not None and dest_name in adapters:
-            return adapters[dest_name]
+        if adapters is not None:
+            return adapters.get(dest_name)
         try:
-            return get_adapter(dest_name)
+            adapter = get_adapter(dest_name)
+            if adapter is None:
+                # PRR-02: Lazy auto-registration fallback if registry is empty
+                register_active_adapters(config)
+                adapter = get_adapter(dest_name)
+            return adapter
         except ValueError:
             return None
 
