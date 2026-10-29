@@ -952,6 +952,23 @@ class TriageDatabase:
 
         return True
 
+    def get_hitl_status(self, email_id: str) -> Optional[str]:
+        """Retrieves the current hitl_status for an email from email_triage.
+
+        Args:
+            email_id: Message identifier.
+
+        Returns:
+            The current hitl_status string or None if email_id is not found.
+        """
+        with self.get_connection() as conn:
+            cur = conn.execute(
+                "SELECT hitl_status FROM email_triage WHERE email_id = ?",
+                (email_id,),
+            )
+            row = cur.fetchone()
+            return str(row["hitl_status"]) if row and row["hitl_status"] is not None else None
+
     @staticmethod
     def build_idempotency_key(email_id: str, destination: str, action_type: str) -> str:
         """Constructs a deterministic composite idempotency key.
@@ -1543,7 +1560,10 @@ class TriageDatabase:
                        j.claimed_at, j.error_message, j.created_at, j.updated_at,
                        t.masked_subject, t.masked_body, t.sender_email,
                        t.message_id, t.thread_id, t.is_active_thread,
-                       t.gatekeeper_confidence, t.classifier_used
+                       t.gatekeeper_confidence, t.classifier_used,
+                       t.hitl_status, t.p2_category, t.p2_priority,
+                       t.p2_sentiment, t.p2_customer_emotion, t.p2_summary,
+                       t.p2_suggested_team, t.p2_confidence, t.p2_classifier_used
                 FROM p2_jobs j
                 JOIN email_triage t ON j.email_id = t.email_id
                 WHERE j.worker_id = ? AND j.state = 'claimed' AND j.claimed_at = ?

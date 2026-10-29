@@ -59,6 +59,17 @@ def classifier_node(
     """
     email_id = state.get("email_id", "<unknown>")
 
+    # PRR-01: If already classified and approved by human, preserve existing classification without redundant LLM call
+    existing_classification = state.get("classification")
+    if existing_classification is not None and state.get("hitl_status") in ("approved", "auto_approved"):
+        logger.info(
+            f"[Node 06: Classifier] Email '{email_id}' has existing classification and prior approval; preserving."
+        )
+        return {
+            "classification": existing_classification,
+            "p2_classifier_used": state.get("p2_classifier_used", "human_review"),
+        }
+
     # Strict Privacy Invariant: Node 06 must ONLY consume masked text from state.
     # Every fallback to email_subject / email_body is strictly removed.
     masked_subject = state.get("masked_subject")

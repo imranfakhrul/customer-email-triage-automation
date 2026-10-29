@@ -90,4 +90,5 @@ QUALITY
 ## 7. Mistakes already made here (do not repeat)
 guessed API formats; fail-open defaults; swallowed config errors; subject/sender sent unmasked; a failed DB
 write reported as success; SELECT-then-UPDATE races; README numbers that did not match reality; tests that
-needed .env; Phase 2 overwriting Phase 1 status values; unbounded regex gaps.
+needed .env; Phase 2 overwriting Phase 1 status values; unbounded regex gaps; re-gating human-approved emails
+in worker pipeline; redundant LLM calls on already-classified jobs.

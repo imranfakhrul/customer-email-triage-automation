@@ -52,6 +52,40 @@ def hitl_queue_node(
     classification = state.get("classification")
     p2_classifier_used = state.get("p2_classifier_used", "offline_heuristic")
 
+    # PRR-01: Check if a human reviewer already resolved this email (approved or rejected)
+    prior_hitl_status = state.get("hitl_status")
+    if db is not None and prior_hitl_status not in ("approved", "rejected"):
+        try:
+            db_hitl = db.get_hitl_status(email_id)
+            if db_hitl in ("approved", "rejected"):
+                prior_hitl_status = db_hitl
+        except Exception as exc:
+            logger.debug(
+                "[Node 07: HITL] Could not check db hitl_status for %s: %s",
+                email_id,
+                exc.__class__.__name__,
+            )
+
+    if prior_hitl_status == "approved":
+        logger.info(
+            f"[Node 07: HITL] Email '{email_id}' was human-approved; passing directly to dispatcher."
+        )
+        return {
+            "hitl_status": "approved",
+            "hitl_reason": None,
+            "p2_status": "auto_approved",
+        }
+    if prior_hitl_status == "rejected":
+        logger.info(
+            f"[Node 07: HITL] Email '{email_id}' was human-rejected; terminating dispatch."
+        )
+        return {
+            "hitl_status": "rejected",
+            "hitl_reason": "Rejected by human reviewer",
+            "p2_status": "failed",
+            "dispatch_status": "rejected",
+        }
+
     cat: Optional[str] = None
     prio: Optional[str] = None
     sent: Optional[str] = None

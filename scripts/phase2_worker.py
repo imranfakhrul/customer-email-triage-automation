@@ -31,7 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from db.database import TriageDatabase  # noqa: E402
 from pipeline import create_phase2_worker_pipeline  # noqa: E402
-from state import TriageState  # noqa: E402
+from state import EmailClassification, TriageState  # noqa: E402
 from utils.config import get_config  # noqa: E402
 
 logger = logging.getLogger("phase2_worker")
@@ -120,6 +120,22 @@ def run_worker_once(
     processed_count = 0
     for job in claimed_jobs:
         email_id = job["email_id"]
+
+        # PRR-01: Reconstitute prior classification if already classified and approved
+        existing_classification = None
+        if job.get("p2_category"):
+            existing_classification = EmailClassification(
+                category=job["p2_category"],
+                priority=job.get("p2_priority", "Medium"),
+                sentiment=job.get("p2_sentiment", "Neutral"),
+                customer_emotion=job.get("p2_customer_emotion", "Calm"),
+                summary=job.get("p2_summary", ""),
+                suggested_team=job.get("p2_suggested_team", "Support"),
+                confidence=float(job.get("p2_confidence") or 1.0),
+            )
+
+        hitl_status_val = job.get("hitl_status") or "none"
+
         initial_state: TriageState = {
             "email_id": email_id,
             "message_id": job.get("message_id") or f"<{email_id}@worker.local>",
@@ -134,6 +150,9 @@ def run_worker_once(
             "routing_status": "gatekeeper_approved",
             "status": "done",
             "unmask_pii": False,
+            "hitl_status": hitl_status_val,
+            "classification": existing_classification,
+            "p2_classifier_used": job.get("p2_classifier_used") or "offline_heuristic",
         }
 
         try:
