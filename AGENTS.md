@@ -95,4 +95,5 @@ in worker pipeline; redundant LLM calls on already-classified jobs; unregistered
 dispatches deferred as adapter_unavailable; mapping deferred and dead-letter dispatches to done; unmasker
 falling back to raw customer text when masked_body is empty; mailbox re-fetch swapping in raw text without
 re-masking high-risk secrets; collapsing auth headers into a dict allowing injected headers to override Google
-MTA; naive substring matching on auth results.
+MTA; naive substring matching on auth results; synthetic customer addresses constructed on customer
+domains routing agent replies to third-party mailboxes.

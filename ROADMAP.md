@@ -23,9 +23,9 @@ Each issue is implemented individually with corresponding unit tests, verified a
 3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04a` ✅ (GitHub Formatting & Schema) ➔ `P2-04b` ✅ (GitHub Adapter & Remote Precheck) ➔ `P2-05` ✅ (FreeScout) ➔ `P2-06` ✅ (CRM) ➔ `P2-07` ✅ (Webhook)
 4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` ✅ (LangGraph Integration) ➔ `P2-09` ✅ (Queue Worker) ➔ `P2-10` ✅ (Benchmark Dataset) ➔ `P2-11` ✅ (Operational Docs)
 5. **Track 4: Mailbox Ingestion Connector:** `P2-12` ✅ (Gmail Pub/Sub Connector)
-6. **Track 5: Post-Review Production Remediation (PRR):** 13 Atomic Commits: `PRR-01` ✅ (Item 1: Stuck Approvals) ➔ `PRR-02` ✅ (Item 2: Adapter Registration) ➔ `PRR-03` ✅ (Item 3: Worker States) ➔ `PRR-04` ✅ (Flow E2E Test) ➔ `PRR-05` ✅ (Item 5: Unmasker Privacy) ➔ `PRR-06` ✅ (Item 4: Gmail Spoof Guard) ➔ `PRR-07` ⏳ (Item 6: Fallback Domain) ➔ `PRR-08` ⏳ (Item 8: Post-Write Idempotency) ➔ `PRR-09` ⏳ (Item 9: FreeScout Fallthrough) ➔ `PRR-10` ⏳ (Item 10: HITL Reconcile) ➔ `PRR-11` ⏳ (Item 7: Webhook Allowlist) ➔ `PRR-12` ⏳ (Worker & Classifier Guards) ➔ `PRR-13` ⏳ (Gmail Auth Refresh & Pagination)
+6. **Track 5: Post-Review Production Remediation (PRR):** 13 Atomic Commits: `PRR-01` ✅ (Item 1: Stuck Approvals) ➔ `PRR-02` ✅ (Item 2: Adapter Registration) ➔ `PRR-03` ✅ (Item 3: Worker States) ➔ `PRR-04` ✅ (Flow E2E Test) ➔ `PRR-05` ✅ (Item 5: Unmasker Privacy) ➔ `PRR-06` ✅ (Item 4: Gmail Spoof Guard) ➔ `PRR-07` ✅ (Item 6: Fallback Domain) ➔ `PRR-08` ⏳ (Item 8: Post-Write Idempotency) ➔ `PRR-09` ⏳ (Item 9: FreeScout Fallthrough) ➔ `PRR-10` ⏳ (Item 10: HITL Reconcile) ➔ `PRR-11` ⏳ (Item 7: Webhook Allowlist) ➔ `PRR-12` ⏳ (Worker & Classifier Guards) ➔ `PRR-13` ⏳ (Gmail Auth Refresh & Pagination)
 
-**Next Immediate Task:** `PRR-07` (`fix(freescout): [PRR-07] enforce non-routable invalid domain for synthetic customer fallback`).
+**Next Immediate Task:** `PRR-08` (`fix(adapters): [PRR-08] split connection setup errors from post-write resets to prevent blind retries`).
 
 ---
 
@@ -889,7 +889,7 @@ This roadmap incorporates the 10 code review findings and lower-priority operati
 | **4** | **PRR-04** | Flow (E2E) | `test(e2e): [PRR-04] integration test asserting human approval to worker dispatch to confirmed ledger flow` | `tests/test_p2_prr_04_e2e_approval_flow.py` | ✅ Complete |
 | **5** | **PRR-05** | Security (Item 5) | `fix(unmasker): [PRR-05] fail closed on missing masked text and re-scrub secrets on mailbox re-fetch` | `utils/unmasker.py`, `tests/test_p2_prr_05_unmasker_secrets.py` | ✅ Complete |
 | **6** | **PRR-06** | Security (Item 4) | `fix(mailbox): [PRR-06] enforce topmost mx.google.com authentication-results header and token parsing` | `utils/mailbox/gmail_connector.py`, `tests/test_p2_prr_06_gmail_auth.py` | ✅ Complete |
-| **7** | **PRR-07** | Security (Item 6) | `fix(freescout): [PRR-07] enforce non-routable invalid domain for synthetic customer fallback` | `utils/adapters/freescout_format.py`, `tests/test_p2_prr_07_freescout_domain.py` | ⏳ Pending |
+| **7** | **PRR-07** | Security (Item 6) | `fix(freescout): [PRR-07] enforce non-routable invalid domain for synthetic customer fallback` | `utils/adapters/freescout_format.py`, `tests/test_p2_prr_07_freescout_domain.py` | ✅ Complete |
 | **8** | **PRR-08** | Idempotency (Item 8) | `fix(adapters): [PRR-08] split connection setup errors from post-write resets to prevent blind retries` | `utils/adapters/base.py`, `utils/adapters/webhook_adapter.py`, `utils/adapters/freescout_adapter.py`, `utils/adapters/crm_adapter.py`, `tests/test_p2_prr_08_post_write_retry.py` | ⏳ Pending |
 | **9** | **PRR-09** | Idempotency (Item 9) | `fix(freescout): [PRR-09] eliminate thread append unhandled error fallthrough to new conversation` | `utils/adapters/freescout_adapter.py`, `tests/test_p2_prr_09_freescout_fallthrough.py` | ⏳ Pending |
 | **10** | **PRR-10** | Idempotency (Item 10) | `feat(hitl): [PRR-10] add hitl_cli reconcile command to resolve unknown-outcome outbox rows` | `scripts/hitl_cli.py`, `docs/hitl_runbook.md`, `tests/test_p2_prr_10_hitl_reconcile.py` | ⏳ Pending |
@@ -950,11 +950,11 @@ This roadmap incorporates the 10 code review findings and lower-priority operati
 * **Done When:** Tests verify attacker headers injected lower down are ignored, and valid Google auth headers evaluate accurately.
 
 #### [PRR-07] FreeScout Non-Routable Fallback Domain (Item 6)
-* **Status:** ⏳ Pending
+* **Status:** ✅ Complete
 * **Scope:** `utils/adapters/freescout_format.py`, `tests/test_p2_prr_07_freescout_domain.py`
 * **Problem:** When unmasking is disabled or sender email is absent, `freescout_format.py` constructs `triage+{email_id}@{sender_domain}`, creating routable addresses on third-party domains (e.g. `gmail.com`).
-* **Solution:** Fall back strictly to the RFC 2606 reserved non-routable domain `triage+{email_id}@customer.invalid`.
-* **Done When:** Tests verify synthetic addresses always terminate with `@customer.invalid`.
+* **Solution:** Fall back strictly to the RFC 2606 reserved non-routable domain `triage+{email_id}@invalid` (`NON_ROUTABLE_FALLBACK_DOMAIN = "invalid"`), preventing downstream helpdesk platforms from dispatching automated replies or updates to external/customer domains.
+* **Done When:** Tests verify synthetic addresses always terminate with `@invalid`.
 
 #### [PRR-08] Error Classification: Connection Setup vs Post-Write Resets (Item 8)
 * **Status:** ⏳ Pending

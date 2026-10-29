@@ -14,6 +14,9 @@ from typing import Any
 
 from utils.unmasker import resolve_dispatch_content
 
+# RFC 2606 reserved non-routable top-level domain for synthetic customer fallback addresses
+NON_ROUTABLE_FALLBACK_DOMAIN = "invalid"
+
 MARKER_PREFIX = "<!-- triage-bot:v1"
 BIDI_AND_CONTROL_RE = re.compile(
     r"[\u202a-\u202e\u2066-\u2069\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]"
@@ -151,12 +154,11 @@ def build_conversation_payload(
     email_id = str(record.get("email_id") or "")
     thread_id = str(record.get("thread_id") or "")
 
-    # Customer email resolution: real sender_email if unmask_pii permitted, else synthetic
+    # Customer email resolution: real sender_email if permitted, else non-routable fallback
     if resolved["customer_email"] and "@" in resolved["customer_email"]:
         customer_email = resolved["customer_email"]
     else:
-        domain = resolved["sender_domain"] or "customer.internal"
-        customer_email = f"triage+{email_id}@{domain}"
+        customer_email = f"triage+{email_id}@{NON_ROUTABLE_FALLBACK_DOMAIN}"
 
     sanitized_subject = sanitize_subject(resolved["subject"])
     sanitized_body = sanitize_html_body(resolved["body"])
@@ -212,8 +214,7 @@ def build_thread_reply_payload(
     if resolved["customer_email"] and "@" in resolved["customer_email"]:
         customer_email = resolved["customer_email"]
     else:
-        domain = resolved["sender_domain"] or "customer.internal"
-        customer_email = f"triage+{email_id}@{domain}"
+        customer_email = f"triage+{email_id}@{NON_ROUTABLE_FALLBACK_DOMAIN}"
 
     sanitized_body = sanitize_html_body(resolved["body"])
     marker = build_marker(idempotency_key, email_id, thread_id)

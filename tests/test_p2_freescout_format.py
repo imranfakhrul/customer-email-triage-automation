@@ -139,8 +139,8 @@ def test_build_conversation_payload_fallback_when_unmask_pii_false():
         unmask_pii=False,
     )
 
-    assert payload["customer"]["email"] == "triage+em_conv_02@acme.com"
-    assert payload["threads"][0]["customer"]["email"] == "triage+em_conv_02@acme.com"
+    assert payload["customer"]["email"] == "triage+em_conv_02@invalid"
+    assert payload["threads"][0]["customer"]["email"] == "triage+em_conv_02@invalid"
 
 
 def test_build_thread_reply_payload():
