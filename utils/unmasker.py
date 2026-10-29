@@ -11,8 +11,11 @@ Guarantees:
    to sender_email and optionally invokes mailbox_fetcher before falling back to masked_body.
 """
 
+import logging
 from collections.abc import Callable, Mapping
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def unmask_text(text: str, token_map: Mapping[str, str]) -> str:
@@ -94,14 +97,15 @@ def resolve_dispatch_content(
         Dictionary containing resolved subject, body, customer_email, sender_domain,
         is_unmasked flag, and tuple of restored_entity_types.
     """
-    masked_subject = str(record.get("masked_subject") or record.get("subject") or "")
-    masked_body = str(
-        record.get("masked_body")
-        or record.get("body")
-        or record.get("cleaned_body")
-        or record.get("email_body")
-        or ""
-    )
+    masked_subject_val = record.get("masked_subject")
+    masked_body_val = record.get("masked_body")
+    if masked_subject_val is None or masked_body_val is None:
+        raise ValueError(
+            "Missing required masked text: 'masked_subject' and 'masked_body' must be present"
+        )
+
+    masked_subject = str(masked_subject_val)
+    masked_body = str(masked_body_val)
     sender_email = str(record.get("sender_email") or "").strip()
     sender_domain = str(record.get("sender_domain") or "").strip().lower()
 
@@ -149,9 +153,34 @@ def resolve_dispatch_content(
         # Token map is absent (e.g. SQLite worker mode)
         message_id = str(record.get("message_id") or "")
         if mailbox_fetcher and message_id:
-            fetched_body = mailbox_fetcher(message_id)
+            try:
+                fetched_body = mailbox_fetcher(message_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    f"[Unmasker] Mailbox fetch failed for '{message_id}': {type(e).__name__}"
+                )
+                fetched_body = None
+
             if fetched_body is not None:
-                body = str(fetched_body)
+                # Lazy import avoids circular import (nodes -> dispatcher -> adapters -> unmasker)
+                from nodes.pii_masker import mask_pii
+
+                # Invariant 1: Re-mask re-fetched text so that high-risk secrets
+                # (CREDIT_CARD, SSN, IBAN, API_KEY) remain strictly masked
+                re_masked_body, re_token_map = mask_pii(str(fetched_body))
+                re_filtered_tokens: dict[str, str] = {}
+                for token, original_val in re_token_map.items():
+                    if not isinstance(token, str) or token.startswith("__"):
+                        continue
+                    etype = extract_entity_type_from_token(token)
+                    if etype and etype in safe_allowed:
+                        re_filtered_tokens[token] = str(original_val)
+                        restored_types.add(etype)
+
+                if re_filtered_tokens:
+                    body = unmask_text(re_masked_body, re_filtered_tokens)
+                else:
+                    body = re_masked_body
 
     customer_email = sender_email if sender_email else None
 

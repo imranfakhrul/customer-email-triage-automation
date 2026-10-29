@@ -96,8 +96,10 @@ def run_checks() -> None:
         "thread_id": "th_abc_123",
         "sender_email": "alice@company.com",
         "sender_domain": "company.com",
-        "subject": "Need assistance with order",
-        "body": "Hello <b>FreeScout</b>!\nLine 2.\n[PERSON_1]\n<script>alert('xss')</script>",
+        "masked_subject": "Need assistance with order",
+        "masked_body": (
+            "Hello <b>FreeScout</b>!\nLine 2.\n[PERSON_1]\n<script>alert('xss')</script>"
+        ),
         "token_map": {"[PERSON_1]": "Alice Smith"},
         "suggested_actions": ["reply_urgent"],
         "confidence": 0.95,

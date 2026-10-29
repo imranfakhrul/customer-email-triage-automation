@@ -140,7 +140,7 @@ All external HTTP requests are strictly HTTPS and validated against the domain a
 - `utils/adapters/__init__.py`: Thread-safe adapter registry, active adapter discovery (`register_active_adapters`), and exports.
 - `utils/adapters/github_format.py`: Formatting, output hardening, and anchored marker parser for GitHub issue payloads.
 - `utils/adapters/github_adapter.py`: GitHub Issues adapter with duplicate detection and rate limit classification.
-- `utils/unmasker.py`: Universal selective unmasking and content resolution helper for destination adapters.
+- `utils/unmasker.py`: Universal selective unmasking and content resolution helper for destination adapters (fails closed on missing masked text, re-masks re-fetched bodies to scrub secrets).
 - `utils/mailbox/base.py`: Abstract mailbox connector interface.
 - `utils/mailbox/gmail_connector.py`: Gmail REST API connector with OAuth lifecycle, MIME parsing, and SPF/DKIM/DMARC verification.
 - `scripts/renew_mailbox_watch.py`: Standalone CLI utility for Gmail Cloud Pub/Sub watch setup and automated 7-day renewal.

@@ -23,9 +23,9 @@ Each issue is implemented individually with corresponding unit tests, verified a
 3. **Track 2: Downstream Destination Adapters:** `P2-03a` ✅ (Foundations & Outbox Ledger) ➔ `P2-03b` ✅ (Router Node & Matrix) ➔ `P2-04a` ✅ (GitHub Formatting & Schema) ➔ `P2-04b` ✅ (GitHub Adapter & Remote Precheck) ➔ `P2-05` ✅ (FreeScout) ➔ `P2-06` ✅ (CRM) ➔ `P2-07` ✅ (Webhook)
 4. **Track 3: Integration, Worker, Benchmark, Failure Tests & Docs:** `P2-08` ✅ (LangGraph Integration) ➔ `P2-09` ✅ (Queue Worker) ➔ `P2-10` ✅ (Benchmark Dataset) ➔ `P2-11` ✅ (Operational Docs)
 5. **Track 4: Mailbox Ingestion Connector:** `P2-12` ✅ (Gmail Pub/Sub Connector)
-6. **Track 5: Post-Review Production Remediation (PRR):** 13 Atomic Commits: `PRR-01` ✅ (Item 1: Stuck Approvals) ➔ `PRR-02` ✅ (Item 2: Adapter Registration) ➔ `PRR-03` ✅ (Item 3: Worker States) ➔ `PRR-04` ✅ (Flow E2E Test) ➔ `PRR-05` ⏳ (Item 5: Unmasker Privacy) ➔ `PRR-06` ⏳ (Item 4: Gmail Spoof Guard) ➔ `PRR-07` ⏳ (Item 6: Fallback Domain) ➔ `PRR-08` ⏳ (Item 8: Post-Write Idempotency) ➔ `PRR-09` ⏳ (Item 9: FreeScout Fallthrough) ➔ `PRR-10` ⏳ (Item 10: HITL Reconcile) ➔ `PRR-11` ⏳ (Item 7: Webhook Allowlist) ➔ `PRR-12` ⏳ (Worker & Classifier Guards) ➔ `PRR-13` ⏳ (Gmail Auth Refresh & Pagination)
+6. **Track 5: Post-Review Production Remediation (PRR):** 13 Atomic Commits: `PRR-01` ✅ (Item 1: Stuck Approvals) ➔ `PRR-02` ✅ (Item 2: Adapter Registration) ➔ `PRR-03` ✅ (Item 3: Worker States) ➔ `PRR-04` ✅ (Flow E2E Test) ➔ `PRR-05` ✅ (Item 5: Unmasker Privacy) ➔ `PRR-06` ⏳ (Item 4: Gmail Spoof Guard) ➔ `PRR-07` ⏳ (Item 6: Fallback Domain) ➔ `PRR-08` ⏳ (Item 8: Post-Write Idempotency) ➔ `PRR-09` ⏳ (Item 9: FreeScout Fallthrough) ➔ `PRR-10` ⏳ (Item 10: HITL Reconcile) ➔ `PRR-11` ⏳ (Item 7: Webhook Allowlist) ➔ `PRR-12` ⏳ (Worker & Classifier Guards) ➔ `PRR-13` ⏳ (Gmail Auth Refresh & Pagination)
 
-**Next Immediate Task:** `PRR-05` (`fix(unmasker): [PRR-05] fail closed on missing masked text and re-scrub secrets on mailbox re-fetch`).
+**Next Immediate Task:** `PRR-06` (`fix(mailbox): [PRR-06] enforce topmost mx.google.com authentication-results header and token parsing`).
 
 ---
 
@@ -887,7 +887,7 @@ This roadmap incorporates the 10 code review findings and lower-priority operati
 | **2** | **PRR-02** | Flow (Item 2) | `fix(dispatcher): [PRR-02] auto-register active production adapters at startup and on demand` | `utils/adapters/__init__.py`, `nodes/dispatcher.py`, `scripts/phase2_worker.py`, `tests/test_p2_prr_02_adapter_registry.py` | ✅ Complete |
 | **3** | **PRR-03** | Flow (Item 3) | `fix(worker): [PRR-03] handle deferred and dead-letter dispatches with retryable job states` | `scripts/phase2_worker.py`, `db/database.py`, `tests/test_p2_prr_03_worker_states.py` | ✅ Complete |
 | **4** | **PRR-04** | Flow (E2E) | `test(e2e): [PRR-04] integration test asserting human approval to worker dispatch to confirmed ledger flow` | `tests/test_p2_prr_04_e2e_approval_flow.py` | ✅ Complete |
-| **5** | **PRR-05** | Security (Item 5) | `fix(unmasker): [PRR-05] fail closed on missing masked text and re-scrub secrets on mailbox re-fetch` | `utils/unmasker.py`, `tests/test_p2_prr_05_unmasker_secrets.py` | ⏳ Pending |
+| **5** | **PRR-05** | Security (Item 5) | `fix(unmasker): [PRR-05] fail closed on missing masked text and re-scrub secrets on mailbox re-fetch` | `utils/unmasker.py`, `tests/test_p2_prr_05_unmasker_secrets.py` | ✅ Complete |
 | **6** | **PRR-06** | Security (Item 4) | `fix(mailbox): [PRR-06] enforce topmost mx.google.com authentication-results header and token parsing` | `utils/mailbox/gmail_connector.py`, `tests/test_p2_prr_06_gmail_auth.py` | ⏳ Pending |
 | **7** | **PRR-07** | Security (Item 6) | `fix(freescout): [PRR-07] enforce non-routable invalid domain for synthetic customer fallback` | `utils/adapters/freescout_format.py`, `tests/test_p2_prr_07_freescout_domain.py` | ⏳ Pending |
 | **8** | **PRR-08** | Idempotency (Item 8) | `fix(adapters): [PRR-08] split connection setup errors from post-write resets to prevent blind retries` | `utils/adapters/base.py`, `utils/adapters/webhook_adapter.py`, `utils/adapters/freescout_adapter.py`, `utils/adapters/crm_adapter.py`, `tests/test_p2_prr_08_post_write_retry.py` | ⏳ Pending |
@@ -936,7 +936,7 @@ This roadmap incorporates the 10 code review findings and lower-priority operati
 * **Done When:** Test runs approval, executes worker cycle, and asserts `confirmed` outbox row in SQLite.
 
 #### [PRR-05] Unmasker Missing Text Safeguard & Re-Fetch Secret Scrubbing (Item 5)
-* **Status:** ⏳ Pending
+* **Status:** ✅ Complete
 * **Scope:** `utils/unmasker.py`, `tests/test_p2_prr_05_unmasker_secrets.py`
 * **Problem:** `utils/unmasker.py` falls back to raw text fields if `masked_body` is missing. Re-fetching via `mailbox_fetcher` inserts raw unmasked text directly, skipping the secret filter.
 * **Solution:** Enforce Invariant 5: read only `masked_*`; if missing, fail closed immediately. When re-fetching original email via `mailbox_fetcher`, scrub high-risk secrets (`CREDIT_CARD`, `SSN`, `IBAN`, `API_KEY`) before selectively restoring allowed contact entities.

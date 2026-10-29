@@ -200,6 +200,8 @@ def test_crm_adapter_contract_conformance(base_config: dict[str, Any]):
         "sender_email": "elena@enterprise.com",
         "customer_email": "elena@enterprise.com",
         "sender_domain": "enterprise.com",
+        "masked_subject": "Enterprise Demo Inquiry",
+        "masked_body": "We need a demo for our team.",
         "category": "Demo Request",
         "priority": "High",
         "sentiment": "Positive",
