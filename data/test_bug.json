@@ -1,0 +1,11 @@
+{
+  "email_id": "em_live_gh_001",
+  "message_id": "<20261029.live.bug@customer.com>",
+  "thread_id": "thread_live_gh_001",
+  "sender_email": "techlead@customer.com",
+  "sender_domain": "customer.com",
+  "email_subject": "Bug Report: 500 error when processing checkout payments",
+  "email_body": "Hello Support,\n\nOur system is throwing HTTP 500 crashes during payment checkout. Please investigate ASAP.\nContact me at +1 555-0199.\n\nThanks,\nEngineering Lead",
+  "has_attachments": false,
+  "auth_status": "pass"
+}

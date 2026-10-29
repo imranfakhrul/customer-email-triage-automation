@@ -147,7 +147,7 @@ classification:
     timeout_seconds: 5.0
 
 dispatch:
-  dry_run: true
+  dry_run: false
   kill_switch: false
   max_attempts: 3
   pending_timeout_minutes: 10
@@ -156,10 +156,10 @@ dispatch:
 
 destinations:
   github:
-    enabled: false
+    enabled: true
     daily_cap: 200
     use_masked_text_only: true
-    target: "my-company/backend-repo"
+    target: "YeasinArafat-bit/email-triage-test"
     token_env: "GITHUB_TOKEN"
     labels: ["triage:automated"]
     api_base_url: "https://api.github.com"

@@ -1,0 +1,11 @@
+{
+  "email_id": "em_live_gh_002",
+  "message_id": "<20261029.calm.002@customer.com>",
+  "thread_id": "thread_calm_002",
+  "sender_email": "dev@customer.com",
+  "sender_domain": "customer.com",
+  "email_subject": "Bug Report: Misaligned button on checkout settings page",
+  "email_body": "Hi Support Team,\n\nWe noticed a minor CSS alignment issue on the checkout settings button when viewing in Safari.\nCould your team take a look in an upcoming sprint?\n\nBest regards,\nFrontend Dev",
+  "has_attachments": false,
+  "auth_status": "pass"
+}
