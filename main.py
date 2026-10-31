@@ -466,10 +466,17 @@ def process_single_email(
         sys.exit(1)
 
     try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
+        if json_path.lower().endswith(".eml"):
+            from utils.mailbox.eml_parser import parse_eml_file
 
-        print(f"[*] Processing email payload: {json_path}")
+            payload = parse_eml_file(json_path)
+            print(f"[*] Parsed raw RFC 822 MIME email: {json_path}")
+            print(f"    From   : {payload.get('sender_email')}")
+            print(f"    Subject: {payload.get('email_subject')}")
+        else:
+            with open(json_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            print(f"[*] Processing email payload: {json_path}")
         db = TriageDatabase()
         from utils.jev_client import JevClient
 

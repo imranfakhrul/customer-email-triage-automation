@@ -61,6 +61,7 @@ def run_worker_once(
     batch_size: int = 10,
     dry_run: bool = False,
     offline: bool = False,
+    email_id: str | None = None,
 ) -> int:
     """Executes a single cycle of crash recovery, intake sync, and batch processing.
 
@@ -71,6 +72,7 @@ def run_worker_once(
         batch_size: Number of jobs to claim in this batch.
         dry_run: Force dry-run dispatch mode.
         offline: Run in offline mode without external AI/APIs.
+        email_id: Optional specific email identifier to process directly.
 
     Returns:
         Number of jobs processed in this cycle.
@@ -80,8 +82,8 @@ def run_worker_once(
     cfg = copy.deepcopy(config or get_config())
     wid = worker_id or f"worker_{uuid.uuid4().hex[:8]}"
 
-    if dry_run and "dispatch" in cfg:
-        cfg["dispatch"]["dry_run"] = True
+    if "dispatch" in cfg:
+        cfg["dispatch"]["dry_run"] = dry_run
     if offline and "classification" in cfg:
         cfg["classification"]["primary"] = "offline_heuristic"
 
@@ -101,7 +103,7 @@ def run_worker_once(
         logger.info("Intake synced %d new gatekeeper_approved records", newly_synced)
 
     # 3. Atomic batch claim
-    claimed_jobs = db_inst.claim_p2_jobs(batch_size=batch_size, worker_id=wid)
+    claimed_jobs = db_inst.claim_p2_jobs(batch_size=batch_size, worker_id=wid, email_id=email_id)
     if not claimed_jobs:
         return 0
 
@@ -249,6 +251,7 @@ class Phase2Worker:
         max_retries: int = 3,
         dry_run: bool = False,
         offline: bool = False,
+        email_id: str | None = None,
     ) -> None:
         self.db = db or TriageDatabase()
         self.config = copy.deepcopy(config or get_config())
@@ -259,6 +262,7 @@ class Phase2Worker:
         self.max_retries = max_retries
         self.dry_run = dry_run
         self.offline = offline
+        self.email_id = email_id
         self.running = False
 
         if self.offline and "classification" in self.config:
@@ -313,6 +317,7 @@ class Phase2Worker:
                     batch_size=self.batch_size,
                     dry_run=self.dry_run,
                     offline=self.offline,
+                    email_id=self.email_id,
                 )
                 total_processed += processed
             except Exception as exc:  # noqa: BLE001
@@ -372,6 +377,12 @@ def main() -> int:
         help="Unique identifier for this worker instance (default: auto-generated)",
     )
     parser.add_argument(
+        "--email-id",
+        type=str,
+        default=None,
+        help="Process a specific email ID directly",
+    )
+    parser.add_argument(
         "--once",
         action="store_true",
         help="Run a single intake, recovery, and processing batch then exit 0",
@@ -409,6 +420,7 @@ def main() -> int:
         worker_id=args.worker_id,
         dry_run=dry_run,
         offline=args.offline,
+        email_id=args.email_id,
     )
 
     try:

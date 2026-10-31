@@ -945,7 +945,7 @@ class TriageDatabase:
                     UPDATE p2_jobs
                     SET state = 'hitl_resolved',
                         updated_at = ?
-                    WHERE email_id = ? AND state = 'hitl_pending'
+                    WHERE email_id = ? AND state IN ('hitl_pending', 'unclaimed')
                     """,
                     (now_iso, email_id),
                 )
@@ -1567,17 +1567,19 @@ class TriageDatabase:
         batch_size: int = 10,
         worker_id: Optional[str] = None,
         now: Optional[datetime] = None,
+        email_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Atomically claims a batch of unclaimed or hitl_resolved jobs for a worker.
 
         Executes a single atomic UPDATE statement with a subquery LIMIT to eliminate
-        SELECT-then-UPDATE race conditions across concurrent workers. Respects next_attempt_at
-        filtering to skip jobs in cooldown.
+        SELECT-then-UPDATE race conditions across concurrent workers. Prioritizes hitl_resolved
+        jobs first, and respects next_attempt_at filtering to skip jobs in cooldown.
 
         Args:
             batch_size: Maximum number of jobs to claim (must be > 0).
             worker_id: Optional worker identifier.
             now: Optional current datetime (defaults to UTC now).
+            email_id: Optional specific email identifier to claim directly.
 
         Returns:
             List of dicts representing the claimed jobs joined with email_triage fields.
@@ -1594,25 +1596,40 @@ class TriageDatabase:
         now_query_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
         with self.get_connection() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE p2_jobs
-                SET state = 'claimed',
-                    worker_id = ?,
-                    claimed_at = ?,
-                    attempts = attempts + 1,
-                    next_attempt_at = NULL,
-                    updated_at = ?
-                WHERE email_id IN (
-                    SELECT email_id FROM p2_jobs
-                    WHERE state IN ('unclaimed', 'hitl_resolved')
-                      AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime(?))
-                    ORDER BY created_at ASC
-                    LIMIT ?
-                );
-                """,
-                (worker_id, now_str, now_str, now_query_str, batch_size),
-            )
+            if email_id:
+                cursor = conn.execute(
+                    """
+                    UPDATE p2_jobs
+                    SET state = 'claimed',
+                        worker_id = ?,
+                        claimed_at = ?,
+                        attempts = attempts + 1,
+                        next_attempt_at = NULL,
+                        updated_at = ?
+                    WHERE email_id = ?
+                    """,
+                    (worker_id, now_str, now_str, email_id),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    UPDATE p2_jobs
+                    SET state = 'claimed',
+                        worker_id = ?,
+                        claimed_at = ?,
+                        attempts = attempts + 1,
+                        next_attempt_at = NULL,
+                        updated_at = ?
+                    WHERE email_id IN (
+                        SELECT email_id FROM p2_jobs
+                        WHERE state IN ('unclaimed', 'hitl_resolved')
+                          AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime(?))
+                        ORDER BY CASE WHEN state = 'hitl_resolved' THEN 0 ELSE 1 END, created_at ASC
+                        LIMIT ?
+                    );
+                    """,
+                    (worker_id, now_str, now_str, now_query_str, batch_size),
+                )
             if cursor.rowcount == 0:
                 return []
 

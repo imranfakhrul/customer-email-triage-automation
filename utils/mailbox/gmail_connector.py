@@ -319,7 +319,10 @@ class GmailConnector(BaseMailboxConnector):
         }
 
     def fetch_new_messages(
-        self, start_history_id: str | None = None, max_pages: int = 5
+        self,
+        start_history_id: str | None = None,
+        max_pages: int = 5,
+        query: str | None = None,
     ) -> list[dict[str, Any]]:
         """Fetches newly added messages via incremental history sync.
 
@@ -382,6 +385,8 @@ class GmailConnector(BaseMailboxConnector):
 
         while page_count < max_pages:
             params = {"maxResults": 20}
+            if query:
+                params["q"] = query
             if page_token:
                 params["pageToken"] = page_token
 

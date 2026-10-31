@@ -49,6 +49,7 @@ class WebhookAdapter(BaseDestinationAdapter):
     def __init__(
         self,
         target: str | None = None,
+        target_env: str | None = None,
         secret_key: str | None = None,
         secret_env: str = "WEBHOOK_SECRET_KEY",  # nosec B107 # noqa: S107
         unmask_pii: bool = False,
@@ -59,9 +60,20 @@ class WebhookAdapter(BaseDestinationAdapter):
         super().__init__()
         cfg = self._load_dest_config()
 
-        self._target = target if target is not None else cfg.get(
-            "target", "https://events.mycompany.internal/triage-alerts"
+        self._target_env = target_env or cfg.get("target_env")
+        env_target = (
+            os.environ.get(self._target_env, "").strip() if self._target_env else ""
         )
+
+        if target is not None:
+            self._target = target
+        elif env_target:
+            self._target = env_target
+        else:
+            self._target = cfg.get(
+                "target", "https://events.mycompany.internal/triage-alerts"
+            )
+
         self._secret_key = secret_key
         self._secret_env = secret_env or cfg.get("secret_env", "WEBHOOK_SECRET_KEY")
 

@@ -1,0 +1,20 @@
+From: Alex Chen <alex.chen@innovatech.com>
+To: support@triage-automation.internal
+Subject: Bug Report: Safari checkout button crashes on click
+Date: Fri, 30 Oct 2026 01:00:00 +0000
+Message-ID: <msg-20261030-bug01@innovatech.com>
+Authentication-Results: mx.google.com; dkim=pass header.i=@innovatech.com; spf=pass
+Content-Type: text/plain; charset="utf-8"
+
+Hi Engineering Support Team,
+
+Our customers are reporting that the primary checkout button crashes on Safari 17.4 with a TypeError exception.
+This is blocking checkouts for Mac and iOS users. Could your team please deploy a hotfix?
+
+You can reach me directly on my cell at +1 415-555-0188 if you need access to our staging environment.
+
+Best regards,
+Alex Chen
+Principal Engineer, InnovaTech
+
+Sent from my iPhone

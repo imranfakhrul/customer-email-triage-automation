@@ -311,3 +311,34 @@ class TestGmailConnectorLifecycleAndAPI:
         assert result["expiration"] == "1761667200000"
         mock_session.post.assert_called_once()
         assert "users/me/watch" in mock_session.post.call_args[0][0]
+
+
+class TestEmlFileParser:
+    """Tests for native RFC 822 .eml MIME parsing."""
+
+    def test_parse_eml_bytes_plain_text(self):
+        from utils.mailbox.eml_parser import parse_eml_bytes
+
+        raw_eml = (
+            b'From: Alex Chen <alex.chen@innovatech.com>\r\n'
+            b'To: support@triage.internal\r\n'
+            b'Subject: Production crash on checkout\r\n'
+            b'Date: Fri, 30 Oct 2026 00:00:00 +0000\r\n'
+            b'Message-ID: <msg-12345@innovatech.com>\r\n'
+            b'Authentication-Results: mx.google.com; dkim=pass; spf=pass\r\n'
+            b'Content-Type: text/plain; charset="utf-8"\r\n'
+            b'\r\n'
+            b'Hi Support Team,\r\n'
+            b'Our checkout crashes with 500 error. Call me at +1 555-0199.\r\n'
+            b'Sent from my iPhone\r\n'
+        )
+
+        parsed = parse_eml_bytes(raw_eml)
+        assert parsed["sender_email"] == "alex.chen@innovatech.com"
+        assert parsed["sender_domain"] == "innovatech.com"
+        assert parsed["email_subject"] == "Production crash on checkout"
+        assert parsed["message_id"] == "<msg-12345@innovatech.com>"
+        assert parsed["auth_status"] == "pass"
+        assert "checkout crashes with 500 error" in parsed["email_body"]
+        assert "Sent from my iPhone" in parsed["email_body"]
+

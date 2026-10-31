@@ -1,0 +1,17 @@
+From: Marcus Brody <marcus.brody@acmecorp.com>
+To: billing@triage-automation.internal
+Subject: Urgent Billing Dispute: Duplicate invoice charge of $4,500 on INV-9821
+Date: Fri, 30 Oct 2026 01:10:00 +0000
+Message-ID: <msg-20261030-billing03@acmecorp.com>
+Authentication-Results: mx.google.com; dkim=pass header.i=@acmecorp.com; spf=pass
+Content-Type: text/plain; charset="utf-8"
+
+Hello Support and Accounting,
+
+Our credit card was charged twice for $4,500.00 on monthly invoice #INV-9821.
+This is an urgent accounting dispute and our finance team requires an immediate refund credit memo today.
+Please look into this right now!
+
+Thank you,
+Marcus Brody
+VP of Finance, Acme Corp
